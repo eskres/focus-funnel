@@ -4,8 +4,8 @@ schema: spec-driven
 # This is shown to AI when creating artifacts.
 context: |
   Focus Funnel: multi-user brain-dump chatbot, BYOK Nebius (OpenAI-compatible API).
-  Stack: Next.js App Router (frontend/), async FastAPI (backend/), Postgres +
-  SQLAlchemy/Alembic, ChromaDB, Auth0.
+  Stack: Next.js App Router + shadcn/ui/Tailwind (frontend/), async FastAPI
+  (backend/), Postgres + SQLAlchemy/Alembic, ChromaDB, Auth0.
   Gates (chat commands):
   - /push: file a thought away. Stores raw text + model summary, title, tags,
     category. User confirms before save; model may suggest a split.

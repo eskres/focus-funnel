@@ -25,7 +25,7 @@ Focus Funnel is a hosted, multi-user chatbot for brain dumping, where each user 
 
 - **New code:** `frontend/` (Next.js), `backend/` (FastAPI), `docker-compose.yml`, Alembic migrations.
 - **New dependencies:**
-  - Frontend: Next.js and `@auth0/nextjs-auth0`.
+  - Frontend: Next.js, `@auth0/nextjs-auth0`, Tailwind CSS, and shadcn/ui components.
   - Backend: FastAPI, SQLAlchemy, Alembic, a Postgres driver, `cryptography`, a JWT/JWKS library, `httpx`, and the `openai` SDK (Nebius has an OpenAI-compatible API).
 - **External services:** an Auth0 tenant with one Application (Next.js) and one API (FastAPI audience), and the Nebius API.
 - **Configuration:** Auth0 settings, `DATABASE_URL`, `KEY_ENCRYPTION_KEY`, `NEBIUS_BASE_URL`, `CHROMA_URL`.

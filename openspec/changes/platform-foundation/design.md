@@ -161,7 +161,11 @@ Requests for another user's record return `not_found`, as the spec requires.
 - The Auth0 Next.js SDK middleware protects every route except the public landing page (`/`).
 - Pages: `/` (landing with a login button), `/app` (an empty chat placeholder that `gate-framework` fills in), `/settings` (the API key section).
 - A small typed fetch helper calls `/api/...` and turns the error format into typed errors.
+- UI components come from shadcn/ui on Tailwind CSS v4. The shadcn CLI copies each component's source into `frontend/components/ui/`, so the repo owns the code and can edit it. Only components a page uses get added.
+- The create-next-app starter styles (`page.module.css`) are removed. Styling uses Tailwind classes and shadcn's CSS variable theme in `app/globals.css`.
 - Checks: TypeScript type checks, ESLint, and Vitest tests for the proxy handler and the fetch helper.
+
+**Alternatives:** plain CSS modules (what the scaffold has; slower to build consistent forms and alerts), and runtime component libraries such as MUI (heavier bundle, theming through the library's own system). Rejected in favor of shadcn/ui.
 
 ## Risks / Trade-offs
 
@@ -171,6 +175,7 @@ Requests for another user's record return `not_found`, as the spec requires.
 - [The proxy buffers streamed responses] → Return a `ReadableStream`, set `Cache-Control: no-cache`, and set `X-Accel-Buffering: no`. A proxy test checks that stream parts arrive one at a time.
 - [Auth0 JWKS outage] → Cached signing keys keep existing sessions working. Only tokens signed with a new key fail, and those fail with 503, not 401.
 - [Nebius key check calls add delay to saving] → They happen only on save and replace, with a 10-second timeout.
+- [shadcn components are copied code, so upstream fixes don't arrive automatically] → Add only the components in use. `components.json` records the setup, so `npx shadcn@latest add <name> --overwrite` can refresh one component.
 
 ## Migration Plan
 

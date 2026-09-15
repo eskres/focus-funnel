@@ -41,9 +41,10 @@
 
 ## 6. Frontend pages
 
-- [ ] 6.1 Add the `/` landing page with a login button and the `/app` placeholder page, and check that `/` loads while logged out and `/app` shows the placeholder while logged in
-- [ ] 6.2 Add the `/settings` API key section (no-key state with an input, saved state with `last4` and the save date, replace, delete), and check by hand with a real Nebius key and a fake key that each state and each error message appears as the spec describes
-- [ ] 6.3 Add a shared component that shows `nebius_key_missing` and `nebius_key_rejected` messages with a link to `/settings`, and check with a Vitest render test that each message and link appears
+- [ ] 6.1 Add Tailwind CSS v4 and run `npx shadcn@latest init` in `frontend/`, remove the starter `page.module.css` styles, and add the `button`, `input`, `card`, and `alert` components. Check that `npm run build` passes and a shadcn `Button` renders on `/`
+- [ ] 6.2 Add the `/` landing page with a shadcn `Button` for login and the `/app` placeholder page, and check that `/` loads while logged out and `/app` shows the placeholder while logged in
+- [ ] 6.3 Add the `/settings` API key section with shadcn `Card`, `Input`, `Button`, and `Alert` (no-key state with an input, saved state with `last4` and the save date, replace, delete), and check by hand with a real Nebius key and a fake key that each state and each error message appears as the spec describes
+- [ ] 6.4 Add a shared component built on shadcn `Alert` that shows `nebius_key_missing` and `nebius_key_rejected` messages with a link to `/settings`, and check with a Vitest render test that each message and link appears
 
 ## 7. Full system check
 
