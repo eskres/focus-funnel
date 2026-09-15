@@ -11,6 +11,7 @@ vi.mock("@/lib/auth0", () => ({ auth0: { middleware, getSession } }));
 import { proxy } from "./proxy";
 
 const request = (path: string) => new NextRequest(`http://localhost:3000${path}`);
+const loggedIn = () => getSession.mockResolvedValue({ user: { sub: "auth0|user-1" } });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -23,7 +24,25 @@ describe("auth proxy", () => {
     const response = await proxy(request("/"));
 
     expect(response.headers.get("location")).toBeNull();
-    expect(getSession).not.toHaveBeenCalled();
+  });
+
+  it("sends logged-in users from the landing page to the app", async () => {
+    loggedIn();
+
+    const response = await proxy(request("/"));
+
+    expect(new URL(response.headers.get("location") ?? "").pathname).toBe("/app");
+  });
+
+  it("keeps the SDK's rolled session cookie on the landing page redirect", async () => {
+    loggedIn();
+    const sdkResponse = NextResponse.next();
+    sdkResponse.headers.append("set-cookie", "__session=rolled; Path=/; HttpOnly");
+    middleware.mockResolvedValue(sdkResponse);
+
+    const response = await proxy(request("/"));
+
+    expect(response.headers.getSetCookie()).toContain("__session=rolled; Path=/; HttpOnly");
   });
 
   it("hands /auth/* routes to the Auth0 SDK", async () => {
@@ -33,6 +52,7 @@ describe("auth proxy", () => {
     const response = await proxy(request("/auth/login"));
 
     expect(response).toBe(sdkResponse);
+    expect(getSession).not.toHaveBeenCalled();
   });
 
   it.each(["/app", "/settings"])(
@@ -40,14 +60,14 @@ describe("auth proxy", () => {
     async (path) => {
       const response = await proxy(request(`${path}?tab=1`));
 
-      const location = new URL(response.headers.get("location")!);
+      const location = new URL(response.headers.get("location") ?? "");
       expect(location.pathname).toBe("/auth/login");
       expect(location.searchParams.get("returnTo")).toBe(`${path}?tab=1`);
     },
   );
 
   it("lets logged-in users through", async () => {
-    getSession.mockResolvedValue({ user: { sub: "auth0|user-1" } });
+    loggedIn();
 
     const response = await proxy(request("/app"));
 

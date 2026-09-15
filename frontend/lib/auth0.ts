@@ -10,4 +10,7 @@ export const auth0 = new Auth0Client({
   // The access token stays on the server: the browser never needs it, so the
   // SDK's /auth/access-token route (which returns it as JSON) is turned off.
   enableAccessTokenEndpoint: false,
+  // Logins that don't name a destination (such as the landing page button)
+  // return to the app instead of the public landing page.
+  signInReturnToPath: "/app",
 });
