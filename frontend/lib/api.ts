@@ -9,7 +9,9 @@ export type ApiErrorCode =
   | "nebius_key_missing"
   | "nebius_key_invalid"
   | "nebius_key_rejected"
-  | "nebius_unreachable";
+  | "nebius_unreachable"
+  | "backend_unreachable"
+  | "internal_error";
 
 export class ApiError extends Error {
   readonly code: string;
@@ -30,6 +32,8 @@ export class NebiusKeyMissingError extends ApiError {}
 export class NebiusKeyInvalidError extends ApiError {}
 export class NebiusKeyRejectedError extends ApiError {}
 export class NebiusUnreachableError extends ApiError {}
+export class BackendUnreachableError extends ApiError {}
+export class InternalError extends ApiError {}
 
 const errorClasses: Record<ApiErrorCode, typeof ApiError> = {
   unauthenticated: UnauthenticatedError,
@@ -39,21 +43,31 @@ const errorClasses: Record<ApiErrorCode, typeof ApiError> = {
   nebius_key_invalid: NebiusKeyInvalidError,
   nebius_key_rejected: NebiusKeyRejectedError,
   nebius_unreachable: NebiusUnreachableError,
+  backend_unreachable: BackendUnreachableError,
+  internal_error: InternalError,
 };
 
+function isKnownCode(code: string): code is ApiErrorCode {
+  return Object.hasOwn(errorClasses, code);
+}
+
+function readErrorBody(body: unknown): { code?: string; message?: string } {
+  if (typeof body !== "object" || body === null || !("error" in body)) return {};
+  const { error } = body;
+  if (typeof error !== "object" || error === null) return {};
+  return {
+    code: "code" in error && typeof error.code === "string" ? error.code : undefined,
+    message:
+      "message" in error && typeof error.message === "string" ? error.message : undefined,
+  };
+}
+
 async function toApiError(response: Response): Promise<ApiError> {
-  let code = "unknown_error";
-  let message = `Request failed with status ${response.status}.`;
-  try {
-    const body: unknown = await response.json();
-    const error = (body as { error?: { code?: unknown; message?: unknown } })
-      ?.error;
-    if (typeof error?.code === "string") code = error.code;
-    if (typeof error?.message === "string") message = error.message;
-  } catch {
-    // Not the shared error format; keep the generic error.
-  }
-  const ErrorClass = errorClasses[code as ApiErrorCode] ?? ApiError;
+  // A body that is not JSON is not the shared error format: use a generic error.
+  const body: unknown = await response.json().catch(() => null);
+  const { code = "unknown_error", message = `Request failed with status ${response.status}.` } =
+    readErrorBody(body);
+  const ErrorClass = isKnownCode(code) ? errorClasses[code] : ApiError;
   return new ErrorClass(code, message, response.status);
 }
 

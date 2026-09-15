@@ -1,6 +1,12 @@
-import { createServer, type IncomingMessage, type Server } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 
+import { AccessTokenError, AccessTokenErrorCode } from "@auth0/nextjs-auth0/errors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { getSession, getAccessToken } = vi.hoisted(() => ({
@@ -14,7 +20,7 @@ vi.mock("@/lib/auth0", () => ({
 
 import { DELETE, GET, PUT } from "./route";
 
-type Handler = (req: IncomingMessage, body: string, res: import("node:http").ServerResponse) => void;
+type Handler = (req: IncomingMessage, body: string, res: ServerResponse) => void;
 
 interface Backend {
   url: string;
@@ -45,6 +51,14 @@ async function startBackend(handler: Handler): Promise<Backend> {
   };
 }
 
+const okBackend: Handler = (_req, _body, res) => {
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end("{}");
+};
+
+/** Route context as Next.js passes it for /api/[...path]. */
+const ctx = (...path: string[]) => ({ params: Promise.resolve({ path }) });
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let backend: Backend | undefined;
@@ -58,6 +72,7 @@ afterEach(async () => {
   await backend?.close();
   backend = undefined;
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
@@ -79,6 +94,7 @@ describe("API proxy", () => {
         },
         body: JSON.stringify({ api_key: "nebius-key-abcd" }),
       }),
+      ctx("settings", "api-key"),
     );
 
     expect(response.status).toBe(200);
@@ -105,6 +121,7 @@ describe("API proxy", () => {
 
     const response = await DELETE(
       new Request("http://localhost:3000/api/settings/api-key", { method: "DELETE" }),
+      ctx("settings", "api-key"),
     );
 
     expect(response.status).toBe(204);
@@ -112,27 +129,130 @@ describe("API proxy", () => {
     expect(backend.requests[0].method).toBe("DELETE");
   });
 
-  it.each([
-    ["no session", () => getSession.mockResolvedValue(null)],
-    [
-      "a session whose token cannot be refreshed",
-      () => getAccessToken.mockRejectedValue(new Error("failed_to_refresh_token")),
-    ],
-  ])("returns 401 unauthenticated without calling the backend for %s", async (_name, setup) => {
-    setup();
+  it("passes only allowlisted backend response headers", async () => {
     backend = await startBackend((_req, _body, res) => {
-      res.writeHead(200);
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Content-Disposition": 'attachment; filename="thoughts.json"',
+        "Set-Cookie": "backend=secret; HttpOnly",
+        "WWW-Authenticate": 'Bearer realm="api"',
+        Server: "uvicorn",
+        Connection: "keep-alive",
+        "Keep-Alive": "timeout=5",
+        "Cache-Control": "max-age=3600",
+      });
       res.end("{}");
     });
     vi.stubEnv("BACKEND_URL", backend.url);
 
-    const response = await GET(new Request("http://localhost:3000/api/me"));
+    const response = await GET(new Request("http://localhost:3000/api/me"), ctx("me"));
+
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(response.headers.get("content-disposition")).toBe(
+      'attachment; filename="thoughts.json"',
+    );
+    expect(response.headers.get("cache-control")).toBe("no-cache");
+    for (const name of ["set-cookie", "www-authenticate", "server", "connection", "keep-alive"]) {
+      expect(response.headers.get(name)).toBeNull();
+    }
+  });
+
+  it.each([
+    ["dot-dot segment", ["..", "health"]],
+    ["encoded dot-dot segment", ["%2e%2e", "health"]],
+    ["mixed dot-dot segment", [".%2e", "health"]],
+    ["dot segment", [".", "me"]],
+    ["empty segment", ["", "me"]],
+    ["other host", [".%2e", "", "127.0.0.1:9999", "steal"]],
+    ["slash in segment", ["a/b"]],
+    ["encoded slash in segment", ["..%2F..%2Fhealth"]],
+    ["backslash in segment", ["a\\b"]],
+    ["encoded backslash in segment", ["a%5Cb"]],
+    ["malformed encoding", ["%E0%A4%A"]],
+  ])("rejects a %s with 404 and no backend call", async (_name, segments) => {
+    backend = await startBackend(okBackend);
+    vi.stubEnv("BACKEND_URL", backend.url);
+
+    const response = await GET(new Request("http://localhost:3000/api/x"), ctx(...segments));
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({
+      error: { code: "not_found", message: expect.any(String) },
+    });
+    expect(backend.requests).toHaveLength(0);
+    expect(getAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("encodes segments so they stay inside /api/ on the backend host", async () => {
+    backend = await startBackend(okBackend);
+    vi.stubEnv("BACKEND_URL", backend.url);
+
+    const response = await GET(
+      new Request("http://localhost:3000/api/x"),
+      ctx("thoughts", "a b?c#d:e"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(backend.requests[0].url).toBe("/api/thoughts/a%20b%3Fc%23d%3Ae");
+  });
+
+  it.each([
+    ["no session", () => getSession.mockResolvedValue(null)],
+    [
+      "a session whose token cannot be refreshed",
+      () =>
+        getAccessToken.mockRejectedValue(
+          new AccessTokenError(AccessTokenErrorCode.FAILED_TO_REFRESH_TOKEN, "refresh failed"),
+        ),
+    ],
+  ])("returns 401 unauthenticated without calling the backend for %s", async (_name, setup) => {
+    setup();
+    backend = await startBackend(okBackend);
+    vi.stubEnv("BACKEND_URL", backend.url);
+
+    const response = await GET(new Request("http://localhost:3000/api/me"), ctx("me"));
 
     expect(response.status).toBe(401);
     expect(await response.json()).toMatchObject({
       error: { code: "unauthenticated", message: expect.any(String) },
     });
     expect(backend.requests).toHaveLength(0);
+  });
+
+  it("returns 500 internal_error and logs when Auth0 fails for another reason", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    getSession.mockRejectedValue(new Error("discovery request failed"));
+    backend = await startBackend(okBackend);
+    vi.stubEnv("BACKEND_URL", backend.url);
+
+    const response = await GET(new Request("http://localhost:3000/api/me"), ctx("me"));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ error: { code: "internal_error" } });
+    expect(backend.requests).toHaveLength(0);
+    expect(consoleError).toHaveBeenCalledWith(
+      "API proxy: could not get an access token",
+      expect.objectContaining({ message: "discovery request failed" }),
+    );
+  });
+
+  it("returns 502 backend_unreachable and logs without the token", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    backend = await startBackend(okBackend);
+    const closedUrl = backend.url;
+    await backend.close();
+    backend = undefined;
+    vi.stubEnv("BACKEND_URL", closedUrl);
+
+    const response = await GET(new Request("http://localhost:3000/api/me"), ctx("me"));
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ error: { code: "backend_unreachable" } });
+    expect(consoleError).toHaveBeenCalledWith(
+      "API proxy: backend request failed",
+      expect.objectContaining({ method: "GET", path: "/api/me" }),
+    );
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain("test-access-token");
   });
 
   it("streams backend parts to the client one at a time", async () => {
@@ -149,7 +269,7 @@ describe("API proxy", () => {
     });
     vi.stubEnv("BACKEND_URL", backend.url);
 
-    const response = await GET(new Request("http://localhost:3000/api/stream"));
+    const response = await GET(new Request("http://localhost:3000/api/stream"), ctx("stream"));
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("text/event-stream");
 

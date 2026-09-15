@@ -71,7 +71,7 @@ describe("ApiKeySettings", () => {
   it.each([
     ["nebius_key_invalid", 400, "Nebius rejected this API key."],
     ["nebius_unreachable", 502, "The key could not be checked because Nebius did not respond. Try again."],
-    ["validation_error", 422, "Enter an API key."],
+    ["validation_error", 422, "backend text"],
   ])("shows the %s message", async (code, status, message) => {
     mockApi(
       { status: 200, body: { saved: false } },

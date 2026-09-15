@@ -12,7 +12,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ApiError, apiFetch, UnauthenticatedError } from "@/lib/api";
+import {
+  ApiError,
+  apiFetch,
+  UnauthenticatedError,
+  ValidationError,
+} from "@/lib/api";
 
 export interface ApiKeyStatus {
   saved: boolean;
@@ -22,17 +27,23 @@ export interface ApiKeyStatus {
 
 const ENDPOINT = "/api/settings/api-key";
 
+// Shown by the browser's own check before an empty key is sent.
+const EMPTY_KEY_MESSAGE = "Enter an API key.";
+
 // Messages from the nebius-api-key spec, keyed by backend error code.
-const errorMessages: Record<string, string> = {
-  nebius_key_invalid: "Nebius rejected this API key. Check the key and try again.",
-  nebius_unreachable:
+const errorMessages = new Map<string, string>([
+  ["nebius_key_invalid", "Nebius rejected this API key. Check the key and try again."],
+  [
+    "nebius_unreachable",
     "The key could not be checked because Nebius did not respond. Try again.",
-  validation_error: "Enter an API key.",
-};
+  ],
+]);
 
 function messageFor(error: unknown): string {
-  if (error instanceof ApiError && errorMessages[error.code]) {
-    return errorMessages[error.code];
+  if (error instanceof ValidationError) return error.message;
+  if (error instanceof ApiError) {
+    const message = errorMessages.get(error.code);
+    if (message) return message;
   }
   return "Something went wrong. Try again.";
 }
@@ -48,8 +59,7 @@ function formatDate(iso: string | undefined): string {
 function redirectToLogin() {
   // /auth/login is an Auth0 SDK route served by proxy.ts, not a Next.js page,
   // so it needs a full browser navigation rather than a client-side route change.
-  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-  window.location.assign("/auth/login?returnTo=/settings");
+  window.location.assign(new URL("/auth/login?returnTo=/settings", window.location.origin));
 }
 
 export function ApiKeySettings() {
@@ -79,7 +89,7 @@ export function ApiKeySettings() {
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (apiKey.trim() === "") {
-      setError(errorMessages.validation_error);
+      setError(EMPTY_KEY_MESSAGE);
       return;
     }
     setBusy(true);

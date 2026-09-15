@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   apiFetch,
+  BackendUnreachableError,
+  InternalError,
   NebiusKeyMissingError,
   UnauthenticatedError,
 } from "./api";
@@ -65,6 +67,35 @@ describe("apiFetch", () => {
     expect(error).not.toBeInstanceOf(UnauthenticatedError);
     expect(error).toMatchObject({ code: "unknown_error", status: 502 });
   });
+
+  it.each([
+    ["backend_unreachable", 502, BackendUnreachableError],
+    ["internal_error", 500, InternalError],
+  ])("turns %s into its error class", async (code, status, ErrorClass) => {
+    mockFetch(jsonResponse(status, { error: { code, message: "Try again." } }));
+
+    const error = await apiFetch("/api/me").catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ErrorClass);
+    expect(error).toMatchObject({ code, message: "Try again.", status });
+  });
+
+  it.each(["constructor", "__proto__", "toString"])(
+    "uses a plain ApiError for the inherited property name %s",
+    async (code) => {
+      mockFetch(
+        new Response(`{"error":{"code":${JSON.stringify(code)},"message":"odd"}}`, {
+          status: 400,
+        }),
+      );
+
+      const error = await apiFetch("/api/me").catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect(Object.getPrototypeOf(error)).toBe(ApiError.prototype);
+      expect(error).toMatchObject({ code, message: "odd", status: 400 });
+    },
+  );
 
   it("returns parsed JSON and sends JSON bodies", async () => {
     const fetchMock = mockFetch(jsonResponse(200, { saved: false }));
