@@ -1,0 +1,5 @@
+# Local debugging only: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  backend:
+    ports:
+      - "8000:8000"

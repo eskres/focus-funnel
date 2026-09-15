@@ -1,0 +1,55 @@
+schema: spec-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+context: |
+  Focus Funnel: multi-user brain-dump chatbot, BYOK Nebius (OpenAI-compatible API).
+  Stack: Next.js App Router (frontend/), async FastAPI (backend/), Postgres +
+  SQLAlchemy/Alembic, ChromaDB, Auth0.
+  Gates (chat commands):
+  - /push: file a thought away. Stores raw text + model summary, title, tags,
+    category. User confirms before save; model may suggest a split.
+  - /pull: find filed thoughts by meaning and answer from them, linking sources.
+    Tag filter; relevance order with newest-first toggle.
+  - /explore: discuss and refine a thought before saving. Sessions persist;
+    searches past thoughts via tool call; "Save" hands off to the /push preview.
+  - No slash command: the router gate picks one.
+  Gates live in one extensible registry. Per-gate model/temperature/max_tokens:
+  user override, else gates.yaml default. Never fall back to another model.
+  Rules:
+  - Browser -> Next.js proxy -> private FastAPI. Token stays server-side.
+  - Data is owner-scoped; another user's record returns 404.
+  - Nebius keys: AES-GCM, never returned or logged.
+  - Errors: {"error":{"code","message"}}.
+  - Postgres is source of truth for thoughts; Chroma is rebuildable.
+  - One versioned Chroma collection per user. Embedding model comes from the
+    vector_collections row via one resolver. Never block per-user embedding
+    models (first post-MVP upgrade).
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
+operations:
+  apply:
+    guidance:
+      - "Use Conventional Commits; scope = change name, e.g. feat(platform-foundation): ..."
+      - "Commit once per task group, after that group's checks pass."
+      - "The first commit also adds openspec/ and the agent workflow folders (.claude/, .cline/, .clinerules/, .kilocode/), excluding ignored files."
