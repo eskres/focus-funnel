@@ -8,10 +8,10 @@
 
 ## 2. Backend core
 
-- [ ] 2.1 Add backend settings loading that fails at startup when a required variable is missing or `KEY_ENCRYPTION_KEY` is not 32 bytes of base64, and check it with a pytest test for each failure case
-- [ ] 2.2 Set up async SQLAlchemy (`asyncpg` and `aiosqlite`) and Alembic, and check that `alembic upgrade head` runs on an empty Postgres database and an empty SQLite database
-- [ ] 2.3 Add the shared error format and handlers (`unauthenticated`, `validation_error`, `not_found`, and the Nebius codes), and check with pytest that a validation failure and an unknown route both return `{ "error": { "code", "message" } }`
-- [ ] 2.4 Add `GET /health` with a database check, and check with pytest that it returns 200 `ok` with the database available and 503 when the database session fails
+- [x] 2.1 Add backend settings loading that fails at startup when a required variable is missing or `KEY_ENCRYPTION_KEY` is not 32 bytes of base64, and check it with a pytest test for each failure case
+- [x] 2.2 Set up async SQLAlchemy (`asyncpg` and `aiosqlite`) and Alembic, and check that `alembic upgrade head` runs on an empty Postgres database and an empty SQLite database
+- [x] 2.3 Add the shared error format and handlers (`unauthenticated`, `validation_error`, `not_found`, and the Nebius codes), and check with pytest that a validation failure and an unknown route both return `{ "error": { "code", "message" } }`
+- [x] 2.4 Add `GET /health` with a database check, and check with pytest that it returns 200 `ok` with the database available and 503 when the database session fails
 
 ## 3. Login and user records
 

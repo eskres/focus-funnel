@@ -3,3 +3,8 @@ services:
   backend:
     ports:
       - "8000:8000"
+
+  postgres:
+    # Lets host-run migrations and tests reach the compose Postgres.
+    ports:
+      - "55432:5432"
