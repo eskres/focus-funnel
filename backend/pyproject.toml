@@ -13,6 +13,7 @@ dependencies = [
     "cryptography>=50.0.1",
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
+    "httpx2>=2.13.0",
     "openai>=3.14.0",
     "pydantic-settings>=2.15.0",
     "pyjwt[crypto]>=2.14.0",
@@ -24,7 +25,6 @@ dependencies = [
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
-    "respx>=0.23.1",
 ]
 
 [tool.uv]

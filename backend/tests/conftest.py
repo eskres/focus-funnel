@@ -4,6 +4,7 @@ import os
 import time
 import uuid
 
+import httpx2
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -77,6 +78,32 @@ def count_users(url: str, auth0_sub: str | None = None) -> int:
         return result
 
     return asyncio.run(count())
+
+
+class FakeNebius:
+    """Records requests and answers them through an httpx2 mock transport."""
+
+    def __init__(self, respond):
+        self.requests: list[httpx2.Request] = []
+        self._respond = respond
+
+    def _handle(self, request: httpx2.Request) -> httpx2.Response:
+        self.requests.append(request)
+        return self._respond(request)
+
+    def http_client(self) -> httpx2.AsyncClient:
+        return httpx2.AsyncClient(transport=httpx2.MockTransport(self._handle))
+
+
+def status(code: int, json=None):
+    return lambda _request: httpx2.Response(code, json=json if json is not None else {})
+
+
+def fail_with(error_class):
+    def respond(request):
+        raise error_class("network failure", request=request)
+
+    return respond
 
 
 def new_rsa_key() -> rsa.RSAPrivateKey:

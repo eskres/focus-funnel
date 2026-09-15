@@ -23,12 +23,12 @@
 
 ## 4. Nebius API key
 
-- [ ] 4.1 Add `crypto.py` with AES-256-GCM encryption that binds each key to its `user_id`, and check with pytest that a round-trip works, a ciphertext with a different `user_id` fails to decrypt, and two encryptions of the same key give different ciphertexts
-- [ ] 4.2 Add the `nebius_api_keys` table model and migration (unique `user_id`, `ciphertext`, `nonce`, `key_version`, `last4`, timestamps), and check that the migration applies and a second row for the same user is rejected
-- [ ] 4.3 Add `nebius.py` with `client_for(user)`, the key check through `models.list()` with a 10-second timeout, and the mapping from SDK errors to `nebius_key_invalid`, `nebius_unreachable`, `nebius_key_rejected`, and `nebius_key_missing`. Check each mapping with a pytest test against a mocked Nebius API
-- [ ] 4.4 Add `GET`, `PUT`, and `DELETE /api/settings/api-key`, and check with pytest the scenarios for a valid key, an invalid key, Nebius unreachable, an empty key, a valid replacement, an invalid replacement that keeps the old key, deletion, and a status response that shows only `last4`
-- [ ] 4.5 Add a log filter that masks API keys and skip request-body logging on the key endpoint, and check with a pytest test that captures logs during save and check that the full key never appears
-- [ ] 4.6 Check with a pytest test that reads the stored database row after a save that the row contains no plain-text key
+- [x] 4.1 Add `crypto.py` with AES-256-GCM encryption that binds each key to its `user_id`, and check with pytest that a round-trip works, a ciphertext with a different `user_id` fails to decrypt, and two encryptions of the same key give different ciphertexts
+- [x] 4.2 Add the `nebius_api_keys` table model and migration (unique `user_id`, `ciphertext`, `nonce`, `key_version`, `last4`, timestamps), and check that the migration applies and a second row for the same user is rejected
+- [x] 4.3 Add `nebius.py` with `client_for(user)`, the key check through `models.list()` with a 10-second timeout, and the mapping from SDK errors to `nebius_key_invalid`, `nebius_unreachable`, `nebius_key_rejected`, and `nebius_key_missing`. Check each mapping with a pytest test against a mocked Nebius API
+- [x] 4.4 Add `GET`, `PUT`, and `DELETE /api/settings/api-key`, and check with pytest the scenarios for a valid key, an invalid key, Nebius unreachable, an empty key, a valid replacement, an invalid replacement that keeps the old key, deletion, and a status response that shows only `last4`
+- [x] 4.5 Add a log filter that masks API keys and skip request-body logging on the key endpoint, and check with a pytest test that captures logs during save and check that the full key never appears
+- [x] 4.6 Check with a pytest test that reads the stored database row after a save that the row contains no plain-text key
 
 ## 5. Frontend login and proxy
 
