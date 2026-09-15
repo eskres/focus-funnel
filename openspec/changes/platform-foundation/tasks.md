@@ -34,10 +34,10 @@
 
 - [ ] 5.1 Set up Auth0 by hand: create the tenant, a Regular Web App, and an API with an identifier, then fill in the Auth0 values in `.env`. Check that `.env` has every Auth0 variable listed in `.env.example`
 - [ ] 5.2 Add the Auth0 Next.js SDK with middleware that protects everything except `/`, configured with the API audience. Check by hand that opening `/app` while logged out redirects to Auth0, logging in returns to `/app`, and logging out ends the session
-- [ ] 5.3 Add the catch-all `app/api/[...path]/route.ts` proxy that attaches the access token on the server, forwards method, path, query, and body to `BACKEND_URL`, and streams the response body unbuffered. Check with Vitest that it forwards the token and returns 401 `unauthenticated` without calling the backend when there is no session
-- [ ] 5.4 Add a Vitest test for the proxy that sends a backend stream in parts with delays, and check that the parts reach the client one at a time
+- [x] 5.3 Add the catch-all `app/api/[...path]/route.ts` proxy that attaches the access token on the server, forwards method, path, query, and body to `BACKEND_URL`, and streams the response body unbuffered. Check with Vitest that it forwards the token and returns 401 `unauthenticated` without calling the backend when there is no session
+- [x] 5.4 Add a Vitest test for the proxy that sends a backend stream in parts with delays, and check that the parts reach the client one at a time
 - [ ] 5.5 Check in browser dev tools, after logging in, that no response body and no cookie readable by JavaScript contains the access token
-- [ ] 5.6 Add a typed fetch helper that converts the error format into typed errors, and check with Vitest that `nebius_key_missing` and `unauthenticated` responses become the matching error types
+- [x] 5.6 Add a typed fetch helper that converts the error format into typed errors, and check with Vitest that `nebius_key_missing` and `unauthenticated` responses become the matching error types
 
 ## 6. Frontend pages
 
