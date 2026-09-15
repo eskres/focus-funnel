@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from app.config import get_settings
 from app.errors import register_error_handlers
-from app.routers import health
+from app.routers import health, me
 
 
 @asynccontextmanager
@@ -17,3 +17,4 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Focus Funnel API", lifespan=lifespan)
 register_error_handlers(app)
 app.include_router(health.router)
+app.include_router(me.router)

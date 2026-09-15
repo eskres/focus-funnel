@@ -15,11 +15,11 @@
 
 ## 3. Login and user records
 
-- [ ] 3.1 Add the `users` table model and migration (`id`, unique `auth0_sub`, `created_at`), and check that the migration applies and the unique constraint rejects a duplicate `auth0_sub`
-- [ ] 3.2 Add the token check with PyJWT and a cached JWKS (RS256, issuer, audience, expiry, refetch on an unknown key id, 503 when no key is available), with a test JWKS based on a local RSA key pair. Check with pytest tests for a missing token, an expired token, the wrong audience, the wrong issuer, a bad signature, and a valid token
-- [ ] 3.3 Add the `current_user` dependency that creates the user record with an upsert, and check with pytest that the first request creates one record, repeat requests reuse it, and two requests at the same time for a new subject leave exactly one record
-- [ ] 3.4 Add `GET /api/me`, and check with pytest that it returns the user's `id` with a valid token and 401 without one
-- [ ] 3.5 Add an ownership helper that returns `not_found` for records owned by another user, and check it with a pytest test that uses a small test-only model
+- [x] 3.1 Add the `users` table model and migration (`id`, unique `auth0_sub`, `created_at`), and check that the migration applies and the unique constraint rejects a duplicate `auth0_sub`
+- [x] 3.2 Add the token check with PyJWT and a cached JWKS (RS256, issuer, audience, expiry, refetch on an unknown key id, 503 when no key is available), with a test JWKS based on a local RSA key pair. Check with pytest tests for a missing token, an expired token, the wrong audience, the wrong issuer, a bad signature, and a valid token
+- [x] 3.3 Add the `current_user` dependency that creates the user record with an upsert, and check with pytest that the first request creates one record, repeat requests reuse it, and two requests at the same time for a new subject leave exactly one record
+- [x] 3.4 Add `GET /api/me`, and check with pytest that it returns the user's `id` with a valid token and 401 without one
+- [x] 3.5 Add an ownership helper that returns `not_found` for records owned by another user, and check it with a pytest test that uses a small test-only model
 
 ## 4. Nebius API key
 

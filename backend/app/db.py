@@ -26,8 +26,8 @@ class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
-def create_engine(url: str) -> AsyncEngine:
-    engine = create_async_engine(url, pool_pre_ping=True)
+def create_engine(url: str, **engine_options) -> AsyncEngine:
+    engine = create_async_engine(url, pool_pre_ping=True, **engine_options)
     if engine.dialect.name == "sqlite":
         # SQLite ignores foreign keys unless each connection turns them on.
         @event.listens_for(engine.sync_engine, "connect")
