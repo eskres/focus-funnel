@@ -32,7 +32,7 @@
 
 ## 5. Frontend login and proxy
 
-- [ ] 5.1 Set up Auth0 by hand: create the tenant, a Regular Web App, and an API with an identifier, then fill in the Auth0 values in `.env`. Check that `.env` has every Auth0 variable listed in `.env.example`
+- [x] 5.1 Set up Auth0 by hand: create the tenant, a Regular Web App, and an API with an identifier, then fill in the Auth0 values in `.env`. Check that `.env` has every Auth0 variable listed in `.env.example`
 - [ ] 5.2 Add the Auth0 Next.js SDK with middleware that protects everything except `/`, configured with the API audience. Check by hand that opening `/app` while logged out redirects to Auth0, logging in returns to `/app`, and logging out ends the session
 - [ ] 5.3 Add the catch-all `app/api/[...path]/route.ts` proxy that attaches the access token on the server, forwards method, path, query, and body to `BACKEND_URL`, and streams the response body unbuffered. Check with Vitest that it forwards the token and returns 401 `unauthenticated` without calling the backend when there is no session
 - [ ] 5.4 Add a Vitest test for the proxy that sends a backend stream in parts with delays, and check that the parts reach the client one at a time
@@ -48,6 +48,6 @@
 
 ## 7. Full system check
 
-- [ ] 7.1 Run the backend test suite on SQLite and on the compose Postgres, and check that both pass
+- [x] 7.1 Run the backend test suite on SQLite and on the compose Postgres, and check that both pass
 - [ ] 7.2 On a fresh `docker compose up`, run the full flow (log in, open settings, save a valid key, see `last4`, replace it with an invalid key and see the old key kept, delete the key, log out), and check that each step matches the specs
 - [ ] 7.3 Check that the backend port is not published by the default `docker-compose.yml`: a request to the backend from the host fails, and the same call through the frontend proxy succeeds

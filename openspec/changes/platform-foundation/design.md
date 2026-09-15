@@ -69,6 +69,11 @@ One repository keeps the API contract and the planning artifacts in one place. *
 - It returns the backend's response body as a `ReadableStream`, without buffering, so the SSE streams in later changes work unchanged.
 - The Auth0 SDK's own routes (login, logout, callback) are handled by the SDK and are not forwarded.
 - The Auth0 client requests the configured API `audience`, so the access token is a JWT that FastAPI can check.
+- The proxy builds the target URL from the parsed path segments, never the raw request path. Segments that are `.`, `..`, empty, or contain `/` or `\` get a 404 and no backend call. The target must stay on the `BACKEND_URL` origin under `/api/`.
+- Request headers use an allowlist (`accept`, `accept-language`, `content-type`). The browser's `Cookie`, `Host`, and `Authorization` headers are never forwarded.
+- Response headers use an allowlist. Backend `Set-Cookie`, `WWW-Authenticate`, and hop-by-hop headers are dropped.
+- The SDK's `/auth/access-token` route is turned off (`enableAccessTokenEndpoint: false`), because it returns the token to browser JavaScript.
+- Session or token errors return 401 `unauthenticated`. A backend that can't be reached returns 502 `backend_unreachable`. Other Auth0 or config failures are logged on the server and return 500 `internal_error`.
 
 **Alternative:** the browser calls FastAPI directly with a bearer token. Rejected: the token would live in browser JavaScript, FastAPI would have to be public, and CORS config would be needed.
 
@@ -76,7 +81,7 @@ One repository keeps the API contract and the planning artifacts in one place. *
 
 - A `current_user` dependency does four things:
   1. Reads the bearer token.
-  2. Checks it with `PyJWKClient` against `https://<AUTH0_DOMAIN>/.well-known/jwks.json`.
+  2. Checks it against keys from `https://<AUTH0_DOMAIN>/.well-known/jwks.json`, loaded with PyJWT's `PyJWKSet` and an async `httpx` fetch. (`PyJWKClient` fetches keys with a blocking call, which would stall async requests.)
   3. Requires the `RS256` algorithm, `iss = https://<AUTH0_DOMAIN>/`, `aud = AUTH0_AUDIENCE`, and a valid `exp`.
   4. Returns the user record.
 - Signing keys are cached. If a token names a key id that isn't in the cache, the JWKS is fetched again, at most once per minute. If the JWKS can't be fetched and the cache holds no matching key, the request fails with HTTP 503. It does not fail with 401, because the token may be fine.
@@ -123,7 +128,8 @@ id | user_id (unique FK) | ciphertext | nonce | key_version | last4 | created_at
   - Nebius returns 401 or 403: error code `nebius_key_invalid`.
   - Timeout, connection error, or 5xx: error code `nebius_unreachable`.
 - One error-mapping function converts OpenAI SDK errors into the spec error codes. `nebius_key_rejected` covers a saved key that fails during use. Later gate changes reuse this function.
-- Log messages pass through a filter that masks anything that looks like the current key. The API key endpoint also never logs request bodies.
+- A log record factory masks every key registered for the current request, in each record's message and traceback. Unlike a handler filter, it also covers handlers uvicorn adds later. The API key endpoint also never logs request bodies.
+- The openai SDK sends requests through `httpx2`, not `httpx`, so tests inject an `httpx2` mock client instead of patching `httpx`.
 - `NEBIUS_BASE_URL` is configuration, not a constant. The correct Nebius base URL must be checked when setting up the environment.
 
 ### 8. API shape and error format
@@ -144,7 +150,20 @@ Every error uses the same format:
 { "error": { "code": "nebius_key_invalid", "message": "Nebius rejected this API key." } }
 ```
 
-The codes in this change are `unauthenticated`, `validation_error`, `not_found`, `nebius_key_missing`, `nebius_key_invalid`, `nebius_key_rejected`, and `nebius_unreachable`. The frontend maps codes to UI; for example, `nebius_key_missing` shows a link to settings. Later changes add codes and keep the format.
+The codes in this change, with their HTTP statuses:
+
+- 401 `unauthenticated`
+- 422 `validation_error`
+- 404 `not_found`
+- 500 `internal_error`
+- 503 `service_unavailable` (Auth0 signing keys can't be fetched)
+- 400 `nebius_key_invalid`
+- 409 `nebius_key_missing`
+- 409 `nebius_key_rejected`
+- 502 `nebius_unreachable`
+- 502 `backend_unreachable` (frontend proxy only)
+
+The frontend maps codes, not statuses, to UI; for example, `nebius_key_missing` shows a link to settings. Later changes add codes and keep the format.
 
 Requests for another user's record return `not_found`, as the spec requires.
 
@@ -158,10 +177,11 @@ Requests for another user's record return `not_found`, as the spec requires.
 
 ### 10. Frontend structure
 
-- The Auth0 Next.js SDK middleware protects every route except the public landing page (`/`).
+- Next.js 16 `proxy.ts` (formerly middleware) protects every page except `/`. `/api/*` calls are not redirected to login: the route handler answers 401 `unauthenticated`, as the spec requires.
 - Pages: `/` (landing with a login button), `/app` (an empty chat placeholder that `gate-framework` fills in), `/settings` (the API key section).
 - A small typed fetch helper calls `/api/...` and turns the error format into typed errors.
 - UI components come from shadcn/ui on Tailwind CSS v4. The shadcn CLI copies each component's source into `frontend/components/ui/`, so the repo owns the code and can edit it. Only components a page uses get added.
+- shadcn uses the `base-nova` style, built on Base UI rather than Radix.
 - The create-next-app starter styles (`page.module.css`) are removed. Styling uses Tailwind classes and shadcn's CSS variable theme in `app/globals.css`.
 - Checks: TypeScript type checks, ESLint, and Vitest tests for the proxy handler and the fetch helper.
 
