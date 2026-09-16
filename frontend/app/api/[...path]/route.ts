@@ -55,14 +55,28 @@ async function getAccessToken(): Promise<TokenResult> {
   }
 }
 
-function isSafeSegment(segment: string): boolean {
-  let decoded: string;
+/** Percent-decodes a segment, or returns null when it is not a valid encoding. */
+function decodeOnce(segment: string): string | null {
   try {
-    decoded = decodeURIComponent(segment);
+    return decodeURIComponent(segment);
   } catch {
-    return false;
+    return null;
   }
-  return [segment, decoded].every(
+}
+
+/**
+ * Next.js hands over segments it has already percent-decoded, so the segment is
+ * checked as it arrives. Decoding a second time is only defense in depth, for a
+ * segment that still holds an encoded traversal sequence such as `%2e%2e`. A
+ * segment that cannot be decoded is a literal string, such as `100%` from `100%25`
+ * in the URL, and the as-arrived check already covers it. `backendTarget`
+ * re-encodes whatever passes, so it reaches the backend as one path component.
+ */
+function isSafeSegment(segment: string): boolean {
+  const values = [segment];
+  const decoded = decodeOnce(segment);
+  if (decoded !== null) values.push(decoded);
+  return values.every(
     (value) =>
       value !== "" &&
       value !== "." &&
@@ -78,6 +92,10 @@ function backendTarget(backendUrl: string, segments: string[], search: string): 
   const base = new URL(backendUrl);
   const path = `/api/${segments.map(encodeURIComponent).join("/")}`;
   const target = new URL(path + search, base.origin);
+  // Unreachable from this handler: `path` is the literal "/api/" followed by
+  // encodeURIComponent-escaped segments, and a path-absolute reference cannot
+  // resolve to another origin. Kept as defense in depth, so a later change to
+  // how `path` is built cannot quietly send a request off the backend origin.
   if (target.origin !== base.origin || !target.pathname.startsWith("/api/")) {
     return null;
   }
@@ -128,6 +146,24 @@ async function forward(request: Request, context: ProxyContext): Promise<Respons
       method: request.method,
       path: target.pathname,
       ...errorDetails(error),
+    });
+    return errorResponse(
+      502,
+      "backend_unreachable",
+      "The server could not be reached. Try again.",
+    );
+  }
+
+  // `redirect: "manual"` returns a 3xx instead of following it, and `location`
+  // is not forwarded, so a redirect would reach the browser with no target.
+  // The API has no redirecting endpoint, so an upstream 3xx means the call did
+  // not complete: report it as a failed backend call and log it on the server.
+  if (upstream.status >= 300 && upstream.status < 400) {
+    await upstream.body?.cancel();
+    console.error("API proxy: backend returned a redirect", {
+      method: request.method,
+      path: target.pathname,
+      status: upstream.status,
     });
     return errorResponse(
       502,
