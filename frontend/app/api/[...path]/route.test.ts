@@ -168,7 +168,6 @@ describe("API proxy", () => {
     ["encoded slash in segment", ["..%2F..%2Fhealth"]],
     ["backslash in segment", ["a\\b"]],
     ["encoded backslash in segment", ["a%5Cb"]],
-    ["malformed encoding", ["%E0%A4%A"]],
   ])("rejects a %s with 404 and no backend call", async (_name, segments) => {
     backend = await startBackend(okBackend);
     vi.stubEnv("BACKEND_URL", backend.url);
@@ -194,6 +193,49 @@ describe("API proxy", () => {
 
     expect(response.status).toBe(200);
     expect(backend.requests[0].url).toBe("/api/thoughts/a%20b%3Fc%23d%3Ae");
+  });
+
+  // Next.js has already decoded the segment, so these cannot be decoded again.
+  // They are literal strings, not traversal attempts, and are forwarded encoded.
+  it.each([
+    ["a literal percent sign", "100%", "/api/thoughts/100%25"],
+    ["an incomplete escape", "%E0%A4%A", "/api/thoughts/%25E0%25A4%25A"],
+  ])("forwards a segment with %s", async (_name, segment, expectedUrl) => {
+    backend = await startBackend(okBackend);
+    vi.stubEnv("BACKEND_URL", backend.url);
+
+    const response = await GET(
+      new Request("http://localhost:3000/api/x"),
+      ctx("thoughts", segment),
+    );
+
+    expect(response.status).toBe(200);
+    expect(backend.requests[0].url).toBe(expectedUrl);
+  });
+
+  it("turns a backend redirect into 502 backend_unreachable", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    backend = await startBackend((_req, _body, res) => {
+      res.writeHead(302, { Location: "https://redirect-target.example/steal" });
+      res.end();
+    });
+    vi.stubEnv("BACKEND_URL", backend.url);
+
+    const response = await GET(new Request("http://localhost:3000/api/me"), ctx("me"));
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({
+      error: { code: "backend_unreachable", message: expect.any(String) },
+    });
+    // The browser never sees a redirect it cannot follow.
+    expect(response.headers.get("location")).toBeNull();
+    expect(consoleError).toHaveBeenCalledWith(
+      "API proxy: backend returned a redirect",
+      expect.objectContaining({ method: "GET", path: "/api/me", status: 302 }),
+    );
+    const logged = JSON.stringify(consoleError.mock.calls);
+    expect(logged).not.toContain("test-access-token");
+    expect(logged).not.toContain("redirect-target.example");
   });
 
   it.each([

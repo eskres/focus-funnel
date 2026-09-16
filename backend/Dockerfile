@@ -10,5 +10,10 @@ RUN uv sync --frozen --no-dev
 
 COPY . .
 
+# Set again here so the image works from a checkout that lost file modes.
+RUN chmod +x /srv/docker-entrypoint.sh
+
 EXPOSE 8000
+# The entrypoint runs `alembic upgrade head` before exec'ing this command.
+ENTRYPOINT ["/srv/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
