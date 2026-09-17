@@ -111,6 +111,13 @@ When the router gate's answer is not one of `push`, `pull`, or `explore`, the sy
 - **THEN** the system reports error code `gate_model_unavailable` naming the router gate
 - **AND** no other model is used to classify the message
 
+#### Scenario: Router gate has no model chosen
+
+- **WHEN** a message with no command arrives and the router gate's model is unset
+- **THEN** the system reports error code `gate_model_not_set` naming the router gate
+- **AND** the message tells the user to choose a router model or to start the message with `/push`, `/pull`, or `/explore`
+- **AND** no model is called
+
 ### Requirement: Placeholder answers until the gates are built
 
 Until the push, pull, and explore gates have their own behavior, each SHALL answer with a short message saying that the gate is not available yet. The routing result SHALL still be reported as it would be for a real answer.

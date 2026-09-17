@@ -1,4 +1,4 @@
-> **Planning status:** Proposal only. Write the specs, design, and tasks when this change is picked up. Depends on `platform-foundation`.
+> Depends on `platform-foundation` (archived).
 
 ## Why
 
@@ -7,17 +7,18 @@ The /push, /pull, and /explore gates each need to call a Nebius model. Users wan
 ## What Changes
 
 - Add a gate registry with four gates: `router`, `push`, `pull`, and `explore`. Settings, model selection, and the API all loop over the registry, so a new gate needs only a registry entry and a handler. User-defined gates are out of scope.
-- Give each gate 3 settings: `model`, `temperature`, and `max_tokens`. System prompt editing is out of scope.
-- Keep system defaults for each gate in a server config file (`gates.yaml`), and store user overrides per user in Postgres.
-- Pick each gate's settings from the user override when one exists, and from the system default otherwise. "Reset to default" deletes the override.
+- Give each gate 4 settings: `model`, `temperature`, `max_tokens`, and an optional `reasoning_effort`. System prompt editing is out of scope.
+- Ship **no default model**. Each gate is unset until the user chooses a model, guided by a hint that says what to prioritise, with an example. A gate with no model returns a clear error pointing to settings.
+- Keep the per-gate hint and the `temperature` and `max_tokens` defaults in a server config file (`gates.yaml`), with no model ids in it, and store user overrides per user in Postgres.
+- Pick each gate's settings from the user override when one exists, and from the system default otherwise. "Reset" deletes the override, which leaves the model unset again.
 - Add a settings API:
   - `GET /api/models` lists Nebius models using the user's key.
   - `GET /api/settings/gates` returns each gate's current settings and where they came from (user or system).
   - `PUT /api/settings/gates/{gate_id}` saves an override.
   - `DELETE /api/settings/gates/{gate_id}` resets a gate to its default.
   - `POST /api/settings/gates/{gate_id}/test` sends a small prompt to check the model.
-- Check that the model exists before saving an override.
-- Let each registry entry declare required model features. For example, `explore` requires tool calling. Saving an override rejects a model that lacks a required feature, and the model dropdown marks such models as not supported for that gate.
+- Check that the model exists in the user's model list before saving an override.
+- Let each registry entry declare the model features it uses. For example, `explore` uses tool calling. The provider's feature list is advisory: a model that does not report a feature is still selectable, marked unconfirmed, and the Test action is what proves it.
 - If a gate's model call fails because the model is unavailable, return a clear error that points to settings. Never switch to another model on its own.
 - Add gate settings to the settings page: a model dropdown, temperature, max_tokens, Test, and Reset to default.
 - Add a chat interface where a leading `/push`, `/pull`, or `/explore` always picks the gate.
@@ -28,7 +29,7 @@ The /push, /pull, and /explore gates each need to call a Nebius model. Users wan
 ## Capabilities
 
 ### New Capabilities
-- `gate-model-config`: Per-gate model settings: system defaults, user overrides, model list, validation, test, reset, and the error when a model is unavailable.
+- `gate-model-config`: Per-gate model settings: gates that start unset with a hint, user overrides, the model list, validation, test, reset, and the errors when a model is unset or unavailable.
 - `message-routing`: Slash-command routing, the router gate's classification, and visible routing results.
 - `chat-interface`: The chat screen, message input, streaming answers, and gate labels on messages.
 

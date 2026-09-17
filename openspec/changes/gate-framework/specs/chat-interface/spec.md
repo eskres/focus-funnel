@@ -80,6 +80,12 @@ When a message cannot be answered, the chat SHALL show the reason in place of th
 - **THEN** the chat shows which gate and model failed, with a link to the gate settings
 - **AND** the chat does not show an answer from a different model
 
+#### Scenario: Gate has no model chosen
+
+- **WHEN** a gate that would handle the message has no model chosen
+- **THEN** the chat shows which gate needs a model, with a link to the gate settings
+- **AND** no answer from any other model appears
+
 #### Scenario: Routing failed
 
 - **WHEN** the router cannot classify a message
