@@ -2,7 +2,7 @@
 
 `platform-foundation` is in place: Auth0 token checks and `current_user`, the Next.js catch-all proxy that streams response bodies unbuffered, async SQLAlchemy with Alembic, the shared error format, and `backend/app/nebius.py` with a per-request client and one error mapper (`map_nebius_error()`). Nothing calls a model for a user yet.
 
-A gate-based prototype (a router model plus four gates with their own model settings) was built and measured before this design. It is not part of this change and was never pushed. It is kept on the local branch `backup/gate-build`, and decision 12 lists what carries over. See `proposal.md` for why it was replaced.
+A gate-based prototype (a router model plus four gates with their own model settings) was built and measured before this design. It is not part of this change and was never pushed. It is kept on the local branch `backup/gate-build`, and decision 12 lists what carries over. See `proposal.md` for why it was replaced. This change depends on `model-providers`, which supplies provider keys, the per-provider client, and the model list.
 
 Findings from probing a real account, which shape the decisions below:
 
@@ -15,7 +15,7 @@ Findings from probing a real account, which shape the decisions below:
 - Nebius offers no balance or usage endpoint for an inference key. Every reply carries `usage` token counts, and the model list carries per-token prices and `context_length`.
 - Nano costs about $0.06 per million input tokens and $0.24 per million output tokens. A turn of about 550 prompt and 360 completion tokens is about $0.00012.
 
-Constraints that stay: the browser talks only to the Next.js proxy, one Nebius client per request per user, one error envelope, and never fall back to another model. Thoughts are stored as plain text in Postgres, and conversations follow the same rule.
+Constraints that stay: the browser talks only to the Next.js proxy, one provider client per request per user, one error envelope, and never fall back to another model. Thoughts are stored as plain text in Postgres, and conversations follow the same rule.
 
 ## Goals / Non-Goals
 
@@ -25,13 +25,13 @@ Constraints that stay: the browser talks only to the Next.js proxy, one Nebius c
 - Conversations that survive a reload, with a sidebar to resume, archive, and delete them.
 - A discussion that ends in an editable proposal to file, without nagging.
 - The user always knows how full the context is and what their usage costs.
-- Reusing the sound parts of the prototype (Nebius client, model list, SSE writer, chat UI) without carrying its gate concepts.
+- Reusing the sound parts of the prototype (provider client, SSE writer, chat UI) without carrying its gate concepts.
 
 **Non-Goals:**
 
 - Storing, searching, or summarising thoughts. `thought-storage` and `push-and-pull-gates` do that. The tools exist here, and the search tool and the confirm step answer that they are not available yet.
 - Embeddings and a classifier. They are not needed without a router.
-- Editing the system prompt, user-defined tools, or other providers than Nebius.
+- Editing the system prompt, user-defined tools, or providers with their own API shape.
 - Sharing conversations, search inside conversations, and model-written titles.
 
 ## Decisions
@@ -56,7 +56,7 @@ The prototype's slash-command parser is the starting point, with this command se
 New tables, all cascading on user delete:
 
 ```
-conversations   id UUID pk, user_id FK, title TEXT, model TEXT null, reasoning_effort TEXT null,
+conversations   id UUID pk, user_id FK, title TEXT, provider_id TEXT null, model TEXT null, reasoning_effort TEXT null,
                 archived_at TIMESTAMPTZ null, last_activity_at, created_at, updated_at,
                 last_prompt_tokens INT null, held_proposal JSONB null
 
@@ -68,13 +68,13 @@ messages        id UUID pk, conversation_id FK, position INT, role TEXT
                 UNIQUE (conversation_id, position)
 
 usage_events    id UUID pk, user_id FK, conversation_id FK ON DELETE SET NULL,
-                kind TEXT ('chat'|'compact'|'proposal'|'test'), model TEXT,
+                kind TEXT ('chat'|'compact'|'proposal'|'test'), provider_id TEXT, model TEXT,
                 prompt_tokens INT, completion_tokens INT, cost_usd NUMERIC null, created_at
                 INDEX (user_id, created_at)
 
-chat_models     id UUID pk, user_id FK, model TEXT, reasoning_effort TEXT null,
+chat_models     id UUID pk, user_id FK, provider_id TEXT, model TEXT, reasoning_effort TEXT null,
                 is_default BOOL, position INT
-                UNIQUE (user_id, model)
+                UNIQUE (user_id, provider_id, model)
 
 user_settings   user_id UUID pk FK, temperature FLOAT null, warning_unit TEXT null
                 ('usd'|'tokens'), warning_amount NUMERIC null, warning_notified_month TEXT null
@@ -84,7 +84,7 @@ user_settings   user_id UUID pk FK, temperature FLOAT null, warning_unit TEXT nu
 - `held_proposal` holds the latest proposal the user has not confirmed: the title, summary, tags, and the message position it was made at.
 - `usage_events` deliberately has no message text and uses `SET NULL`, so deleting a conversation keeps the spend history.
 - The loadout limit of five is enforced in code, not by a constraint, so raising it needs no migration.
-- Conversation text is stored as plain text, like thoughts. Nebius keys stay AES-GCM encrypted. The "delete my data" endpoint in `thought-storage` must also remove these rows, which cascade from the user.
+- Conversation text is stored as plain text, like thoughts. Provider keys stay AES-GCM encrypted. The "delete my data" endpoint in `thought-storage` must also remove these rows, which cascade from the user.
 
 **Alternative:** one JSON blob per conversation. Rejected: it makes appending under concurrent writes, listing, and compaction awkward.
 
@@ -132,9 +132,9 @@ The system never mentions deleting a conversation. That is a rule for the prompt
 
 ### 7. Settings: one model section
 
-`GET /api/settings/models` and `PUT /api/settings/models` The body holds the loadout (up to five entries with a model and an optional effort), the default, and the temperature. `POST /api/settings/models/test` runs a test of one model and effort. `GET /api/models` lists the models the user's key can use, with `context_length`, the advisory tool-calling status, and the per-token prices for the usage estimate.
+`GET /api/settings/models` and `PUT /api/settings/models` The body holds the loadout (up to five entries with a model and an optional effort), the default, and the temperature. `POST /api/settings/models/test` runs a test of one model and effort. The models a user can choose come from `GET /api/providers/{id}/models` (see `model-providers`), which carries `context_length`, per-token prices, and the advisory tool-calling status when the provider reports them.
 
-`PUT` replaces the loadout with exactly what the body holds, one rule, with no partial merge. A model must appear in the user's list (`model_unknown`), and an effort must be a documented value. Feature information stays advisory: a model that does not report tool calling is stored and marked unconfirmed.
+`PUT` replaces the loadout with exactly what the body holds, one rule, with no partial merge. A model must appear in its provider's list for that user's key (`model_unknown`), and an effort must be a documented value. Feature information stays advisory: a model that does not report tool calling is stored and marked unconfirmed.
 
 **`max_tokens` is not a setting.** The server sends its own limit on every call, 8,192 to start, from `chat.yaml`. That leaves room for the 2,300 reasoning tokens the worst probed case used, plus an answer. A reply that stops with `finish_reason = length`, and an empty reply, end with an `error` event `output_limit_reached`. Text received so far is kept, and the UI offers a retry or a lower effort.
 
@@ -146,12 +146,12 @@ Configuration lives in `chat.yaml`, loaded and validated once at startup: an inv
 
 - **Meter:** each answer stores the provider's `prompt_tokens` in `conversations.last_prompt_tokens` and emits it in a `usage` event. The context length comes from the model list, held in a short-lived per-user cache (five minutes) so a chat turn does not add a list call. A stale cache can only affect the meter and the price estimate. It is never used to accept a model choice, which still reads the list fresh.
 - **Soft limit:** when `last_prompt_tokens` passes 70% of the context length, the answer ends with a `notice` of kind `compact_suggested`, once per crossing.
-- **Hard limit:** before a call, the server estimates the next prompt as `last_prompt_tokens` plus the new message at about 3.5 characters per token, and refuses with `context_full` if that plus the reply limit exceeds the context length. Nebius offers no tokenizer, so this is an estimate. Being wrong on the low side only means Nebius refuses the call and the error is mapped to `context_full`.
+- **Hard limit:** before a call, the server estimates the next prompt as `last_prompt_tokens` plus the new message at about 3.5 characters per token, and refuses with `context_full` if that plus the reply limit exceeds the context length. Nebius offers no tokenizer, so this is an estimate. Being wrong on the low side only means the provider refuses the call and the error is mapped to `context_full`.
 - **`/compact`:** the chat endpoint runs a call without tools, asking for a summary of all but the last 6 messages that keeps decisions, facts, names, and open questions. It returns the draft as a `compact_draft` event. The user edits it and accepts through `POST /api/conversations/{id}/compaction { summary }`. Only then does the server insert a `summary` message and set `compacted = true` on the replaced messages. The transcript is untouched, so a resume still shows everything. A summary made after an earlier summary includes it, so compaction repeats.
 
 ### 9. Usage tracking
 
-A single helper records a `usage_events` row after every model call: chat rounds, `/compact`, forced proposals, and tests. The token counts come from the stream: every streamed call sets `stream_options.include_usage`, which Nebius honours (without it a stream reports no usage). The token counts arrive on a final chunk with no choices, so the stream reader must not assume every chunk has one. If a stream ends without that chunk, nothing is recorded and the reply's cost is unknown, which the spec allows.
+A single helper records a `usage_events` row after every model call: chat rounds, `/compact`, forced proposals, and tests. The token counts come from the stream: every streamed call sets `stream_options.include_usage`, which Nebius honours (without it a stream reports no usage). The token counts arrive on a final chunk with no choices, so the stream reader must not assume every chunk has one. How usage arrives depends on the provider's `stream_usage` capability in `model-providers`: `final_chunk` is read as described, `incremental` takes the last reported value, and `none` records the cost as unknown. If a stream ends without usage, nothing is recorded and the reply's cost is unknown, which the spec allows.
 
 The cost is `prompt_tokens × prompt_price + completion_tokens × completion_price` from the model list at the time of the call. Prices are read as USD per token, as the list reports them. The field carries no unit, and Nebius's price page needs a login, so the unit is **not verified** against a published price. Task 14.8 compares the estimate with the Nebius console for real usage, and the settings label already calls the figure an estimate.
 
@@ -161,7 +161,7 @@ The warning threshold lives in `user_settings`. After each recorded call the ser
 
 ### 10. Error codes
 
-Codes: `model_not_set` (409), `model_unknown` (400), `model_unsupported` (400), `model_unavailable` (409), `context_full` (409), `conversation_busy` (409), `nebius_rate_limited` (429), `nebius_request_refused` (502, carrying Nebius's message for any other client error with no code of its own, such as an account that has run out of credit), and the stream-only codes `output_limit_reached` and `tool_loop_limit`. `map_nebius_error()` gains a `model_id` argument that maps a missing model to `model_unavailable`, maps a 429 to `nebius_rate_limited` (it maps nothing for a 429 today, which would surface as an internal error), and maps any other unmapped client error to `nebius_request_refused`. The frontend's `ApiErrorCode` list and error classes match, and a model alert links to the model settings.
+Codes: `model_not_set` (409), `model_unknown` (400), `model_unsupported` (400), `model_unavailable` (409), `context_full` (409), `conversation_busy` (409), and the stream-only codes `output_limit_reached` and `tool_loop_limit`. The provider codes (`provider_key_missing`, `provider_key_rejected`, `provider_unreachable`, `provider_rate_limited`, `provider_request_refused`) come from `model-providers`, whose error mapper takes a `model_id` so that a missing model maps to `model_unavailable`. The frontend's `ApiErrorCode` list and error classes match, and a model alert links to the model settings.
 
 ### 11. Frontend structure
 
@@ -174,23 +174,23 @@ Codes: `model_not_set` (409), `model_unknown` (400), `model_unsupported` (400), 
 
 ### 12. Reusing the prototype code
 
-The prototype on `backup/gate-build` is a source, not a base. The build brings over, with `gate` removed from names: the model list fetch and feature classifier (with their tests), the SSE writer, the Nebius client changes and error mapper, the slash-command parser, the `FakeNebius` helpers, the `pyyaml` dependency and the config-loader pattern, the chat UI (composer, message list, error display, command list), `lib/sse.ts`, `lib/chat.ts`, the error-code handling in `lib/api.ts`, `redirect-to-login`, the five shadcn components, and the proxy SSE test. It does not bring over the gate registry, `gates.yaml`, overrides and their storage and resolution, the gate handlers, the router, the gate settings API and cards, or the `gate_overrides` migration.
+The prototype on `backup/gate-build` is a source, not a base. The build brings over, with `gate` removed from names: the SSE writer, the slash-command parser, the chat UI (composer, message list, error display, command list), `lib/sse.ts`, `lib/chat.ts`, `redirect-to-login`, the five shadcn components, and the proxy SSE test. The provider client, error mapper, model list, feature classifier, and `FakeProvider` double come from `model-providers`, which lands first. Not brought over: the gate registry, `gates.yaml`, overrides and their storage and resolution, the gate handlers, the router, the gate settings API and cards, or the `gate_overrides` migration.
 
 One Alembic revision creates the new tables, with `down_revision` `d06a9fe12cba` (the API key migration). There are no users yet, so no data is migrated. A developer's local database that already ran the prototype's overrides migration is reset (delete the Postgres volume, or recreate the SQLite file), since Alembic cannot find that revision. The downgrade drops the new tables.
 
 ### 13. Several conversations on several models
 
-Nothing in the design shares state between conversations except the user's loadout, default, temperature, usage, and Nebius account. The rules that keep that safe:
+Nothing in the design shares state between conversations except the user's loadout, default, temperature, usage, and provider accounts. The rules that keep that safe:
 
 - **The model is stored on the conversation.** A conversation created with no default set stores no model and takes the default at its first successful message. Changing the default or the loadout later never rewrites an existing conversation. The dropdown always shows the conversation's own model, marked when it is not in the loadout.
-- **Switching model inside a conversation** clears `last_prompt_tokens`, sets the effort to the new model's loadout effort (or none), and drops an effort the effort table says the new model refuses. The history carries over unchanged. Tool calls and results are stored in the OpenAI-compatible format that every Nebius chat model receives, and a model that rejects tools fails with `model_unsupported` on its first turn instead of part-way through a conversation.
+- **Switching model inside a conversation** clears `last_prompt_tokens`, sets the effort to the new model's loadout effort (or none), and drops an effort the effort table says the new model refuses. The history carries over unchanged. Tool calls and results are stored in the OpenAI-compatible format that chat models on every supported provider receive, and a model that rejects tools fails with `model_unsupported` on its first turn instead of part-way through a conversation.
 - **Context differs per model.** The meter and the `context_full` check always use the conversation's current model's `context_length`. `/compact` summarises with the conversation's model. When the conversation does not fit that model, the dialog lists the loadout models that are large enough, with their context lengths, and the user picks one for that one summary. There is no automatic choice, in line with the rule against falling back.
-- **Concurrency.** The row lock is per conversation, so turns in different conversations run at the same time. Each writes only its own conversation's messages, and each usage record names the model that made the call. Parallel turns share the account's Nebius rate limit. A 429 is retried by the SDK and then reported as `nebius_rate_limited`. The design adds no client-side cap on parallel turns, and the first real use will show whether one is needed.
+- **Concurrency.** The row lock is per conversation, so turns in different conversations run at the same time. Each writes only its own conversation's messages, and each usage record names the model that made the call. Parallel turns share the provider account's rate limit. A 429 is retried by the SDK and then reported as `provider_rate_limited`. The design adds no client-side cap on parallel turns, and the first real use will show whether one is needed.
 - **The held proposal, the meter, and the compaction state belong to the conversation**, so nothing leaks between conversations.
 
 ### 14. Tests
 
-`FakeNebius` gains streaming responses: text deltas, tool-call deltas, a final `usage` chunk, and a mid-stream error. Backend tests cover the loop, forced tools, the event order, truncation, the context refusal, compaction, usage records and the warning, and ownership on every new endpoint. Frontend tests use Vitest with a mocked `fetch`.
+`FakeProvider` (from `model-providers`) gains streaming responses: text deltas, tool-call deltas, a final `usage` chunk, and a mid-stream error. Backend tests cover the loop, forced tools, the event order, truncation, the context refusal, compaction, usage records and the warning, and ownership on every new endpoint. Frontend tests use Vitest with a mocked `fetch`.
 
 ## Risks / Trade-offs
 
@@ -198,14 +198,14 @@ Nothing in the design shares state between conversations except the user's loado
 - [A reply runs out of room while reasoning] → A high server limit (8,192), a clear `output_limit_reached` message with retry, and a lower effort choice. Empty replies are treated as failures.
 - [Turns take 2 to 4 s, and text starts only after reasoning ends] → A thinking indicator, and a plain greeting takes about 1 s. Users can pick a faster model per conversation.
 - [Tangent detection by the model is unreliable] → Only that one trigger depends on it. The other three are deterministic. A probe decides whether to swap in embeddings.
-- [Several conversations on different models share one Nebius account and its rate limit] → The SDK retries a 429 twice, then the call fails with `nebius_rate_limited` and a retry message. Turns in different conversations run in parallel and each is recorded against its own model.
-- [A conversation's model is removed from the loadout or withdrawn by Nebius] → The conversation keeps its stored model while the key can use it. A withdrawn model gives `model_unavailable`, and the user picks another in the dropdown and carries on with the same history.
+- [Several conversations on different models share one provider account and its rate limit] → The SDK retries a 429 twice, then the call fails with `provider_rate_limited` and a retry message. Turns in different conversations run in parallel and each is recorded against its own model.
+- [A conversation's model is removed from the loadout or withdrawn by the provider] → The conversation keeps its stored model while the key can use it. A withdrawn model gives `model_unavailable`, and the user picks another in the dropdown and carries on with the same history.
 - [Switching to a model with a smaller context] → The meter shows the conversation over the limit, sends get `context_full`, and `/compact` lets the user choose a loadout model large enough to write the summary. Nothing is chosen for them.
 - [A model counts tokens differently, so `last_prompt_tokens` is wrong after a switch] → The stored count is cleared on a model change and the meter shows an estimate until the next answer.
 - [Full history is re-sent every turn, so the cost grows] → The meter, the compact suggestion, the usage graph, and the warning threshold. At Nano prices a 10,000-token history costs about $0.0006 per turn.
 - [A `/compact` summary loses something important] → The user reads and edits it before it takes effect, and the full transcript stays visible.
 - [Storing conversations changes the privacy promise] → Plain-text storage like thoughts, cascade delete with the account, `/delete` and the sidebar delete for single conversations, and usage records that hold no text.
-- [The `context_full` estimate is off] → A too-low estimate lets Nebius refuse instead, and that error is mapped to the same code.
+- [The `context_full` estimate is off] → A too-low estimate lets the provider refuse instead, and that error is mapped to the same code.
 - [Two tabs write to one conversation] → A row lock allows one turn at a time and the second gets `conversation_busy`.
 - [The prototype's code is reused in a new shape] → Only the parts listed in decision 12 come over, each with its existing tests, so the suite guards the reuse.
 
@@ -219,6 +219,6 @@ Nothing in the design shares state between conversations except the user's loado
 ## Open Questions
 
 - The starting values for the temperature default (0.3, the probed value), the recent messages kept by `/compact` (6), and the tool round limit (3) are guesses to tune against real use.
-- What Nebius returns when an account runs out of credit. It is not probed. Until it is known, any client error without its own code reaches the user as `nebius_request_refused` with Nebius's own message.
+- What each provider returns when an account runs out of credit. It is not probed. Until it is known, any client error without its own code reaches the user as `provider_request_refused` with the provider's own message.
 - Whether daily usage buckets should follow the user's time zone rather than UTC.
 - Whether the reasoning text should ever be shown to the user. It is ignored for now.

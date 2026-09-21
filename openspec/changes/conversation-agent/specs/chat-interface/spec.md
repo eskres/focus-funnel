@@ -90,12 +90,12 @@ When the model proposes a thought, the chat SHALL show the title, summary, and t
 
 ### Requirement: Errors are shown in the chat
 
-When a message cannot be answered, the chat SHALL show the reason in place of the answer, and the user's message SHALL stay in the conversation. Errors about the Nebius key SHALL link to the API key settings. Errors about the model, including no model chosen and an unavailable model, SHALL link to the model settings. A full context SHALL advise `/compact`, a model with a larger context, or a new conversation. A reply that ran out of room SHALL offer to try again.
+When a message cannot be answered, the chat SHALL show the reason in place of the answer, and the user's message SHALL stay in the conversation. Errors about a provider key SHALL link to the provider settings. Errors about the model, including no model chosen and an unavailable model, SHALL link to the model settings. A full context SHALL advise `/compact`, a model with a larger context, or a new conversation. A reply that ran out of room SHALL offer to try again.
 
-#### Scenario: No Nebius key saved
+#### Scenario: No provider key saved
 
-- **WHEN** a user with no saved Nebius key sends a message
-- **THEN** the chat shows that a Nebius API key is needed, with a link to the API key settings
+- **WHEN** a user with no saved key for their conversation's provider sends a message
+- **THEN** the chat shows that a key for that provider is needed, with a link to the provider settings
 
 #### Scenario: No model chosen
 

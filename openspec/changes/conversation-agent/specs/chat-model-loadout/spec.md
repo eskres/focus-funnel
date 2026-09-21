@@ -1,6 +1,6 @@
 ## Purpose
 
-Lets each user choose which Nebius models the chat can use and how they are called: one default model, a small loadout to switch between per conversation, a reasoning effort for each, and one temperature. No model is chosen for the user.
+Lets each user choose which models the chat can use, from any provider they have a key for, and how they are called: one default model, a small loadout to switch between per conversation, a reasoning effort for each, and one temperature. No model is chosen for the user.
 
 ## ADDED Requirements
 
@@ -21,7 +21,7 @@ The system SHALL NOT choose a chat model for a user. Until the user picks a defa
 
 ### Requirement: A default model and a loadout
 
-The user SHALL be able to add up to five models from their own model list to a loadout, mark one as the default, and remove models. Each model in the loadout SHALL have an optional reasoning effort. A new conversation SHALL start with the default model and its effort. Removing the default model SHALL require choosing another one, or leave the default unset.
+The user SHALL be able to add up to five models from the model lists of the providers they have keys for, each entry being a provider and a model, to a loadout, mark one as the default, and remove models. Each model in the loadout SHALL have an optional reasoning effort. A new conversation SHALL start with the default model and its effort. Removing the default model SHALL require choosing another one, or leave the default unset.
 
 #### Scenario: Add a model to the loadout
 
@@ -63,34 +63,15 @@ The user SHALL have one temperature setting that applies to every chat call, wit
 - **WHEN** a user opens the model settings
 - **THEN** there is no field for a reply length limit
 
-### Requirement: Model list with feature information
-
-The system SHALL let a logged-in user list the models their own Nebius key can use. For each model the system SHALL report whether the provider says it supports tool calling, says it does not, or says nothing. This information SHALL be advisory and SHALL NOT decide whether a model can be chosen, because a provider may under-report what a model can do.
-
-#### Scenario: Model that reports tool calling
-
-- **WHEN** a user lists models and a model reports tool calling
-- **THEN** it is marked as supporting tool calling
-
-#### Scenario: Model that reports features but not tool calling
-
-- **WHEN** a model reports its features and tool calling is not among them
-- **THEN** it is marked as unconfirmed for tool calling and stays selectable
-
-#### Scenario: Model that reports no features
-
-- **WHEN** a model reports nothing about its features
-- **THEN** it is marked as unknown for tool calling
-
 ### Requirement: A choice is checked before it is saved
 
-The system SHALL check a loadout entry before storing it. The model SHALL appear in the model list for the user's key, and the reasoning effort SHALL be a value the provider documents. Nothing SHALL be stored when any part is refused, and an earlier choice SHALL stay in force.
+The system SHALL check a loadout entry before storing it. The provider SHALL have a saved key for the user, and the model SHALL appear in that provider's model list for that key, and the reasoning effort SHALL be a value the provider documents. Nothing SHALL be stored when any part is refused, and an earlier choice SHALL stay in force.
 
 #### Scenario: Model not in the user's list
 
 - **WHEN** a user saves a model their key cannot use
 - **THEN** nothing is stored
-- **AND** the system responds with error code `model_unknown`, naming the model
+- **AND** the system responds with error code `model_unknown`, naming the provider and the model
 
 #### Scenario: Unconfirmed tool calling
 
@@ -177,8 +158,8 @@ The system SHALL let a user test a model and effort. A test SHALL send a short p
 
 #### Scenario: No key
 
-- **WHEN** a user with no saved Nebius key tests a model
-- **THEN** the system responds with error code `nebius_key_missing`
+- **WHEN** a user with no saved key for the model's provider tests a model
+- **THEN** the system responds with error code `provider_key_missing`
 
 #### Scenario: Settings unchanged
 
@@ -196,7 +177,7 @@ The loadout, default model, and temperature SHALL be owned by the user who saved
 
 ### Requirement: Model settings in the settings page
 
-The settings page SHALL have a model section with the loadout as slots, the default marked, an effort choice for each, the temperature, and a Test action. It SHALL show a hint about what to look for in a chat model, with an example, and SHALL mark models that do not report tool calling as unconfirmed. Without a saved Nebius key it SHALL show that a key is needed, with a link to the API key settings, and empty choosers.
+The settings page SHALL have a model section with the loadout as slots, the default marked, an effort choice for each, the temperature, and a Test action. It SHALL show a hint about what to look for in a chat model, with an example, and SHALL mark models that do not report tool calling as unconfirmed. Without a saved key it SHALL show that a provider key is needed, with a link to the provider settings, and empty choosers.
 
 #### Scenario: First visit
 
@@ -206,7 +187,7 @@ The settings page SHALL have a model section with the loadout as slots, the defa
 #### Scenario: No key
 
 - **WHEN** a user with no saved key opens the model section
-- **THEN** the page shows that a Nebius API key is needed, with a link to the API key settings
+- **THEN** the page shows that a provider key is needed, with a link to the provider settings
 
 #### Scenario: Refused save shown
 
@@ -215,7 +196,7 @@ The settings page SHALL have a model section with the loadout as slots, the defa
 
 ### Requirement: A conversation keeps its own model
 
-A conversation SHALL keep the model and reasoning effort stored with it. Later changes to the default model or to the loadout SHALL NOT change an existing conversation. A conversation whose model is no longer in the loadout SHALL keep using it for as long as the user's key can use it, and the model dropdown SHALL still show it, marked as not in the loadout. A conversation with no model yet SHALL take the default model, with its effort, at its next message and store it. Switching a conversation to another model SHALL set its effort to that model's effort in the loadout, or to none, and SHALL NOT keep an effort the new model is known not to accept.
+A conversation SHALL keep the provider, model, and reasoning effort stored with it. Later changes to the default model or to the loadout SHALL NOT change an existing conversation. A conversation whose model is no longer in the loadout SHALL keep using it for as long as the user's key can use it, and the model dropdown SHALL still show it, marked as not in the loadout. A conversation with no model yet SHALL take the default model, with its effort, at its next message and store it. Switching a conversation to another model SHALL set its effort to that model's effort in the loadout, or to none, and SHALL NOT keep an effort the new model is known not to accept.
 
 #### Scenario: Default changes later
 
@@ -228,7 +209,7 @@ A conversation SHALL keep the model and reasoning effort stored with it. Later c
 - **THEN** the older conversation is still answered by that model
 - **AND** the dropdown shows it, marked as not in the loadout
 
-#### Scenario: Model withdrawn by Nebius
+#### Scenario: Model withdrawn by the provider
 
 - **WHEN** an older conversation's model is no longer available to the key
 - **THEN** the system responds with error code `model_unavailable`, naming the model

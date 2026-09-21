@@ -180,26 +180,26 @@ When the conversation's model cannot be used, the system SHALL fail the message 
 
 #### Scenario: Model withdrawn
 
-- **WHEN** Nebius reports that the conversation's model does not exist or is not available to the key
+- **WHEN** the provider reports that the conversation's model does not exist or is not available to the key
 - **THEN** the system responds with error code `model_unavailable`, naming the model
 - **AND** no other model is called
 
-#### Scenario: Nebius cannot be reached
+#### Scenario: The provider cannot be reached
 
-- **WHEN** a call times out, cannot connect, or gets a server error from Nebius
-- **THEN** the system responds with error code `nebius_unreachable`
+- **WHEN** a call times out, cannot connect, or gets a server error from the provider
+- **THEN** the system responds with error code `provider_unreachable`
 - **AND** no other model is called
 
-#### Scenario: Nebius rate limit
+#### Scenario: Provider rate limit
 
-- **WHEN** Nebius refuses a call because the account is sending too many requests
-- **THEN** the system responds with error code `nebius_rate_limited`, saying to wait and try again
+- **WHEN** the provider refuses a call because the account is sending too many requests
+- **THEN** the system responds with error code `provider_rate_limited`, saying to wait and try again
 - **AND** no other model is called
 
-#### Scenario: Nebius refuses the call for another reason
+#### Scenario: The provider refuses the call for another reason
 
-- **WHEN** Nebius refuses a call with a client error that has no other code
-- **THEN** the system responds with error code `nebius_request_refused` carrying Nebius's message
+- **WHEN** the provider refuses a call with a client error that has no other code
+- **THEN** the system responds with error code `provider_request_refused` carrying the provider's message
 - **AND** no other model is called
 
 #### Scenario: Model rejects tools

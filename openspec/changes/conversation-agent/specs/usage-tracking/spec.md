@@ -1,12 +1,12 @@
 ## Purpose
 
-Shows the user what their chat costs. Every model call is recorded with its tokens and an estimated cost, and settings shows the spend over time and can warn when it passes a limit the user sets. The real account balance is not shown, because Nebius does not offer it through an API key.
+Shows the user what their chat costs. Every model call is recorded with its tokens and an estimated cost, and settings shows the spend over time and can warn when it passes a limit the user sets. The real account balance is not shown, because providers generally do not offer it through an API key, and Nebius does not.
 
 ## ADDED Requirements
 
 ### Requirement: Every model call is recorded
 
-The system SHALL record, for every model call it makes for a user, the model, the prompt tokens, the completion tokens, the time, and the conversation, when there is one. It SHALL record an estimated cost calculated from the per-token prices the provider lists for that model at the time of the call. When the provider reports no price, the cost SHALL be recorded as unknown. A record SHALL NOT hold any message text. A call that fails without a reported token count SHALL NOT be recorded.
+The system SHALL record, for every model call it makes for a user, the provider, the model, the prompt tokens, the completion tokens, the time, and the conversation, when there is one. It SHALL record an estimated cost calculated from the per-token prices the provider lists for that model at the time of the call. When the provider reports no price, the cost SHALL be recorded as unknown. A record SHALL NOT hold any message text. A call that fails without a reported token count SHALL NOT be recorded.
 
 #### Scenario: A chat answer
 
@@ -31,7 +31,7 @@ The system SHALL record, for every model call it makes for a user, the model, th
 
 ### Requirement: Usage is shown as a graph in settings
 
-The settings page SHALL show the user's estimated daily spend as a graph, for a period the user can choose, with the spend by model and the total for the current month. It SHALL be labelled an estimate, based on list prices, for calls made through this app. It SHALL NOT show an account balance, and SHALL link to the Nebius console for it. Calls with an unknown cost SHALL be counted in tokens and marked.
+The settings page SHALL show the user's estimated daily spend as a graph, for a period the user can choose, with the spend by model and the total for the current month. It SHALL be labelled an estimate, based on list prices, for calls made through this app. It SHALL NOT show an account balance, and SHALL link to the provider's console for it when the provider has one. Calls with an unknown cost SHALL be counted in tokens and marked.
 
 #### Scenario: Spend over time
 
@@ -56,7 +56,7 @@ The settings page SHALL show the user's estimated daily spend as a graph, for a 
 #### Scenario: Balance is not shown
 
 - **WHEN** a user looks for their balance
-- **THEN** the section says the balance is only in the Nebius console, with a link
+- **THEN** the section says the balance is only in the provider's console, with a link when one is known
 
 ### Requirement: A warning threshold
 

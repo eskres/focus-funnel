@@ -1,3 +1,5 @@
+> Depends on `model-providers`, which must land first: it provides provider keys, the provider client, and the model list.
+
 ## Why
 
 A first design routed every message through a router model to one of four gates, each with its own model settings. A prototype of it was built and measured on a real account. It is not part of this change and was never pushed; it is kept on a local branch. The router took about 1 s for a clear message and 4 to 5 s for an unclear one, and it had no memory of the conversation. A reasoning model could also spend its whole token budget thinking and return nothing. Every message paid for context twice, once in the router and once in the gate.
@@ -10,10 +12,10 @@ One model that sees the whole conversation and has tools can answer, ask a quest
 - Add slash commands: `/push` and `/pull` make the model use that tool. `/explore` starts or continues a discussion. A message with no command is a normal turn in the conversation. `/explore` is the default mode, so the model may ask a question or reply in plain text.
 - Store conversations and their messages per user. Add a sidebar on the left of the chat that lists conversations, newest first, with resume, archive, and restore from archive. `/delete` deletes the current conversation for good after a confirmation, and nothing in the product ever suggests it.
 - Make every discussion end in a proposal to file a thought. The model proposes a short summary at a fitting point, and the user can expand or trim it before anything is saved. If the user carries on, the proposal is held and not repeated. It comes back when the conversation veers onto a different topic, when the user archives or leaves, and on `/compact`. Coming back to an old conversation does not bring it back.
-- Settings: one default chat model, a loadout of other models the user may switch to, and a reasoning effort for each. Temperature is a setting. The maximum reply length is not: the server applies its own cap and says plainly when a reply hits it. Users list the models their own Nebius key can use, with advisory feature information.
+- Settings: one default chat model, a loadout of other models the user may switch to, and a reasoning effort for each. Temperature is a setting. The maximum reply length is not: the server applies its own cap and says plainly when a reply hits it. Models come from the providers the user has keys for (see `model-providers`), so a loadout entry is a provider and a model.
 - Add a model and effort dropdown to the input box. The choice is saved with the conversation, so several conversations can use different models at the same time. A new conversation starts from the default, and later changes to the default or the loadout do not change an existing conversation. Which efforts a model accepts comes from server configuration, because the model list does not say.
 - Add a context meter and a soft limit. Past the limit, the chat suggests `/compact`. `/compact` replaces older turns with an editable summary and keeps the latest turns as they are.
-- Record the tokens and estimated cost of every model call. Settings shows daily spend as a graph, spend by model, and the month's total, and lets the user set a warning threshold. Nebius has no balance or usage API for an inference key, so the account balance is not shown; settings links to the Nebius console.
+- Record the tokens and estimated cost of every model call. Settings shows daily spend as a graph, spend by model, and the month's total, and lets the user set a warning threshold. Nebius has no balance or usage API for an inference key, and the same is assumed of other providers until each is checked, so the account balance is not shown; settings links to the provider's console when one is known.
 - Run tools in a tool-calling loop over the stream. Until `thought-storage` and `push-and-pull-gates` land, the search tool and the confirm step answer that they are not available yet.
 - Add a chat screen that streams answers through the existing proxy over server-sent events, with a thinking indicator, tool indications, and errors that link to the place that fixes them.
 - **Replaces `gate-framework`.** That planned change is removed, because this design supersedes it.
@@ -31,13 +33,13 @@ One model that sees the whole conversation and has tools can answer, ask a quest
 
 ### Modified Capabilities
 
-- `nebius-api-key`: Adds listing the models a user's own key can use.
+None. Provider keys and the model list are in `model-providers`.
 
 ## Impact
 
-- **Backend:** new `conversations`, `messages`, `usage_events`, `chat_models`, and `user_settings` tables in one migration; a tool-calling loop; `/compact`; usage recording; conversation, model settings, and usage endpoints; a model list endpoint; a `chat.yaml` config file that includes the reasoning effort table.
+- **Backend:** new `conversations`, `messages`, `usage_events`, `chat_models`, and `user_settings` tables in one migration; a tool-calling loop; `/compact`; usage recording; conversation, model settings, and usage endpoints; a `chat.yaml` config file that includes the reasoning effort table.
 - **Frontend:** the chat screen, conversation sidebar, composer dropdown, context meter, held-proposal and summary editor, and in settings the model section, usage graph, and warning setting.
-- **API:** `POST /api/chat` takes a conversation id and returns conversation, tool, proposal, usage, and notice events. New error codes: `model_not_set`, `model_unknown`, `model_unsupported`, `model_unavailable`, `context_full`, `conversation_busy`, `nebius_rate_limited`, and `nebius_request_refused`.
+- **API:** `POST /api/chat` takes a conversation id and returns conversation, tool, proposal, usage, and notice events. New error codes: `model_not_set`, `model_unknown`, `model_unsupported`, `model_unavailable`, `context_full`, and `conversation_busy`. The provider error codes come from `model-providers`.
 - **Data:** `thought-storage`'s "delete my data" must also delete conversations, messages, and usage records.
 - **Other planned changes:** `explore-gate` mostly merges into this change, and `push-and-pull-gates` and `thought-storage` need updating for the tools. Their proposals and the `openspec/config.yaml` project context still describe a router and per-gate models. This change updates them in its last task group.
 - **Dependencies:** `pyyaml` for the config file. No frontend dependency: charts are small SVG components.

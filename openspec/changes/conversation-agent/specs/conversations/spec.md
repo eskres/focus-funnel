@@ -6,7 +6,7 @@ Keeps a user's chats so they can leave one and come back to it. A sidebar lists 
 
 ### Requirement: Conversations are stored per user
 
-The system SHALL store each conversation with its messages, in order, for the user who started it. A conversation SHALL have a title, a time of last activity, an archived state, and the model and reasoning effort it uses. The first message a user sends with no conversation open SHALL start a new conversation. A conversation SHALL be readable and changeable only by its owner: another user's conversation SHALL respond as if it does not exist.
+The system SHALL store each conversation with its messages, in order, for the user who started it. A conversation SHALL have a title, a time of last activity, an archived state, and the provider, model, and reasoning effort it uses. The first message a user sends with no conversation open SHALL start a new conversation. A conversation SHALL be readable and changeable only by its owner: another user's conversation SHALL respond as if it does not exist.
 
 #### Scenario: First message starts a conversation
 
