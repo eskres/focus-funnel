@@ -33,10 +33,10 @@
 
 ## 7. Frontend
 
-- [ ] 7.1 Rename the frontend error codes and classes and turn the Nebius key alert into a provider key alert naming the provider. Check with Vitest that each new code becomes its error type and that the alert shows the provider name and a link to the provider settings
-- [ ] 7.2 Replace the API key settings section with the providers section: one card per provider with status, the key field, the "Get a key" link, and a Test. Check with Vitest against mocked responses that every preset card renders, that saving sends the key, that a refused key shows its reason and keeps the earlier state, and that a saved key shows the last 4 characters and the date
-- [ ] 7.3 Show the data-handling notice before the first save and let the user read it later. Check with Vitest that saving is blocked until the notice is accepted and that the notice is available afterwards
-- [ ] 7.4 Add the custom provider card with a base URL field, hidden when custom providers are off. Check with Vitest that the field shows and sends the URL and that the card is absent when the server says custom is off
+- [x] 7.1 Rename the frontend error codes and classes and turn the Nebius key alert into a provider key alert naming the provider. Check with Vitest that each new code becomes its error type and that the alert shows the provider name and a link to the provider settings
+- [x] 7.2 Replace the API key settings section with the providers section: one card per provider with status, the key field, the "Get a key" link, and a Test. Check with Vitest against mocked responses that every preset card renders, that saving sends the key, that a refused key shows its reason and keeps the earlier state, and that a saved key shows the last 4 characters and the date
+- [x] 7.3 Show the data-handling notice before the first save and let the user read it later. Check with Vitest that saving is blocked until the notice is accepted and that the notice is available afterwards
+- [x] 7.4 Add the custom provider card with a base URL field, hidden when custom providers are off. Check with Vitest that the field shows and sends the URL and that the card is absent when the server says custom is off
 
 ## 8. Cleanup and system check
 

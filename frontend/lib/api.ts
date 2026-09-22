@@ -6,10 +6,12 @@ export type ApiErrorCode =
   | "unauthenticated"
   | "validation_error"
   | "not_found"
-  | "nebius_key_missing"
-  | "nebius_key_invalid"
-  | "nebius_key_rejected"
-  | "nebius_unreachable"
+  | "provider_key_missing"
+  | "provider_key_invalid"
+  | "provider_key_rejected"
+  | "provider_unreachable"
+  | "provider_rate_limited"
+  | "provider_request_refused"
   | "backend_unreachable"
   | "internal_error";
 
@@ -28,10 +30,12 @@ export class ApiError extends Error {
 export class UnauthenticatedError extends ApiError {}
 export class ValidationError extends ApiError {}
 export class NotFoundError extends ApiError {}
-export class NebiusKeyMissingError extends ApiError {}
-export class NebiusKeyInvalidError extends ApiError {}
-export class NebiusKeyRejectedError extends ApiError {}
-export class NebiusUnreachableError extends ApiError {}
+export class ProviderKeyMissingError extends ApiError {}
+export class ProviderKeyInvalidError extends ApiError {}
+export class ProviderKeyRejectedError extends ApiError {}
+export class ProviderUnreachableError extends ApiError {}
+export class ProviderRateLimitedError extends ApiError {}
+export class ProviderRequestRefusedError extends ApiError {}
 export class BackendUnreachableError extends ApiError {}
 export class InternalError extends ApiError {}
 
@@ -39,10 +43,12 @@ const errorClasses: Record<ApiErrorCode, typeof ApiError> = {
   unauthenticated: UnauthenticatedError,
   validation_error: ValidationError,
   not_found: NotFoundError,
-  nebius_key_missing: NebiusKeyMissingError,
-  nebius_key_invalid: NebiusKeyInvalidError,
-  nebius_key_rejected: NebiusKeyRejectedError,
-  nebius_unreachable: NebiusUnreachableError,
+  provider_key_missing: ProviderKeyMissingError,
+  provider_key_invalid: ProviderKeyInvalidError,
+  provider_key_rejected: ProviderKeyRejectedError,
+  provider_unreachable: ProviderUnreachableError,
+  provider_rate_limited: ProviderRateLimitedError,
+  provider_request_refused: ProviderRequestRefusedError,
   backend_unreachable: BackendUnreachableError,
   internal_error: InternalError,
 };
@@ -72,7 +78,7 @@ async function toApiError(response: Response): Promise<ApiError> {
 }
 
 /**
- * Calls a frontend API route (for example `/api/settings/api-key`) and returns
+ * Calls a frontend API route (for example `/api/providers`) and returns
  * the parsed JSON body, or `undefined` for an empty response. Throws an
  * `ApiError` subclass when the response is not OK.
  */

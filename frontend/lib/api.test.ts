@@ -5,7 +5,7 @@ import {
   apiFetch,
   BackendUnreachableError,
   InternalError,
-  NebiusKeyMissingError,
+  ProviderKeyMissingError,
   UnauthenticatedError,
 } from "./api";
 
@@ -27,19 +27,19 @@ afterEach(() => {
 });
 
 describe("apiFetch", () => {
-  it("turns nebius_key_missing into NebiusKeyMissingError", async () => {
+  it("turns provider_key_missing into ProviderKeyMissingError", async () => {
     mockFetch(
       jsonResponse(400, {
-        error: { code: "nebius_key_missing", message: "Add a Nebius API key." },
+        error: { code: "provider_key_missing", message: "Add a Nebius API key." },
       }),
     );
 
     const error = await apiFetch("/api/chat").catch((e: unknown) => e);
 
-    expect(error).toBeInstanceOf(NebiusKeyMissingError);
+    expect(error).toBeInstanceOf(ProviderKeyMissingError);
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({
-      code: "nebius_key_missing",
+      code: "provider_key_missing",
       message: "Add a Nebius API key.",
       status: 400,
     });
@@ -100,14 +100,14 @@ describe("apiFetch", () => {
   it("returns parsed JSON and sends JSON bodies", async () => {
     const fetchMock = mockFetch(jsonResponse(200, { saved: false }));
 
-    const result = await apiFetch<{ saved: boolean }>("/api/settings/api-key", {
+    const result = await apiFetch<{ saved: boolean }>("/api/providers/nebius/key", {
       method: "PUT",
-      body: JSON.stringify({ api_key: "k" }),
+      body: JSON.stringify({ key: "k" }),
     });
 
     expect(result).toEqual({ saved: false });
     const [path, init] = fetchMock.mock.calls[0];
-    expect(path).toBe("/api/settings/api-key");
+    expect(path).toBe("/api/providers/nebius/key");
     expect(new Headers(init.headers).get("Content-Type")).toBe(
       "application/json",
     );
@@ -117,7 +117,7 @@ describe("apiFetch", () => {
     mockFetch(new Response(null, { status: 204 }));
 
     await expect(
-      apiFetch("/api/settings/api-key", { method: "DELETE" }),
+      apiFetch("/api/providers/nebius/key", { method: "DELETE" }),
     ).resolves.toBeUndefined();
   });
 });
