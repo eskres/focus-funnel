@@ -14,6 +14,15 @@ def test_valid_environment_loads(settings_env):
     assert len(settings.key_encryption_key) == 32
 
 
+def test_allow_custom_provider_defaults_on(settings_env):
+    assert Settings().allow_custom_provider is True
+
+
+def test_allow_custom_provider_can_be_turned_off(settings_env):
+    settings_env.setenv("ALLOW_CUSTOM_PROVIDER", "false")
+    assert Settings().allow_custom_provider is False
+
+
 @pytest.mark.parametrize(
     "name", ["DATABASE_URL", "KEY_ENCRYPTION_KEY", "AUTH0_DOMAIN", "AUTH0_AUDIENCE"]
 )

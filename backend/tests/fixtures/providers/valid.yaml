@@ -1,0 +1,19 @@
+providers:
+  nebius:
+    label: Nebius Token Factory
+    base_url: https://api.tokenfactory.nebius.com/v1/
+    key_url: https://tokenfactory.nebius.com/project/api-keys
+    notice: Nebius does not use your prompts or outputs to train models.
+    key_required: true
+    capabilities:
+      model_list: { prices: true, context_length: true, features: true }
+      stream_usage: final_chunk
+  local:
+    label: Local Test Server
+    base_url: http://localhost:11434/v1/
+    key_url: https://example.test/keys
+    notice: Runs on your own machine; nothing leaves it.
+    key_required: false
+    capabilities:
+      model_list: { prices: false, context_length: false, features: false }
+      stream_usage: none

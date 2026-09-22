@@ -1,0 +1,24 @@
+# Provider presets: base URL, where to get a key, the data-handling notice, and
+# what each provider's model list and streaming reports. No key lives here.
+#
+# capabilities.model_list says which fields the provider's model list reports.
+# capabilities.stream_usage says how the provider reports token usage in a
+# streamed chat: final_chunk (one chunk with no choices, after
+# stream_options.include_usage), incremental (on every chunk), or none.
+#
+# A preset ships only once it has been probed with a real key (see
+# openspec/changes/model-providers/design.md, decision 10).
+
+providers:
+  nebius:
+    label: Nebius Token Factory
+    base_url: https://api.tokenfactory.nebius.com/v1/
+    key_url: https://tokenfactory.nebius.com/project/api-keys
+    notice: >-
+      Nebius does not use your prompts or outputs to train models. You can
+      turn on Zero Data Retention in your Nebius account profile for stronger
+      guarantees.
+    key_required: true
+    capabilities:
+      model_list: { prices: true, context_length: true, features: true }
+      stream_usage: final_chunk

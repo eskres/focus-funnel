@@ -1,35 +1,35 @@
 ## 1. Probes
 
-- [ ] 1.1 Probe NVIDIA, OpenRouter, and Groq with a real key each: list models, stream a chat, call a tool, and read streamed usage. Check by recording, in `design.md` decision 10 and in `providers.yaml`, the model list fields each reports, its tool calling result, and how it reports usage
-- [ ] 1.2 Probe a local OpenAI-compatible server (Ollama) with no key. Check by recording whether its model list, tool calling, and streamed usage work and what the list reports
+- [ ] 1.1 Probe NVIDIA and OpenRouter with a real key each (Groq dropped): list models, stream a chat, call a tool, and read streamed usage. Check by recording, in `design.md` decision 10 and in `providers.yaml`, the model list fields each reports, its tool calling result, and how it reports usage
+- [x] 1.2 Probe a local OpenAI-compatible server (Ollama) with no key. Check by recording whether its model list, tool calling, and streamed usage work and what the list reports
 
 ## 2. Provider configuration
 
-- [ ] 2.1 Add `providers.yaml` and its loader with `PROVIDERS_CONFIG_PATH` support and validation, loaded in the lifespan. Check with pytest fixture files that a valid file loads, that a missing base URL, an unknown `stream_usage` value, a missing capability, and a duplicate id each fail at load naming the preset, that the file holds no key, and that the app refuses to start on an invalid file
-- [ ] 2.2 Add the presets for Nebius, NVIDIA, OpenRouter, and Groq with the results of task 1.1, and the `custom` provider rules. Check with pytest that every preset loads and that `custom` has the cautious capability set
-- [ ] 2.3 Add the `ALLOW_CUSTOM_PROVIDER` setting to the app settings. Check with pytest that it defaults to on and that turning it off is read
+- [x] 2.1 Add `providers.yaml` and its loader with `PROVIDERS_CONFIG_PATH` support and validation, loaded in the lifespan. Check with pytest fixture files that a valid file loads, that a missing base URL, an unknown `stream_usage` value, a missing capability, and a duplicate id each fail at load naming the preset, that the file holds no key, and that the app refuses to start on an invalid file
+- [ ] 2.2 Add the presets for Nebius, NVIDIA, and OpenRouter (Groq dropped) with the results of task 1.1, and the `custom` provider rules. Check with pytest that every preset loads and that `custom` has the cautious capability set
+- [x] 2.3 Add the `ALLOW_CUSTOM_PROVIDER` setting to the app settings. Check with pytest that it defaults to on and that turning it off is read
 
 ## 3. Data
 
-- [ ] 3.1 Add the `ProviderKey` model and one migration that renames `nebius_api_keys`, adds `provider_id` (default `nebius`) and `base_url`, and keeps existing rows, then reset any local database that cannot run it. Check that `alembic upgrade head` then `downgrade -1` runs cleanly on an empty SQLite database and on the compose Postgres, that a Nebius row survives the upgrade as the `nebius` provider, and that there is a single Alembic head
-- [ ] 3.2 Bind the ciphertext to the provider id as well as the user. Check with pytest that a record copied to another user, or to another provider of the same user, fails to decrypt
+- [x] 3.1 Add the `ProviderKey` model and one migration that renames `nebius_api_keys`, adds `provider_id` (default `nebius`) and `base_url`, and keeps existing rows, then reset any local database that cannot run it. Check that `alembic upgrade head` then `downgrade -1` runs cleanly on an empty SQLite database and on the compose Postgres, that a Nebius row survives the upgrade as the `nebius` provider, and that there is a single Alembic head
+- [x] 3.2 Bind the ciphertext to the provider id as well as the user. Check with pytest that a record copied to another user, or to another provider of the same user, fails to decrypt
 
 ## 4. Client and errors
 
-- [ ] 4.1 Bring the model-missing case and the `FakeNebius` double over from `backup/gate-build`, renaming to `FakeProvider`, and replace `client_for()` with the per-provider builder. Check with pytest that the client uses the provider's base URL and that user's key, that a keyless provider gets a placeholder key, and that another user's key is never used
-- [ ] 4.2 Rename `map_nebius_error()` to `map_provider_error()` and the error codes to `provider_key_missing`, `provider_key_invalid`, `provider_key_rejected`, `provider_unreachable`, `provider_rate_limited`, and `provider_request_refused`. Check with pytest that each maps as specified, that a 429 maps to `provider_rate_limited`, and that another unmapped client error carries the provider's message
+- [x] 4.1 Bring the model-missing case and the `FakeNebius` double over from `backup/gate-build`, renaming to `FakeProvider`, and replace `client_for()` with the per-provider builder. Check with pytest that the client uses the provider's base URL and that user's key, that a keyless provider gets a placeholder key, and that another user's key is never used
+- [x] 4.2 Rename `map_nebius_error()` to `map_provider_error()` and the error codes to `provider_key_missing`, `provider_key_invalid`, `provider_key_rejected`, `provider_unreachable`, `provider_rate_limited`, and `provider_request_refused`. Check with pytest that each maps as specified, that a 429 maps to `provider_rate_limited`, and that another unmapped client error carries the provider's message
 
 ## 5. Provider keys API
 
-- [ ] 5.1 Add `GET /api/providers` listing presets, the custom provider, key status, and notices. Check with pytest that every preset appears with its key link and notice and that key status is per user
-- [ ] 5.2 Add `PUT` and `DELETE /api/providers/{id}/key` with the check before saving. Check with pytest for a valid key, an invalid key giving `provider_key_invalid`, an unreachable provider giving `provider_unreachable` with nothing stored, an empty key, a replacement that fails leaving the old key, a delete leaving other providers alone, and a keyless local provider saved with no key
-- [ ] 5.3 Add the custom provider rules: `base_url` accepted only for `custom`, only `http` and `https`, refused when custom providers are off, and preset URLs unchangeable. Check with pytest for each, with `validation_error` on refusal
-- [ ] 5.4 Check that keys never leak. Check with pytest that no response and no log entry holds a full key, that the key status holds at most 4 characters, and that two users' keys for one provider never mix
+- [x] 5.1 Add `GET /api/providers` listing presets, the custom provider, key status, and notices. Check with pytest that every preset appears with its key link and notice and that key status is per user
+- [x] 5.2 Add `PUT` and `DELETE /api/providers/{id}/key` with the check before saving. Check with pytest for a valid key, an invalid key giving `provider_key_invalid`, an unreachable provider giving `provider_unreachable` with nothing stored, an empty key, a replacement that fails leaving the old key, a delete leaving other providers alone, and a keyless local provider saved with no key
+- [x] 5.3 Add the custom provider rules: `base_url` accepted only for `custom`, only `http` and `https`, refused when custom providers are off, and preset URLs unchangeable. Check with pytest for each, with `validation_error` on refusal
+- [x] 5.4 Check that keys never leak. Check with pytest that no response and no log entry holds a full key, that the key status holds at most 4 characters, and that two users' keys for one provider never mix
 
 ## 6. Model list
 
-- [ ] 6.1 Bring the feature classifier and model list mapping and their tests over from `backup/gate-build`, with `gate` removed from names. Check that the brought-over tests pass
-- [ ] 6.2 Add `GET /api/providers/{id}/models` reading only the fields a provider's capabilities say it reports. Check with pytest against `FakeProvider` that prices and context length are returned when reported and absent otherwise, that features are `supported`, `unconfirmed`, or `unknown`, that a missing key gives `provider_key_missing`, a rejected key `provider_key_rejected`, and an unreachable provider `provider_unreachable` with no partial list, and that two users' lists use their own keys
+- [x] 6.1 Bring the feature classifier and model list mapping and their tests over from `backup/gate-build`, with `gate` removed from names. Check that the brought-over tests pass
+- [x] 6.2 Add `GET /api/providers/{id}/models` reading only the fields a provider's capabilities say it reports. Check with pytest against `FakeProvider` that prices and context length are returned when reported and absent otherwise, that features are `supported`, `unconfirmed`, or `unknown`, that a missing key gives `provider_key_missing`, a rejected key `provider_key_rejected`, and an unreachable provider `provider_unreachable` with no partial list, and that two users' lists use their own keys
 
 ## 7. Frontend
 

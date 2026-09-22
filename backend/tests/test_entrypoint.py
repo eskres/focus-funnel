@@ -17,7 +17,7 @@ ENTRYPOINT = BACKEND_DIR / "docker-entrypoint.sh"
 SERVER_COMMAND = ["python", "-c", "print('SERVER STARTED')"]
 SERVER_MARKER = "SERVER STARTED"
 
-MIGRATED_TABLES = {"users", "nebius_api_keys", "alembic_version"}
+MIGRATED_TABLES = {"users", "provider_keys", "alembic_version"}
 
 
 def run_entrypoint(database_url: str) -> subprocess.CompletedProcess[str]:

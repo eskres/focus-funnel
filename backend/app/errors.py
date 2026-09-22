@@ -16,10 +16,12 @@ class ErrorCode:
     NOT_FOUND = "not_found"
     SERVICE_UNAVAILABLE = "service_unavailable"
     INTERNAL_ERROR = "internal_error"
-    NEBIUS_KEY_MISSING = "nebius_key_missing"
-    NEBIUS_KEY_INVALID = "nebius_key_invalid"
-    NEBIUS_KEY_REJECTED = "nebius_key_rejected"
-    NEBIUS_UNREACHABLE = "nebius_unreachable"
+    PROVIDER_KEY_MISSING = "provider_key_missing"
+    PROVIDER_KEY_INVALID = "provider_key_invalid"
+    PROVIDER_KEY_REJECTED = "provider_key_rejected"
+    PROVIDER_UNREACHABLE = "provider_unreachable"
+    PROVIDER_RATE_LIMITED = "provider_rate_limited"
+    PROVIDER_REQUEST_REFUSED = "provider_request_refused"
 
 
 class ApiError(Exception):

@@ -6,7 +6,7 @@ A gate-based prototype (kept on the local branch `backup/gate-build`, never push
 
 Findings that shape the decisions:
 
-- Nebius, NVIDIA, OpenRouter, and Groq all offer OpenAI-compatible endpoints, per their own documentation as reported by third-party roundups. Ollama, LM Studio, and vLLM do too.
+- Nebius, NVIDIA, and OpenRouter all offer OpenAI-compatible endpoints, per their own documentation as reported by third-party roundups. Ollama, LM Studio, and vLLM do too.
 - Nebius's model list, fetched with `?verbose=true`, includes per-token prices, `context_length`, and `supported_features`. Other providers report fewer or different fields. Which ones is unverified until each is probed.
 - Nebius returns stream usage only when `stream_options.include_usage` is set, on a final chunk with no choices. One source says NVIDIA reports usage incrementally, which would break a reader that expects one final chunk. This is unverified.
 - NVIDIA's free key is under trial terms that allow evaluation, not production use, and its notice says use is logged. Google and Mistral free tiers use prompts for training. Notices differ per provider.
@@ -104,6 +104,14 @@ The API key settings section becomes a providers section: one card per provider 
 
 For each of NVIDIA, OpenRouter, and Groq, a task lists models, streams a chat, and checks tool calling and streamed usage with a real key, and records the result in `providers.yaml`. A preset whose usage arrives incrementally needs the stream reader to sum or take the last value, which `conversation-agent` implements from the `stream_usage` capability. A preset that fails tool calling is shipped with that noted, or not shipped.
 
+Groq is dropped from this change (2026-09-22, user decision): only Nebius, NVIDIA, and OpenRouter ship as presets. NVIDIA and OpenRouter still need a real-key probe before their capabilities can be anything but the cautious default; until then they ship with the same cautious capability set as `custom` (nothing reported, `stream_usage: final_chunk`), which is honest per the risk mitigation below (missing fields degrade to unknown, never wrong).
+
+**Ollama probe (2026-09-22, local `mistral-small3.2` via `ollama serve`, no key, `PROVIDERS_CONFIG_PATH` not involved since Ollama is exercised through the `custom` provider):**
+
+- Model list (`GET /v1/models`) reports only `id`, `object`, `created`, `owned_by` — no `context_length`, no `pricing`, no `supported_features`. Confirms the `custom` provider's cautious `model_list` capabilities (nothing reported).
+- Streamed chat (`stream_options.include_usage: true`) never sends a usage chunk, never sends a chunk with `finish_reason` set, and never sends `data: [DONE]` — the stream just ends after the last content chunk. Confirms `stream_usage: final_chunk` as the right cautious default (a reader waiting on a final usage-bearing chunk degrades to "unknown cost" instead of hanging, since the connection closing ends the read either way).
+- Tool calling: inconclusive. A request with a `tools` array against the only locally available model (`mistral-small3.2`, 15GB, CPU inference) did not return a response within 6.7 minutes (`HTTP_STATUS:000`, 0 bytes). This is model/hardware speed, not a signal about Ollama's OpenAI-compat tool-calling support one way or the other; the `custom` provider's capabilities don't claim tool-calling support regardless, so this doesn't change the shipped config.
+
 ## Risks / Trade-offs
 
 - [A provider's model list has different fields than assumed] → Capabilities are per provider and verified by probe. Missing fields degrade to unknown, never to a wrong value.
@@ -121,4 +129,5 @@ For each of NVIDIA, OpenRouter, and Groq, a task lists models, streams a chat, a
 
 ## Open Questions
 
-- Whether OpenRouter and Groq should ship as presets at first or only after their probes show clean tool calling and usage. The probe decides.
+- Whether OpenRouter should ship as a preset at first or only after its probe shows clean tool calling and usage. The probe decides. (Groq is dropped from this change; see decision 10.)
+- NVIDIA and OpenRouter presets currently ship with the cautious capability set, unverified, because no real key was available during implementation (2026-09-22). Update their `providers.yaml` capabilities once probed with a real key, per decision 10.

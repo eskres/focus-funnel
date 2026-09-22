@@ -2,11 +2,11 @@
 
 ## Why
 
-The app talks to one provider, Nebius, with one saved key. Users want a free NVIDIA key to try the app, OpenRouter or Groq as alternatives, and local models such as Ollama for private and air-gapped self-hosting. Every one of those speaks an OpenAI-compatible API, so most of the work is a per-provider base URL and key, plus honest handling of the differences: what the model list reports, how token usage is reported, and how each provider treats prompts. There are no users yet and `conversation-agent` has not started storing model choices, so this is the cheapest moment to generalise.
+The app talks to one provider, Nebius, with one saved key. Users want a free NVIDIA key to try the app, OpenRouter as an alternative, and local models such as Ollama for private and air-gapped self-hosting. Every one of those speaks an OpenAI-compatible API, so most of the work is a per-provider base URL and key, plus honest handling of the differences: what the model list reports, how token usage is reported, and how each provider treats prompts. There are no users yet and `conversation-agent` has not started storing model choices, so this is the cheapest moment to generalise.
 
 ## What Changes
 
-- Replace the single Nebius key with one key per user per provider. A provider is an OpenAI-compatible endpoint. The server ships presets for Nebius, NVIDIA, OpenRouter, and Groq, and offers a custom provider with a base URL for Ollama, LM Studio, or vLLM.
+- Replace the single Nebius key with one key per user per provider. A provider is an OpenAI-compatible endpoint. The server ships presets for Nebius, NVIDIA, and OpenRouter, and offers a custom provider with a base URL for Ollama, LM Studio, or vLLM.
 - Keep the key rules as they are today: the key is checked with the provider before it is stored, stored encrypted, never returned in full, and used only on the server for that user.
 - Hold each provider's differences in server configuration: its base URL, where to get a key, a data-handling notice, what its model list reports (prices, context length, features), and how it reports token usage in a stream. A preset ships only after it has been probed.
 - List the models a user's key can use, per provider, with advisory feature information (moved here from the earlier Nebius-only design).
