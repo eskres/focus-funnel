@@ -42,5 +42,5 @@
 
 - [x] 8.1 Remove `/api/settings/api-key`, `NEBIUS_BASE_URL`, the `nebius_*` error codes, and the old Nebius key screen and its tests. Check that a search of `backend/` and `frontend/` for `nebius_` finds only the Nebius preset and its config, and that the suites pass
 - [x] 8.2 Run the backend suite on SQLite and on the compose Postgres, and `npm run test`, `npm run lint`, and `npm run build` in `frontend/`. Check that all pass
-- [ ] 8.3 On a fresh `docker compose up --build`, save a key for Nebius and one other preset, list each provider's models, and check that a wrong key shows `provider_key_invalid` with the provider's name and that a stored Nebius key from before the upgrade still works
-- [ ] 8.4 With an Ollama server and no key, save the custom provider and list its models. Check that it works, and that turning `ALLOW_CUSTOM_PROVIDER` off refuses the same request
+- [x] 8.3 On a fresh `docker compose up --build`, save a key for Nebius and one other preset, list each provider's models, and check that a wrong key shows `provider_key_invalid` with the provider's name and that a stored Nebius key from before the upgrade still works
+- [x] 8.4 With an Ollama server and no key, save the custom provider and list its models. Check that it works, and that turning `ALLOW_CUSTOM_PROVIDER` off refuses the same request
