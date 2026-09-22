@@ -62,7 +62,23 @@ def test_missing_key_url_fails_naming_the_preset():
 def test_shipped_providers_yaml_loads():
     """The real config file the app starts with must itself be valid."""
     config = load_providers_config()
-    assert "nebius" in config.providers
+    assert set(config.providers) == {"nebius", "nvidia", "openrouter"}
+
+
+def test_shipped_nvidia_and_openrouter_have_probed_capabilities():
+    config = load_providers_config()
+
+    nvidia = config.get("nvidia")
+    assert nvidia.capabilities.model_list.prices is False
+    assert nvidia.capabilities.model_list.context_length is False
+    assert nvidia.capabilities.model_list.features is False
+    assert nvidia.capabilities.stream_usage == "final_chunk"
+
+    openrouter = config.get("openrouter")
+    assert openrouter.capabilities.model_list.prices is True
+    assert openrouter.capabilities.model_list.context_length is True
+    assert openrouter.capabilities.model_list.features is True
+    assert openrouter.capabilities.stream_usage == "final_chunk"
 
 
 def test_shipped_providers_yaml_holds_no_key():

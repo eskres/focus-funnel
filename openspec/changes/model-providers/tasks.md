@@ -1,12 +1,12 @@
 ## 1. Probes
 
-- [ ] 1.1 Probe NVIDIA and OpenRouter with a real key each (Groq dropped): list models, stream a chat, call a tool, and read streamed usage. Check by recording, in `design.md` decision 10 and in `providers.yaml`, the model list fields each reports, its tool calling result, and how it reports usage
+- [x] 1.1 Probe NVIDIA and OpenRouter with a real key each (Groq dropped): list models, stream a chat, call a tool, and read streamed usage. Check by recording, in `design.md` decision 10 and in `providers.yaml`, the model list fields each reports, its tool calling result, and how it reports usage
 - [x] 1.2 Probe a local OpenAI-compatible server (Ollama) with no key. Check by recording whether its model list, tool calling, and streamed usage work and what the list reports
 
 ## 2. Provider configuration
 
 - [x] 2.1 Add `providers.yaml` and its loader with `PROVIDERS_CONFIG_PATH` support and validation, loaded in the lifespan. Check with pytest fixture files that a valid file loads, that a missing base URL, an unknown `stream_usage` value, a missing capability, and a duplicate id each fail at load naming the preset, that the file holds no key, and that the app refuses to start on an invalid file
-- [ ] 2.2 Add the presets for Nebius, NVIDIA, and OpenRouter (Groq dropped) with the results of task 1.1, and the `custom` provider rules. Check with pytest that every preset loads and that `custom` has the cautious capability set
+- [x] 2.2 Add the presets for Nebius, NVIDIA, and OpenRouter (Groq dropped) with the results of task 1.1, and the `custom` provider rules. Check with pytest that every preset loads and that `custom` has the cautious capability set
 - [x] 2.3 Add the `ALLOW_CUSTOM_PROVIDER` setting to the app settings. Check with pytest that it defaults to on and that turning it off is read
 
 ## 3. Data

@@ -104,7 +104,20 @@ The API key settings section becomes a providers section: one card per provider 
 
 For each of NVIDIA, OpenRouter, and Groq, a task lists models, streams a chat, and checks tool calling and streamed usage with a real key, and records the result in `providers.yaml`. A preset whose usage arrives incrementally needs the stream reader to sum or take the last value, which `conversation-agent` implements from the `stream_usage` capability. A preset that fails tool calling is shipped with that noted, or not shipped.
 
-Groq is dropped from this change (2026-09-22, user decision): only Nebius, NVIDIA, and OpenRouter ship as presets. NVIDIA and OpenRouter still need a real-key probe before their capabilities can be anything but the cautious default; until then they ship with the same cautious capability set as `custom` (nothing reported, `stream_usage: final_chunk`), which is honest per the risk mitigation below (missing fields degrade to unknown, never wrong).
+Groq is dropped from this change (2026-09-22, user decision): only Nebius, NVIDIA, and OpenRouter ship as presets.
+
+**NVIDIA probe (2026-09-22, `https://integrate.api.nvidia.com/v1/`, trial key, no credits purchased):**
+
+- Model list (plain `GET /v1/models`, no verbose flag NVIDIA recognises) reports only `id`, `object`, `created`, `owned_by` - no context length, prices, or features. Capabilities shipped as the cautious set, same as `custom`.
+- Streamed usage (`stream_options.include_usage: true`) arrives on a final chunk with empty `choices` and a `total_tokens` usage object, followed by `data: [DONE]` - a clean match for `stream_usage: final_chunk`.
+- Tool calling works on the platform: `meta/llama-3.2-11b-vision-instruct` returned a clean `tool_calls` response. One model tried first, `nvidia/nemotron-3.5-lightning-30b-a3b`, hung instead of answering once a `tools` array was added (worked fine without one); reads as a model-specific gap on this NIM deployment, not a platform limit, and doesn't change the shipped capabilities, which don't claim tool-calling support at the model-list level regardless (advisory feature reporting is off for NVIDIA, so every model's `tool_calling` reports `unknown`).
+
+**OpenRouter probe (2026-09-22, `https://openrouter.ai/api/v1/`, real key, tested against the free `nvidia/nemotron-3.5-lightning:free` model so it cost nothing):**
+
+- Model list reports `context_length` and `pricing.{prompt,completion}` in the same shape as Nebius, with no verbose flag needed - full detail by default. Feature/parameter names are reported under `supported_parameters` (every request parameter the model accepts, e.g. `temperature`, `tools`, `reasoning`), not `supported_features` like Nebius. `app/provider_models.py` tries both field names, since both list `tools` the same way when tool calling is accepted; this needed a code change (`SUPPORTED_FEATURES_FIELDS`), not just a `providers.yaml` value.
+- Streamed usage arrives attached to the last content chunk itself (`finish_reason: "stop"` and a `usage` object together, not a separate empty-choices trailer like Nebius/NVIDIA), then `data: [DONE]`. Still `stream_usage: final_chunk`: a reader that takes the last chunk's usage field, if present, covers both shapes.
+- Tool calling returned a clean `tool_calls` response.
+- Ships with the full capability set: `model_list: { prices: true, context_length: true, features: true }`, `stream_usage: final_chunk`.
 
 **Ollama probe (2026-09-22, local `mistral-small3.2` via `ollama serve`, no key, `PROVIDERS_CONFIG_PATH` not involved since Ollama is exercised through the `custom` provider):**
 
@@ -129,5 +142,4 @@ Groq is dropped from this change (2026-09-22, user decision): only Nebius, NVIDI
 
 ## Open Questions
 
-- Whether OpenRouter should ship as a preset at first or only after its probe shows clean tool calling and usage. The probe decides. (Groq is dropped from this change; see decision 10.)
-- NVIDIA and OpenRouter presets currently ship with the cautious capability set, unverified, because no real key was available during implementation (2026-09-22). Update their `providers.yaml` capabilities once probed with a real key, per decision 10.
+None outstanding. Both prior questions are resolved by the 2026-09-22 probes in decision 10: OpenRouter ships as a preset (clean tool calling and usage), and NVIDIA and OpenRouter's `providers.yaml` capabilities reflect what each was actually probed to report, not the cautious default. Groq is dropped from this change.

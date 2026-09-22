@@ -22,3 +22,44 @@ providers:
     capabilities:
       model_list: { prices: true, context_length: true, features: true }
       stream_usage: final_chunk
+
+  nvidia:
+    label: NVIDIA
+    base_url: https://integrate.api.nvidia.com/v1/
+    key_url: https://build.nvidia.com/settings/api-keys
+    notice: >-
+      This is NVIDIA's free trial API: for evaluation and testing only, not
+      production use. NVIDIA logs API calls for security, fraud, and abuse
+      monitoring.
+    key_required: true
+    capabilities:
+      # Probed 2026-09-22: model list reports only id/object/created/owned_by,
+      # no prices, context length, or feature list. Streamed usage arrives on
+      # a final chunk with empty choices, then [DONE]. Tool calling works
+      # (meta/llama-3.2-11b-vision-instruct returned a clean tool_calls
+      # response); one model tried (nemotron-3.5-lightning-30b-a3b) hung
+      # instead of answering once "tools" was set, which looks like a
+      # model-specific gap, not a platform one.
+      model_list: { prices: false, context_length: false, features: false }
+      stream_usage: final_chunk
+
+  openrouter:
+    label: OpenRouter
+    base_url: https://openrouter.ai/api/v1/
+    key_url: https://openrouter.ai/keys
+    notice: >-
+      OpenRouter does not log your prompts or completions by default. Each
+      model page shows a data policy for the upstream provider that actually
+      serves it, since some of them retain data under their own terms.
+    key_required: true
+    capabilities:
+      # Probed 2026-09-22 with nvidia/nemotron-3.5-lightning:free: model list
+      # reports context_length and pricing.{prompt,completion} like Nebius,
+      # but feature names are under "supported_parameters" (every accepted
+      # request parameter, not just features) rather than
+      # "supported_features" - both are read; see provider_models.py. Usage
+      # arrives on the last content chunk (not a separate empty-choices
+      # trailer), still covered by final_chunk. Tool calling returned a clean
+      # tool_calls response.
+      model_list: { prices: true, context_length: true, features: true }
+      stream_usage: final_chunk

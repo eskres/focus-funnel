@@ -31,6 +31,16 @@ class ModelItem(BaseModel):
     features: ModelFeatures
 
 
+# The field a provider's model list uses for a model's reported feature/
+# parameter names differs: Nebius (and providers sharing its schema) use
+# "supported_features"; OpenRouter (and providers sharing its schema, which
+# lists every accepted request parameter, not just features) use
+# "supported_parameters". Both list "tools" when a model accepts it, which is
+# all the classifier reads, so trying each field name in turn covers both
+# without a config knob for something this narrow.
+SUPPORTED_FEATURES_FIELDS = ("supported_features", "supported_parameters")
+
+
 def _field(model: Any, name: str) -> Any:
     """Read a field from either a dict (tests) or an OpenAI SDK model object.
 
@@ -74,9 +84,12 @@ async def fetch_model_list(
                     completion=str(pricing.get("completion", "0")),
                 )
 
-        supported_features = (
-            _field(model, "supported_features") if capabilities.model_list.features else None
-        )
+        supported_features = None
+        if capabilities.model_list.features:
+            for field_name in SUPPORTED_FEATURES_FIELDS:
+                supported_features = _field(model, field_name)
+                if supported_features is not None:
+                    break
 
         items.append(
             ModelItem(
