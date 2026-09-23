@@ -7,7 +7,7 @@ from app.config import get_settings
 from app.errors import register_error_handlers
 from app.log_masking import install_log_masking
 from app.provider_config import get_providers_config
-from app.routers import health, me, providers
+from app.routers import health, me, providers, settings_models
 
 
 @asynccontextmanager
@@ -27,3 +27,4 @@ register_error_handlers(app)
 app.include_router(health.router)
 app.include_router(me.router)
 app.include_router(providers.router)
+app.include_router(settings_models.router)

@@ -27,7 +27,12 @@ from app.crypto import DecryptionError, EncryptedSecret, decrypt_secret
 from app.errors import ApiError, ErrorCode, model_unavailable
 from app.log_masking import register_secret
 from app.models import ProviderKey, User
-from app.provider_config import ProviderPreset
+from app.provider_config import (
+    CUSTOM_PROVIDER_ID,
+    ProviderPreset,
+    custom_provider,
+    get_providers_config,
+)
 
 KEY_CHECK_TIMEOUT_SECONDS = 10.0
 # Sent for a provider that needs no key; OpenAI-compatible servers that don't
@@ -85,12 +90,13 @@ def make_client(
     api_key: str,
     timeout: float = KEY_CHECK_TIMEOUT_SECONDS,
     http_client: httpx2.AsyncClient | None = None,
+    max_retries: int = 0,
 ) -> AsyncOpenAI:
     return AsyncOpenAI(
         api_key=api_key,
         base_url=provider.base_url,
         timeout=timeout,
-        max_retries=0,
+        max_retries=max_retries,
         http_client=http_client,
     )
 
@@ -209,8 +215,58 @@ async def client_for(
     provider: ProviderPreset,
     settings: Settings | None = None,
     http_client: httpx2.AsyncClient | None = None,
+    *,
+    timeout: float = KEY_CHECK_TIMEOUT_SECONDS,
+    max_retries: int = 0,
 ) -> AsyncOpenAI:
     """A client for one request to this provider, using only this user's key."""
     settings = settings or get_settings()
     api_key = await load_api_key(session, user, provider, settings)
-    return make_client(provider, api_key, http_client=http_client)
+    return make_client(
+        provider, api_key, timeout=timeout, http_client=http_client, max_retries=max_retries
+    )
+
+
+def provider_not_found() -> ApiError:
+    return ApiError(404, ErrorCode.NOT_FOUND, "No such provider.")
+
+
+async def find_key_row(session: AsyncSession, user: User, provider_id: str) -> ProviderKey | None:
+    return (
+        await session.execute(
+            select(ProviderKey).where(
+                ProviderKey.user_id == user.id, ProviderKey.provider_id == provider_id
+            )
+        )
+    ).scalar_one_or_none()
+
+
+def resolve_provider(
+    provider_id: str, settings: Settings, saved_row: ProviderKey | None = None
+) -> ProviderPreset:
+    """Look up a preset, or build the custom provider from the user's saved row.
+
+    The custom provider's base URL comes only from saved_row, never from a
+    request body.
+    """
+    if provider_id == CUSTOM_PROVIDER_ID:
+        if not settings.allow_custom_provider:
+            raise ApiError(
+                422, ErrorCode.VALIDATION_ERROR, "Custom providers are turned off on this server."
+            )
+        base_url = saved_row.base_url if saved_row is not None else None
+        if not base_url:
+            raise provider_not_found()
+        return custom_provider(base_url)
+
+    preset = get_providers_config().get(provider_id)
+    if preset is None:
+        raise provider_not_found()
+    return preset
+
+
+async def provider_for_user(
+    session: AsyncSession, user: User, provider_id: str, settings: Settings
+) -> ProviderPreset:
+    """The provider as this user has it configured."""
+    return resolve_provider(provider_id, settings, await find_key_row(session, user, provider_id))
