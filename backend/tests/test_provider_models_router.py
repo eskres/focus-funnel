@@ -78,8 +78,8 @@ def test_prices_and_context_length_returned_when_reported(client, alice):
     assert full["features"]["tool_calling"] == "supported"
 
     bare = models["org/model-reports-nothing"]
-    assert bare["context_length"] is None
-    assert bare["prices"] is None
+    assert "context_length" not in bare
+    assert "prices" not in bare
     assert bare["features"]["tool_calling"] == "unknown"
 
 
@@ -94,8 +94,9 @@ def test_fields_absent_when_provider_does_not_report_them(client, alice):
     response = client.get("/api/providers/local/models", headers=alice)
     assert response.status_code == 200
     model = response.json()["models"][0]
-    assert model["context_length"] is None
-    assert model["prices"] is None
+    # Absent, not null: the provider did not report them.
+    assert "context_length" not in model
+    assert "prices" not in model
     assert model["features"]["tool_calling"] == "unknown"
 
 

@@ -223,7 +223,7 @@ async def delete_provider_key(
     return Response(status_code=204)
 
 
-@router.get("/{provider_id}/models", response_model=ModelsResponse)
+@router.get("/{provider_id}/models", response_model=ModelsResponse, response_model_exclude_none=True)
 async def get_provider_models(
     provider_id: str,
     user: User = Depends(get_current_user),
