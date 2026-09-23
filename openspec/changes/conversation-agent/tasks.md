@@ -1,10 +1,9 @@
 ## 1. Groundwork and probes
 
 - [ ] 1.1 With `model-providers` landed, bring the reusable backend code over from the local branch `backup/gate-build`, as listed in `design.md` decision 12, with `gate` removed from module, class, and test names (for example `git checkout backup/gate-build -- <path>`, then rename). Check that `uv run pytest` passes for the brought-over code and its tests and that nothing imports a gate registry, resolution, storage, or handler module
-- [ ] 1.2 Add a probe script under `backend/scripts/` that sends a labelled message set (about 40 messages: recall, to-do, idea, greeting, unfinished, discussion, multi-turn, tangent) to a model with the two tools and prints the tool chosen, argument validity, time, and tokens. Check by running it against a real Nebius key and saving the baseline result in the change folder
-- [x] 1.3 Probe forced tool use (`tool_choice` naming a function) on `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`. Done: honoured on 8 of 8 calls including streamed, `required` works, and a forced call ends with `finish_reason: stop`. Recorded in `design.md` decisions 2 and 5
-- [x] 1.4 Probe `stream_options.include_usage` on a streamed call. Done: usage arrives on a final chunk with no choices only when the option is set, and matched the non-streamed prompt count. Recorded in `design.md` decision 9. The price unit is not verified: task 14.8 checks it against the Nebius console
-- [ ] 1.5 With `model-providers` landed, bring the reusable frontend code over from `backup/gate-build` as listed in `design.md` decision 12, with `gate` removed from names. Check that `npm run test`, `npm run lint`, and `npm run build` pass and that a search of `frontend/` for `gate`, `routing_failed`, and `GateModel` finds nothing
+- [x] 1.2 Probe forced tool use (`tool_choice` naming a function) on `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`. Done: honoured on 8 of 8 calls including streamed, `required` works, and a forced call ends with `finish_reason: stop`. Recorded in `design.md` decisions 2 and 5
+- [x] 1.3 Probe `stream_options.include_usage` on a streamed call. Done: usage arrives on a final chunk with no choices only when the option is set, and matched the non-streamed prompt count. Recorded in `design.md` decision 9. The price unit is not verified: task 14.8 checks it against the Nebius console
+- [ ] 1.4 With `model-providers` landed, bring the reusable frontend code over from `backup/gate-build` as listed in `design.md` decision 12, with `gate` removed from names. Check that `npm run test`, `npm run lint`, and `npm run build` pass and that a search of `frontend/` for `gate`, `routing_failed`, and `GateModel` finds nothing
 
 ## 2. Chat configuration and error codes
 
@@ -42,7 +41,7 @@
 - [ ] 6.4 Add the streamed model call that forwards text deltas and collects tool-call deltas, ignoring the reasoning field, and sends the reasoning effort only when set. Check with pytest that text is forwarded in order, that split tool-call arguments are joined, and that no effort is sent when none is set
 - [ ] 6.5 Add the tool loop: run the tools, store the tool messages, call the model again, and stop after the configured rounds with `tool_loop_limit`. Check with pytest that a tool result reaches the next call, that the loop stops at the limit keeping the text so far, and that malformed tool arguments go back as a tool error for one retry
 - [ ] 6.6 Add `POST /api/chat` with the events from design decision 4, where a failure before the first byte is an error response and one after is an `error` event without `done`. Check with pytest that `conversation` comes first for a new conversation, that events arrive in order and end with `done`, that the user's message is stored before the model is called and kept after a failure, and that an error mid-stream carries the same code
-- [ ] 6.7 Force the named tool for `/push` and `/pull` using the method chosen in task 1.3. Check with pytest that `/push text` sends the proposal tool as required and `/pull text` the search tool, and that `/explore text` sends neither
+- [ ] 6.7 Force the named tool for `/push` and `/pull` using the method chosen in task 1.2. Check with pytest that `/push text` sends the proposal tool as required and `/pull text` the search tool, and that `/explore text` sends neither
 - [ ] 6.8 Add the reply length limit and empty-reply handling. Check with pytest that a reply with `finish_reason` length ends with `output_limit_reached` keeping its text, that an empty reply is reported the same way, and that the server's limit is sent on every call
 - [ ] 6.9 Add the model checks and the no-fallback rule. Check with pytest that an unset model gives `model_not_set` before any network call, that a withdrawn model gives `model_unavailable` with no second call to any model, that a provider being unreachable gives `provider_unreachable`, that a provider 429 gives `provider_rate_limited`, and that another client error gives `provider_request_refused`
 - [ ] 6.10 Lock a conversation to one running turn. Check with pytest that a second turn started during the first gets `conversation_busy` and that the lock is released after a failure
@@ -54,9 +53,10 @@
 - [ ] 7.1 Add the `propose_thought` tool: validate its arguments, store the proposal in `held_proposal` and as a message, and emit a `proposal` event, saving nothing. Check with pytest that a valid call emits the proposal and stores nothing else, and that invalid arguments are refused
 - [ ] 7.2 Add the confirm endpoint with the `save_thought` seam that answers "not available yet". Check with pytest that confirming with edited text returns the edited text and the not-available outcome, and that the seam can be replaced in a test to report success
 - [ ] 7.3 Add the `search_thoughts` stub that returns "not available yet" from one function. Check with pytest that the result reaches the model and that the function can be replaced in a test
-- [ ] 7.4 Add the held-proposal note to the turn context so an already-shown conclusion is not proposed again. Check with pytest that the note is present when a proposal is held and absent otherwise, and that a proposal stays held across turns
-- [ ] 7.5 Add the forced proposal call used before archive, before `/compact`, and when the model has produced none, recorded with `kind` proposal. Check with pytest that it returns a proposal for a conversation with a discussion, and that it is not called when a held proposal already exists
-- [ ] 7.6 Check that time never brings a held proposal back. Check with pytest that opening a conversation with a held proposal after a long time shows it only as held and that no model is called
+- [ ] 7.4 Run a smoke check against a real Nebius key: send a greeting, a to-do, a recall question, an idea, and a `/push` and a `/pull` message. Check that the greeting calls no tool, that each other message calls the expected tool, and that answers stream. The full probe set is task 12.1
+- [ ] 7.5 Add the held-proposal note to the turn context so an already-shown conclusion is not proposed again. Check with pytest that the note is present when a proposal is held and absent otherwise, and that a proposal stays held across turns
+- [ ] 7.6 Add the forced proposal call used before archive, before `/compact`, and when the model has produced none, recorded with `kind` proposal. Check with pytest that it returns a proposal for a conversation with a discussion, and that it is not called when a held proposal already exists
+- [ ] 7.7 Check that time never brings a held proposal back. Check with pytest that opening a conversation with a held proposal after a long time shows it only as held and that no model is called
 
 ## 8. Context management
 
@@ -101,10 +101,11 @@
 
 ## 12. Prompt tuning and probes
 
-- [ ] 12.1 Tune the system prompt against the probe set from task 1.2 and record the result. Check that the tool chosen matches the label on at least 90% of cases over two runs and that no greeting or unfinished message triggers a tool
-- [ ] 12.2 Probe topic changes: multi-turn discussions with a held proposal followed by an unrelated message, and by a related one. Check that the model offers the held summary on the unrelated one and not on the related one on at least 8 of 10 cases each, otherwise record the decision to compare embeddings instead in `design.md` decision 6
-- [ ] 12.3 Probe repeat proposals: 10 long discussions where the user keeps going after a proposal. Check that the same conclusion is not proposed again in more than one of them
-- [ ] 12.4 Probe `/compact`: summarise five long conversations and check that the decisions, names, and open questions in a hand-written checklist survive in each summary
+- [ ] 12.1 Add a probe script under `backend/scripts/` that sends a labelled message set (about 40 messages: recall, to-do, idea, greeting, unfinished, discussion, multi-turn, tangent) to a model with the system prompt and the two tools and prints the tool chosen, argument validity, time, and tokens. Check by running it against a real Nebius key and saving the baseline result in the change folder
+- [ ] 12.2 Tune the system prompt against the probe set from task 12.1 and record the result. Check that the tool chosen matches the label on at least 90% of cases over two runs and that no greeting or unfinished message triggers a tool
+- [ ] 12.3 Probe topic changes: multi-turn discussions with a held proposal followed by an unrelated message, and by a related one. Check that the model offers the held summary on the unrelated one and not on the related one on at least 8 of 10 cases each, otherwise record the decision to compare embeddings instead in `design.md` decision 6
+- [ ] 12.4 Probe repeat proposals: 10 long discussions where the user keeps going after a proposal. Check that the same conclusion is not proposed again in more than one of them
+- [ ] 12.5 Probe `/compact`: summarise five long conversations and check that the decisions, names, and open questions in a hand-written checklist survive in each summary
 
 ## 13. Realign the planned changes
 

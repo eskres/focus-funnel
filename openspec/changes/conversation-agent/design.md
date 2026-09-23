@@ -123,7 +123,7 @@ One system prompt is kept in code and not user-editable. It tells the model to t
 
 **The three triggers for offering a held proposal are not all model judgment:**
 
-- **Topic change** is the only model judgment. The system note for a turn with a held proposal says: do not repeat it, unless this message is about an unrelated topic, in which case call `propose_thought` first with a summary of everything discussed so far, then answer. It is tested by a probe (task 12.2) and, if unreliable, replaced by a comparison of embeddings of the new message and the held summary.
+- **Topic change** is the only model judgment. The system note for a turn with a held proposal says: do not repeat it, unless this message is about an unrelated topic, in which case call `propose_thought` first with a summary of everything discussed so far, then answer. It is tested by a probe (task 12.3) and, if unreliable, replaced by a comparison of embeddings of the new message and the held summary.
 - **Archive or leave** and **`/compact`** are checked by the app. When a held proposal exists, the action first shows the proposal card. If the model has not produced one for the open discussion, the app asks it to (a forced `propose_thought` call, recorded as `kind = proposal`).
 
 Time never brings a proposal back. A user who returns to an old conversation carries on as normal, and the held proposal waits for one of the three triggers.
@@ -211,7 +211,7 @@ Nothing in the design shares state between conversations except the user's loado
 
 ## Migration Plan
 
-1. Bring over the reusable prototype code (task 1.1 and task 1.5).
+1. Bring over the reusable prototype code (task 1.1 and task 1.4).
 2. Ship the backend, the Alembic revision, and the frontend together, because the chat request, the events, the tables, and the error codes all change.
 3. Reset local databases that ran the prototype's overrides migration.
 4. Rollback: `alembic downgrade -1` drops conversations, messages, usage, and the loadout.
