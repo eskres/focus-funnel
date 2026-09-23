@@ -19,7 +19,7 @@ def make_test_app() -> FastAPI:
 
     @test_app.get("/api-error")
     async def api_error():
-        raise ApiError(400, ErrorCode.NEBIUS_KEY_INVALID, "Nebius rejected this API key.")
+        raise ApiError(400, ErrorCode.PROVIDER_KEY_INVALID, "The provider rejected this API key.")
 
     @test_app.get("/boom")
     async def boom():
@@ -54,8 +54,8 @@ def test_unknown_route_uses_error_format(settings_env):
 def test_api_error_uses_error_format():
     client = TestClient(make_test_app())
     response = client.get("/api-error")
-    error = assert_error_shape(response, 400, ErrorCode.NEBIUS_KEY_INVALID)
-    assert error["message"] == "Nebius rejected this API key."
+    error = assert_error_shape(response, 400, ErrorCode.PROVIDER_KEY_INVALID)
+    assert error["message"] == "The provider rejected this API key."
 
 
 def test_unexpected_error_hides_details():

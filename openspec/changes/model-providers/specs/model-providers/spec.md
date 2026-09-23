@@ -6,7 +6,7 @@ Defines the providers a user can call, and what is known about each: how to reac
 
 ### Requirement: Providers are presets or a custom URL
 
-The system SHALL offer a fixed set of provider presets, each with a stable id, a name, a base URL, a link to where a user gets a key, and a data-handling notice. The presets are Nebius, NVIDIA, OpenRouter, and Groq. The system SHALL also offer a custom provider with a base URL entered by the user, for a local or self-hosted model server. The base URLs of presets SHALL NOT be changeable by users.
+The system SHALL offer a fixed set of provider presets, each with a stable id, a name, a base URL, a link to where a user gets a key, and a data-handling notice. The presets are Nebius, NVIDIA, and OpenRouter. The system SHALL also offer a custom provider with a base URL entered by the user, for a local or self-hosted model server. The base URLs of presets SHALL NOT be changeable by users.
 
 #### Scenario: Listing presets
 

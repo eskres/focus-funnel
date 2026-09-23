@@ -15,6 +15,7 @@ from app.auth import JwksCache
 from app.config import get_settings
 from app.db import create_engine, get_engine, get_sessionmaker
 from app.models import Base, User
+from app.provider_config import get_providers_config
 
 REQUIRED_ENV = {
     "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
@@ -27,10 +28,10 @@ TEST_KID = "test-key-1"
 
 @pytest.fixture(autouse=True)
 def clear_settings_cache():
-    for cached in (get_settings, get_engine, get_sessionmaker):
+    for cached in (get_settings, get_engine, get_sessionmaker, get_providers_config):
         cached.cache_clear()
     yield
-    for cached in (get_settings, get_engine, get_sessionmaker):
+    for cached in (get_settings, get_engine, get_sessionmaker, get_providers_config):
         cached.cache_clear()
 
 
@@ -80,7 +81,7 @@ def count_users(url: str, auth0_sub: str | None = None) -> int:
     return asyncio.run(count())
 
 
-class FakeNebius:
+class FakeProvider:
     """Records requests and answers them through an httpx2 mock transport."""
 
     def __init__(self, respond):

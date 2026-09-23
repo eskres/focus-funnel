@@ -1,0 +1,10 @@
+providers:
+  nebius:
+    label: Nebius Token Factory
+    base_url: https://api.tokenfactory.nebius.com/v1/
+    key_url: https://tokenfactory.nebius.com/project/api-keys
+    notice: Nebius does not use your prompts or outputs to train models.
+    key_required: true
+    capabilities:
+      model_list: { prices: true, context_length: true }
+      stream_usage: final_chunk

@@ -3,7 +3,7 @@
 ### Requirement: Save a Nebius API key
 
 **Reason**: Keys are now kept per provider, and Nebius is one provider among several.
-**Migration**: See "Save a provider API key" in the `provider-keys` capability. Existing Nebius keys are kept as the `nebius` provider's key.
+**Migration**: See "Save a provider API key" in the `provider-keys` capability. Nothing was live when this change landed, so no Nebius key is carried over: the migration keeps the row as the `nebius` provider's, but its ciphertext was bound to the user alone and is not readable, so the key is entered again and local databases are reset.
 
 ### Requirement: Key is stored encrypted and never returned
 

@@ -5,8 +5,6 @@ from functools import lru_cache
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
-DEFAULT_NEBIUS_BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
-
 
 class Settings(BaseSettings):
     """Backend settings, read from environment variables."""
@@ -15,8 +13,10 @@ class Settings(BaseSettings):
     key_encryption_key: bytes
     auth0_domain: str = Field(min_length=1)
     auth0_audience: str = Field(min_length=1)
-    nebius_base_url: str = DEFAULT_NEBIUS_BASE_URL
     chroma_url: str = "http://chroma:8000"
+    # Lets an operator turn off the custom provider (an arbitrary base URL),
+    # which auth-modes sets to false in demo mode on a public instance.
+    allow_custom_provider: bool = True
 
     @field_validator("key_encryption_key", mode="before")
     @classmethod

@@ -6,7 +6,7 @@ A gate-based prototype (kept on the local branch `backup/gate-build`, never push
 
 Findings that shape the decisions:
 
-- Nebius, NVIDIA, OpenRouter, and Groq all offer OpenAI-compatible endpoints, per their own documentation as reported by third-party roundups. Ollama, LM Studio, and vLLM do too.
+- Nebius, NVIDIA, and OpenRouter all offer OpenAI-compatible endpoints, per their own documentation as reported by third-party roundups. Ollama, LM Studio, and vLLM do too.
 - Nebius's model list, fetched with `?verbose=true`, includes per-token prices, `context_length`, and `supported_features`. Other providers report fewer or different fields. Which ones is unverified until each is probed.
 - Nebius returns stream usage only when `stream_options.include_usage` is set, on a final chunk with no choices. One source says NVIDIA reports usage incrementally, which would break a reader that expects one final chunk. This is unverified.
 - NVIDIA's free key is under trial terms that allow evaluation, not production use, and its notice says use is logged. Google and Mistral free tiers use prompts for training. Notices differ per provider.
@@ -40,12 +40,15 @@ providers:
     key_url: <where to get a key>
     notice: <data-handling text>
     key_required: true
+    key_check_url: <optional, see below>
     capabilities:
       model_list: { prices: true, context_length: true, features: true }
       stream_usage: final_chunk        # final_chunk | incremental | none
 ```
 
-The startup check refuses a missing base URL, an unknown `stream_usage` value, a missing capability, or a duplicate id. The file holds no key. The `custom` provider is not a preset: its base URL is entered by the user and its capabilities are the most cautious set (nothing reported, usage read from a final chunk when present).
+`key_check_url` is optional. Saving a key lists models by default. A provider whose model list needs no key answers 200 to any key, so listing models cannot tell a wrong key from a right one. Such a provider sets `key_check_url` to an authenticated URL that answers 401 or 403 to a wrong key, and the check calls that URL instead.
+
+The startup check refuses a missing base URL, a `key_check_url` that is not an http or https URL, an unknown `stream_usage` value, a missing capability, or a duplicate id. The file holds no key. The `custom` provider is not a preset: its base URL is entered by the user and its capabilities are the most cautious set (nothing reported, usage read from a final chunk when present).
 
 `NEBIUS_BASE_URL` is retired in favour of the preset. An operator who needs another base URL edits the file.
 
@@ -67,7 +70,7 @@ key_last4 TEXT null, created_at, updated_at
 UNIQUE (user_id, provider_id)
 ```
 
-The existing encryption and the "record copied to another user fails to decrypt" binding are kept, and the provider id is added to what the ciphertext is bound to, so a key cannot be moved between providers. One migration renames the table, adds `provider_id` with a server default of `nebius` and `base_url`, and keeps existing rows. The downgrade restores the old name and drops the new columns.
+The existing encryption and the "record copied to another user fails to decrypt" binding are kept, and the provider id is added to what the ciphertext is bound to, so a key cannot be moved between providers. One migration renames the table, adds `provider_id` with a server default of `nebius` and `base_url`, and keeps existing rows. The provider id joins the ciphertext binding, so a row saved before the upgrade no longer decrypts. Nothing is live, so this is accepted: local databases are reset and the key is entered again, and no fallback for the old binding is added. The downgrade restores the old name and drops the new columns.
 
 ### 4. Routes
 
@@ -104,6 +107,33 @@ The API key settings section becomes a providers section: one card per provider 
 
 For each of NVIDIA, OpenRouter, and Groq, a task lists models, streams a chat, and checks tool calling and streamed usage with a real key, and records the result in `providers.yaml`. A preset whose usage arrives incrementally needs the stream reader to sum or take the last value, which `conversation-agent` implements from the `stream_usage` capability. A preset that fails tool calling is shipped with that noted, or not shipped.
 
+Groq is dropped from this change (2026-09-22, user decision): only Nebius, NVIDIA, and OpenRouter ship as presets.
+
+**NVIDIA probe (2026-09-22, `https://integrate.api.nvidia.com/v1/`, trial key, no credits purchased):**
+
+- Model list (plain `GET /v1/models`, no verbose flag NVIDIA recognises) reports only `id`, `object`, `created`, `owned_by` - no context length, prices, or features. Capabilities shipped as the cautious set, same as `custom`.
+- Streamed usage (`stream_options.include_usage: true`) arrives on a final chunk with empty `choices` and a `total_tokens` usage object, followed by `data: [DONE]` - a clean match for `stream_usage: final_chunk`.
+- Tool calling works on the platform: `meta/llama-3.2-11b-vision-instruct` returned a clean `tool_calls` response. One model tried first, `nvidia/nemotron-3.5-lightning-30b-a3b`, hung instead of answering once a `tools` array was added (worked fine without one); reads as a model-specific gap on this NIM deployment, not a platform limit, and doesn't change the shipped capabilities, which don't claim tool-calling support at the model-list level regardless (advisory feature reporting is off for NVIDIA, so every model's `tool_calling` reports `unknown`).
+
+**OpenRouter probe (2026-09-22, `https://openrouter.ai/api/v1/`, real key, tested against the free `nvidia/nemotron-3.5-lightning:free` model so it cost nothing):**
+
+- Model list reports `context_length` and `pricing.{prompt,completion}` in the same shape as Nebius, with no verbose flag needed - full detail by default. Feature/parameter names are reported under `supported_parameters` (every request parameter the model accepts, e.g. `temperature`, `tools`, `reasoning`), not `supported_features` like Nebius. `app/provider_models.py` tries both field names, since both list `tools` the same way when tool calling is accepted; this needed a code change (`SUPPORTED_FEATURES_FIELDS`), not just a `providers.yaml` value.
+- Streamed usage arrives attached to the last content chunk itself (`finish_reason: "stop"` and a `usage` object together, not a separate empty-choices trailer like Nebius/NVIDIA), then `data: [DONE]`. Still `stream_usage: final_chunk`: a reader that takes the last chunk's usage field, if present, covers both shapes.
+- Tool calling returned a clean `tool_calls` response.
+- Ships with the full capability set: `model_list: { prices: true, context_length: true, features: true }`, `stream_usage: final_chunk`.
+
+**Key check probe (2026-09-23):** `GET /models` answers 200 to any key on NVIDIA and OpenRouter (and to no key), so a wrong key was saved as valid. Checks that tell keys apart:
+
+- OpenRouter: `GET https://openrouter.ai/api/v1/auth/key` answers 401 to a wrong key and 200 to a right one.
+- NVIDIA: `GET https://api.nvcf.nvidia.com/v2/nvcf/functions` answers 401 to a wrong key and 200 to a right one, with a response of about 100 KB, fetched only when a key is saved. A one-token chat also tells keys apart, but needs a model, and the model tried first (`meta/llama-3.2-1b-instruct`) had been retired. `api.ngc.nvidia.com/v3/keys/get-caller-info` also works, but takes a form-encoded POST.
+- Nebius: `GET /models` answers 401 to a wrong key, so it needs no `key_check_url`.
+
+**Ollama probe (2026-09-22, local `mistral-small3.2` via `ollama serve`, no key, `PROVIDERS_CONFIG_PATH` not involved since Ollama is exercised through the `custom` provider):**
+
+- Model list (`GET /v1/models`) reports only `id`, `object`, `created`, `owned_by` — no `context_length`, no `pricing`, no `supported_features`. Confirms the `custom` provider's cautious `model_list` capabilities (nothing reported).
+- Streamed chat (`stream_options.include_usage: true`) never sends a usage chunk, never sends a chunk with `finish_reason` set, and never sends `data: [DONE]` — the stream just ends after the last content chunk. Confirms `stream_usage: final_chunk` as the right cautious default (a reader waiting on a final usage-bearing chunk degrades to "unknown cost" instead of hanging, since the connection closing ends the read either way).
+- Tool calling: inconclusive. A request with a `tools` array against the only locally available model (`mistral-small3.2`, 15GB, CPU inference) did not return a response within 6.7 minutes (`HTTP_STATUS:000`, 0 bytes). This is model/hardware speed, not a signal about Ollama's OpenAI-compat tool-calling support one way or the other; the `custom` provider's capabilities don't claim tool-calling support regardless, so this doesn't change the shipped config.
+
 ## Risks / Trade-offs
 
 - [A provider's model list has different fields than assumed] → Capabilities are per provider and verified by probe. Missing fields degrade to unknown, never to a wrong value.
@@ -116,9 +146,9 @@ For each of NVIDIA, OpenRouter, and Groq, a task lists models, streams a chat, a
 ## Migration Plan
 
 1. Ship the migration, backend, and frontend together, because routes and error codes change.
-2. The migration keeps an existing Nebius key as the `nebius` provider's key.
+2. The migration keeps an existing Nebius row as the `nebius` provider's, but its key is not readable after the binding change (decision 3). Reset local databases and enter the key again.
 3. Rollback: `alembic downgrade -1` restores the old table name. Keys saved for other providers are dropped.
 
 ## Open Questions
 
-- Whether OpenRouter and Groq should ship as presets at first or only after their probes show clean tool calling and usage. The probe decides.
+None outstanding. Both prior questions are resolved by the 2026-09-22 probes in decision 10: OpenRouter ships as a preset (clean tool calling and usage), and NVIDIA and OpenRouter's `providers.yaml` capabilities reflect what each was actually probed to report, not the cautious default. Groq is dropped from this change.

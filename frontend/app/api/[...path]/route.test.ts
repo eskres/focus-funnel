@@ -85,16 +85,16 @@ describe("API proxy", () => {
     vi.stubEnv("BACKEND_URL", backend.url);
 
     const response = await PUT(
-      new Request("http://localhost:3000/api/settings/api-key?x=1&y=two", {
+      new Request("http://localhost:3000/api/providers/nebius/key?x=1&y=two", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
           Cookie: "appSession=secret-session",
           Authorization: "Bearer client-supplied",
         },
-        body: JSON.stringify({ api_key: "nebius-key-abcd" }),
+        body: JSON.stringify({ api_key: "example-key-abcd" }),
       }),
-      ctx("settings", "api-key"),
+      ctx("providers", "nebius", "key"),
     );
 
     expect(response.status).toBe(200);
@@ -105,8 +105,8 @@ describe("API proxy", () => {
     expect(backend.requests).toHaveLength(1);
     const [forwarded] = backend.requests;
     expect(forwarded.method).toBe("PUT");
-    expect(forwarded.url).toBe("/api/settings/api-key?x=1&y=two");
-    expect(forwarded.body).toBe(JSON.stringify({ api_key: "nebius-key-abcd" }));
+    expect(forwarded.url).toBe("/api/providers/nebius/key?x=1&y=two");
+    expect(forwarded.body).toBe(JSON.stringify({ api_key: "example-key-abcd" }));
     expect(forwarded.headers.authorization).toBe("Bearer test-access-token");
     expect(forwarded.headers["content-type"]).toBe("application/json");
     expect(forwarded.headers.cookie).toBeUndefined();
@@ -120,8 +120,8 @@ describe("API proxy", () => {
     vi.stubEnv("BACKEND_URL", backend.url);
 
     const response = await DELETE(
-      new Request("http://localhost:3000/api/settings/api-key", { method: "DELETE" }),
-      ctx("settings", "api-key"),
+      new Request("http://localhost:3000/api/providers/nebius/key", { method: "DELETE" }),
+      ctx("providers", "nebius", "key"),
     );
 
     expect(response.status).toBe(204);

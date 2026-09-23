@@ -1,0 +1,78 @@
+# Provider presets: base URL, where to get a key, the data-handling notice, and
+# what each provider's model list and streaming reports. No key lives here.
+#
+# capabilities.model_list says which fields the provider's model list reports.
+# capabilities.stream_usage says how the provider reports token usage in a
+# streamed chat: final_chunk (one chunk with no choices, after
+# stream_options.include_usage), incremental (on every chunk), or none.
+#
+# key_check_url (optional) is an authenticated URL that answers 401 or 403 to a
+# wrong key. A provider whose model list needs no key sets it, because listing
+# models cannot tell a wrong key from a right one. Without it, saving a key
+# lists models.
+#
+# A preset ships only once it has been probed with a real key (see
+# openspec/changes/model-providers/design.md, decision 10).
+
+providers:
+  nebius:
+    label: Nebius Token Factory
+    base_url: https://api.tokenfactory.nebius.com/v1/
+    key_url: https://tokenfactory.nebius.com/project/api-keys
+    notice: >-
+      Nebius does not use your prompts or outputs to train models. You can
+      turn on Zero Data Retention in your Nebius account profile for stronger
+      guarantees.
+    key_required: true
+    capabilities:
+      model_list: { prices: true, context_length: true, features: true }
+      stream_usage: final_chunk
+
+  nvidia:
+    label: NVIDIA
+    base_url: https://integrate.api.nvidia.com/v1/
+    key_url: https://build.nvidia.com/settings/api-keys
+    notice: >-
+      This is NVIDIA's free trial API: for evaluation and testing only, not
+      production use. NVIDIA logs API calls for security, fraud, and abuse
+      monitoring.
+    key_required: true
+    # Probed 2026-09-23: /v1/models answers 200 to any key, and a chat check
+    # would need a model that may be retired (meta/llama-3.2-1b-instruct was).
+    # The NVCF function list needs a valid key (401 otherwise); it is a large
+    # response (~100 KB), fetched only when a key is saved.
+    key_check_url: https://api.nvcf.nvidia.com/v2/nvcf/functions
+    capabilities:
+      # Probed 2026-09-22: model list reports only id/object/created/owned_by,
+      # no prices, context length, or feature list. Streamed usage arrives on
+      # a final chunk with empty choices, then [DONE]. Tool calling works
+      # (meta/llama-3.2-11b-vision-instruct returned a clean tool_calls
+      # response); one model tried (nemotron-3.5-lightning-30b-a3b) hung
+      # instead of answering once "tools" was set, which looks like a
+      # model-specific gap, not a platform one.
+      model_list: { prices: false, context_length: false, features: false }
+      stream_usage: final_chunk
+
+  openrouter:
+    label: OpenRouter
+    base_url: https://openrouter.ai/api/v1/
+    key_url: https://openrouter.ai/keys
+    notice: >-
+      OpenRouter does not log your prompts or completions by default. Each
+      model page shows a data policy for the upstream provider that actually
+      serves it, since some of them retain data under their own terms.
+    key_required: true
+    # Probed 2026-09-23: /models answers 200 to any key; /auth/key answers 401
+    # to a wrong key and 200 to a right one.
+    key_check_url: https://openrouter.ai/api/v1/auth/key
+    capabilities:
+      # Probed 2026-09-22 with nvidia/nemotron-3.5-lightning:free: model list
+      # reports context_length and pricing.{prompt,completion} like Nebius,
+      # but feature names are under "supported_parameters" (every accepted
+      # request parameter, not just features) rather than
+      # "supported_features" - both are read; see provider_models.py. Usage
+      # arrives on the last content chunk (not a separate empty-choices
+      # trailer), still covered by final_chunk. Tool calling returned a clean
+      # tool_calls response.
+      model_list: { prices: true, context_length: true, features: true }
+      stream_usage: final_chunk

@@ -1,0 +1,10 @@
+providers:
+  custom:
+    label: Not Allowed
+    base_url: https://example.test/v1/
+    key_url: https://example.test/keys
+    notice: This id is reserved.
+    key_required: true
+    capabilities:
+      model_list: { prices: true, context_length: true, features: true }
+      stream_usage: final_chunk
