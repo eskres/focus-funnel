@@ -106,3 +106,100 @@ describe("ProposalCard", () => {
     expect(calls.filter((c) => c.path.includes("/proposal"))).toEqual([]);
   });
 });
+
+describe("the held proposal before an action", () => {
+  const held = { ...PROPOSAL, position: 1 };
+  const withHistory = () => ({
+    ...conversation(),
+    held_proposal: held,
+    messages: [
+      { ...message(0, "user", "I need oat milk") },
+      { ...message(1, "assistant", "Noted.") },
+    ],
+  });
+
+  function message(position: number, role: string, content: string) {
+    return {
+      id: `m${position}`,
+      position,
+      role,
+      content,
+      tool_calls: null,
+      tool_call_id: null,
+      status: "complete",
+      error_code: null,
+      compacted: false,
+      created_at: "2026-09-23T10:00:00Z",
+    };
+  }
+
+  it("shows the held proposal before /compact, then sends /compact", async () => {
+    const { calls } = fakeApi({
+      "GET /api/settings/models": json(200, loadout()),
+      "GET /api/conversations/c1": json(200, withHistory()),
+      "POST /api/conversations/c1/proposal": json(200, { held_proposal: held }),
+      "POST /api/chat": () => streamOf(delta("Summary ready."), done),
+    });
+    render(<Chat conversationId="c1" />);
+    await screen.findByText("Noted.");
+
+    send("/compact");
+
+    const card = await screen.findByRole("region", { name: "Proposal to file" });
+    expect(within(card).getByLabelText("Title")).toHaveValue("Oat milk");
+    expect(calls.filter((c) => c.path === "/api/chat")).toEqual([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Compact now" }));
+
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path === "/api/chat").map((c) => c.body)).toEqual([
+        { message: "/compact", conversation_id: "c1" },
+      ]),
+    );
+  });
+
+  it("sends /compact at once when there is nothing to propose", async () => {
+    const { calls } = fakeApi({
+      "GET /api/settings/models": json(200, loadout()),
+      "GET /api/conversations/c1": json(200, { ...withHistory(), held_proposal: null }),
+      "POST /api/conversations/c1/proposal": json(200, { held_proposal: null }),
+      "POST /api/chat": () => streamOf(delta("Summary ready."), done),
+    });
+    render(<Chat conversationId="c1" />);
+    await screen.findByText("Noted.");
+
+    send("/compact");
+
+    await waitFor(() => expect(calls.filter((c) => c.path === "/api/chat")).toHaveLength(1));
+    expect(screen.queryByRole("region", { name: "Proposal to file" })).not.toBeInTheDocument();
+  });
+
+  it("shows the proposal on a topic change, from the proposal event", async () => {
+    fakeApi({
+      "GET /api/settings/models": json(200, loadout()),
+      "GET /api/conversations/c1": json(200, withHistory()),
+      "POST /api/chat": proposing,
+    });
+    render(<Chat conversationId="c1" />);
+    await screen.findByText("Noted.");
+
+    send("unrelated: how do taxes work?");
+
+    expect(await screen.findByRole("region", { name: "Proposal to file" })).toBeInTheDocument();
+  });
+
+  it("does not show the held proposal when an old conversation is opened", async () => {
+    const { calls } = fakeApi({
+      "GET /api/settings/models": json(200, loadout()),
+      "GET /api/conversations/c1": json(200, {
+        ...withHistory(),
+        last_activity_at: "2026-01-01T10:00:00Z",
+      }),
+    });
+    render(<Chat conversationId="c1" />);
+    await screen.findByText("Noted.");
+
+    expect(screen.queryByRole("region", { name: "Proposal to file" })).not.toBeInTheDocument();
+    expect(calls.filter((c) => c.path.includes("/proposal"))).toEqual([]);
+  });
+});

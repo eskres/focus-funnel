@@ -85,3 +85,11 @@ export function confirmProposal(id: string, proposal: Proposal): Promise<Confirm
     body: JSON.stringify(proposal),
   });
 }
+
+/** The held proposal to show before archive or /compact; the server asks the model when none is held. */
+export function offerProposal(id: string): Promise<{ held_proposal: HeldProposal | null }> {
+  return apiFetch<{ held_proposal: HeldProposal | null }>(
+    `${BASE}/${encodeURIComponent(id)}/proposal`,
+    { method: "POST" },
+  );
+}

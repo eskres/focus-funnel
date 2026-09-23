@@ -7,6 +7,11 @@ import { useState } from "react";
 
 import { useConversations } from "@/components/chat/conversations-context";
 import { DeleteDialog } from "@/components/chat/delete-dialog";
+import {
+  ProposalDialog,
+  heldProposalFor,
+  type HeldOffer,
+} from "@/components/chat/proposal-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -29,6 +34,7 @@ export function Sidebar() {
   const router = useRouter();
   const [showArchived, setShowArchived] = useState(false);
   const [deleting, setDeleting] = useState<ConversationSummary | null>(null);
+  const [offer, setOffer] = useState<HeldOffer | null>(null);
   const activeId = pathname?.startsWith("/app/") ? pathname.slice("/app/".length) : null;
 
   async function confirmDelete() {
@@ -58,6 +64,7 @@ export function Sidebar() {
                 conversation={conversation}
                 active={conversation.id === activeId}
                 onChanged={refresh}
+                onOffer={setOffer}
                 onDelete={() => setDeleting(conversation)}
               />
             ))}
@@ -81,6 +88,7 @@ export function Sidebar() {
                     conversation={conversation}
                     active={conversation.id === activeId}
                     onChanged={refresh}
+                    onOffer={setOffer}
                     onDelete={() => setDeleting(conversation)}
                   />
                 ))}
@@ -89,6 +97,7 @@ export function Sidebar() {
           </div>
         )}
       </div>
+      <ProposalDialog offer={offer} onClose={() => setOffer(null)} />
       <DeleteDialog
         open={deleting !== null}
         title={deleting?.title ?? ""}
@@ -103,11 +112,14 @@ function ConversationRow({
   conversation,
   active,
   onChanged,
+  onOffer,
   onDelete,
 }: {
   conversation: ConversationSummary;
   active: boolean;
   onChanged: () => Promise<void>;
+  /** Shows a held proposal before an action. */
+  onOffer: (offer: HeldOffer) => void;
   onDelete: () => void;
 }) {
   const [renaming, setRenaming] = useState(false);
@@ -122,6 +134,21 @@ function ConversationRow({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not change the conversation.");
     }
+  }
+
+  async function archive() {
+    // The held proposal is offered before archiving.
+    const proposal = await heldProposalFor(conversation.id);
+    if (!proposal) {
+      await change({ archived: true });
+      return;
+    }
+    onOffer({
+      conversationId: conversation.id,
+      proposal,
+      continueLabel: "Archive now",
+      onContinue: () => change({ archived: true }),
+    });
   }
 
   async function saveTitle() {
@@ -177,7 +204,7 @@ function ConversationRow({
             {conversation.archived ? (
               <DropdownMenuItem onClick={() => change({ archived: false })}>Restore</DropdownMenuItem>
             ) : (
-              <DropdownMenuItem onClick={() => change({ archived: true })}>Archive</DropdownMenuItem>
+              <DropdownMenuItem onClick={archive}>Archive</DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onClick={onDelete}>

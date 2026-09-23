@@ -89,7 +89,7 @@
 - [ ] 10.8 Add the context meter and the compact notice, and the `/compact` draft dialog with edit, accept, and cancel. Check with Vitest that the meter follows the `usage` event, that accepting calls the compaction endpoint with the edited text, that cancelling changes nothing, that the meter is marked as an estimate after a model switch, and that a conversation too long for its model asks the user to choose a larger loadout model
 - [x] 10.9 Update the error display for `model_not_set`, `model_unavailable`, `context_full`, `output_limit_reached` with a retry, `tool_loop_limit`, `provider_rate_limited`, `provider_request_refused`, `provider_key_missing`, and `conversation_busy`, and show the usage warning notice. Check with Vitest that each renders its message and link and that the user's message stays
 - [x] 10.10 Update the empty-state command list to `/push`, `/pull`, `/explore`, and `/compact`. Check with Vitest that all four appear and `/delete` does not
-- [ ] 10.11 Show the held proposal before archive, before `/compact`, and on a topic change from the `proposal` event. Check with Vitest that each shows the card first and that the action then continues, and that opening an old conversation does not show it
+- [x] 10.11 Show the held proposal before archive, before `/compact`, and on a topic change from the `proposal` event. Check with Vitest that each shows the card first and that the action then continues, and that opening an old conversation does not show it
 
 ## 11. Frontend: settings
 
