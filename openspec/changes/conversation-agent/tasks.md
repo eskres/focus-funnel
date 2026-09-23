@@ -54,9 +54,9 @@
 - [x] 7.2 Add the confirm endpoint with the `save_thought` seam that answers "not available yet". Check with pytest that confirming with edited text returns the edited text and the not-available outcome, and that the seam can be replaced in a test to report success
 - [x] 7.3 Add the `search_thoughts` stub that returns "not available yet" from one function. Check with pytest that the result reaches the model and that the function can be replaced in a test
 - [x] 7.4 Run a smoke check against a real Nebius key: send a greeting, a to-do, a recall question, an idea, and a `/push` and a `/pull` message. Check that the greeting calls no tool, that each other message calls the expected tool, and that answers stream. The full probe set is task 12.1 Done 2026-09-23 on `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`: 6 of 6 as expected, 2.1 to 5.5 s per call, all tool arguments valid
-- [ ] 7.5 Add the held-proposal note to the turn context so an already-shown conclusion is not proposed again. Check with pytest that the note is present when a proposal is held and absent otherwise, and that a proposal stays held across turns
-- [ ] 7.6 Add the forced proposal call used before archive, before `/compact`, and when the model has produced none, recorded with `kind` proposal. Check with pytest that it returns a proposal for a conversation with a discussion, and that it is not called when a held proposal already exists
-- [ ] 7.7 Check that time never brings a held proposal back. Check with pytest that opening a conversation with a held proposal after a long time shows it only as held and that no model is called
+- [x] 7.5 Add the held-proposal note to the turn context so an already-shown conclusion is not proposed again. Check with pytest that the note is present when a proposal is held and absent otherwise, and that a proposal stays held across turns
+- [x] 7.6 Add the forced proposal call used before archive, before `/compact`, and when the model has produced none, recorded with `kind` proposal. Check with pytest that it returns a proposal for a conversation with a discussion, and that it is not called when a held proposal already exists
+- [x] 7.7 Check that time never brings a held proposal back. Check with pytest that opening a conversation with a held proposal after a long time shows it only as held and that no model is called
 
 ## 8. Context management
 
