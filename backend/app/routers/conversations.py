@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.chat.config import ChatConfig, get_chat_config
+from app.chat import tools
 from app.chat.conversations import get_conversation, list_messages, now, switch_model
 from app.db import get_session
 from app.errors import ApiError, ErrorCode
@@ -52,6 +53,18 @@ class ConversationDetail(ConversationSummary):
 class ConversationList(BaseModel):
     conversations: list[ConversationSummary]
     archived: list[ConversationSummary]
+
+
+class ProposalIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(min_length=1)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ConfirmOutcome(BaseModel):
+    saved: bool
+    message: str
+    proposal: ProposalIn
 
 
 class ConversationPatch(BaseModel):
@@ -188,3 +201,32 @@ async def delete_conversation(
     await session.execute(delete(Conversation).where(Conversation.id == conversation.id))
     await session.commit()
     return Response(status_code=204)
+
+
+@router.post("/{conversation_id}/proposal/confirm", response_model=ConfirmOutcome)
+async def confirm_proposal(
+    conversation_id: uuid.UUID,
+    body: ProposalIn,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> ConfirmOutcome:
+    """Hand the proposal, as the user edited it, to thought storage.
+
+    A saved proposal is no longer held. One that could not be saved stays
+    held, and its text comes back so the card can keep it.
+    """
+    conversation = await get_conversation(session, user, conversation_id)
+    title = body.title.strip()
+    summary = body.summary.strip()
+    if not title or not summary:
+        raise ApiError(422, ErrorCode.VALIDATION_ERROR, "A proposal needs a title and a summary.")
+    proposal = tools.Proposal(
+        title=title, summary=summary, tags=[tag.strip() for tag in body.tags if tag.strip()]
+    )
+    outcome = await tools.save_thought(user, proposal)
+    if outcome.saved:
+        conversation.held_proposal = None
+        await session.commit()
+    return ConfirmOutcome(
+        saved=outcome.saved, message=outcome.message, proposal=ProposalIn(**proposal.as_dict())
+    )

@@ -27,7 +27,9 @@ class Conversation(Base):
     """One chat, with the model it uses. Stored as plain text, like thoughts.
 
     held_proposal is the latest proposal the user has not confirmed: title,
-    summary, tags, and the message position it was made at.
+    summary, tags, and the message position it was made at. turn_started_at
+    is set while a turn runs, so a second turn in the same conversation is
+    refused.
     """
 
     __tablename__ = "conversations"
@@ -46,6 +48,9 @@ class Conversation(Base):
     )
     last_prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     held_proposal: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    turn_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

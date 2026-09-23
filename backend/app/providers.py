@@ -64,7 +64,7 @@ def unreachable(provider: ProviderPreset) -> ApiError:
     return ApiError(
         502,
         ErrorCode.PROVIDER_UNREACHABLE,
-        f"Couldn't reach {provider.label} to check the key. Try again.",
+        f"Couldn't reach {provider.label}. Try again.",
     )
 
 

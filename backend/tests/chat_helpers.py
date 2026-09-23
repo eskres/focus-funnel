@@ -8,6 +8,7 @@ takes the next scripted reply; a reply is either a finished completion (a
 dict) or a list of streamed chunks, and may end in a mid-stream failure.
 """
 
+import asyncio
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -20,6 +21,7 @@ from fastapi.testclient import TestClient
 from app.auth import get_jwks_cache
 from app.main import app
 from app.providers import get_provider_http_client
+from tests.conftest import FakeProvider
 
 PROVIDERS_FIXTURE = Path(__file__).parent / "fixtures" / "providers" / "valid.yaml"
 NANO = "vendor/nano-model"
@@ -139,6 +141,10 @@ class _SseStream(httpx2.AsyncByteStream):
         for item in self._items:
             if item is MidStreamFailure or isinstance(item, MidStreamFailure):
                 raise httpx2.ReadError("connection reset")
+            if isinstance(item, asyncio.Event):
+                # Hold the stream here until the test sets the event.
+                await asyncio.wait_for(item.wait(), timeout=5)
+                continue
             yield f"data: {json.dumps(item)}\n\n".encode()
         yield b"data: [DONE]\n\n"
 
@@ -158,10 +164,12 @@ class _SharedClient(httpx2.AsyncClient):
         pass
 
 
-class FakeLLM:
-    """Answers /models and /chat/completions; records every chat request body."""
+class FakeLLM(FakeProvider):
+    """FakeProvider with routes: answers /models and /chat/completions from a
+    script, streamed or not, and records every chat request body."""
 
     def __init__(self, replies: list[Reply] | None = None, models: dict | None = None):
+        super().__init__(self._route)
         self.replies = list(replies or [])
         self.models = models if models is not None else MODEL_LIST
         self.chat_requests: list[dict] = []
@@ -171,7 +179,7 @@ class FakeLLM:
         self.replies.extend(replies)
         return self
 
-    def _handle(self, request: httpx2.Request) -> httpx2.Response:
+    def _route(self, request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith("/models"):
             self.model_list_calls += 1
             return httpx2.Response(200, json=self.models)
@@ -316,3 +324,17 @@ def seed_conversation(
         return str(conversation.id)
 
     return run_db(url, work)
+
+
+def chat(client, headers, message: str, conversation_id: str | None = None, **extra):
+    body = {"message": message, **extra}
+    if conversation_id is not None:
+        body["conversation_id"] = conversation_id
+    return client.post("/api/chat", headers=headers, json=body)
+
+
+def ready_user(client, headers, *entries: dict):
+    """Save a Nebius key and a loadout, NANO as the default unless entries are given."""
+    save_key(client, headers)
+    response = save_models(client, headers, *(entries or (entry(NANO, default=True),)))
+    assert response.status_code == 200, response.text

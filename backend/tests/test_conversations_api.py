@@ -296,3 +296,60 @@ def test_a_model_outside_the_loadout_is_refused(client, alice, fake_llm, test_da
 
     assert response.status_code == 422
     assert client.get(f"/api/conversations/{conversation_id}", headers=alice).json()["model"] == NANO
+
+
+# --- 7.2 confirming a proposal ---
+
+HELD = {"title": "Oat milk", "summary": "Buy oat milk.", "tags": ["shopping"], "position": 1}
+
+
+def confirm(client, headers, conversation_id, **proposal):
+    body = {"title": "Oat milk", "summary": "Buy oat milk.", "tags": ["shopping"], **proposal}
+    return client.post(
+        f"/api/conversations/{conversation_id}/proposal/confirm", headers=headers, json=body
+    )
+
+
+def test_confirming_returns_the_edited_text_and_that_saving_is_not_available(
+    client, alice, test_database_url
+):
+    conversation_id = seed_conversation(test_database_url, client, alice, held_proposal=HELD)
+
+    response = confirm(client, alice, conversation_id, summary="  Buy oat milk tomorrow.  ", tags=["milk", " "])
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["saved"] is False
+    assert "not available yet" in body["message"]
+    assert body["proposal"] == {"title": "Oat milk", "summary": "Buy oat milk tomorrow.", "tags": ["milk"]}
+    # Not saved, so it stays held.
+    assert client.get(f"/api/conversations/{conversation_id}", headers=alice).json()["held_proposal"] == HELD
+
+
+def test_the_save_seam_can_be_replaced_to_report_success(client, alice, test_database_url, monkeypatch):
+    from app.chat import tools
+
+    handed = []
+
+    async def save(user, proposal):
+        handed.append(proposal)
+        return tools.SaveOutcome(saved=True, message="Saved.")
+
+    monkeypatch.setattr(tools, "save_thought", save)
+    conversation_id = seed_conversation(test_database_url, client, alice, held_proposal=HELD)
+
+    response = confirm(client, alice, conversation_id, summary="Trimmed.")
+
+    assert response.json()["saved"] is True
+    assert handed[0].summary == "Trimmed."
+    assert client.get(f"/api/conversations/{conversation_id}", headers=alice).json()["held_proposal"] is None
+
+
+def test_confirming_in_another_users_conversation_is_not_found(client, alice, bob, test_database_url):
+    conversation_id = seed_conversation(test_database_url, client, alice, held_proposal=HELD)
+    assert confirm(client, bob, conversation_id).status_code == 404
+
+
+def test_a_proposal_needs_a_title_and_summary(client, alice, test_database_url):
+    conversation_id = seed_conversation(test_database_url, client, alice)
+    assert confirm(client, alice, conversation_id, title="  ").status_code == 422

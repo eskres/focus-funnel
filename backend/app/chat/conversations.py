@@ -1,14 +1,14 @@
 """Stored conversations: creating them, their model, and their messages."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.config import ChatConfig
 from app.chat.loadout import find_loadout_model
-from app.errors import ApiError, ErrorCode
+from app.errors import ApiError, ErrorCode, conversation_busy
 from app.models import ChatModel, Conversation, Message, User
 from app.ownership import get_owned_or_404
 
@@ -113,3 +113,43 @@ async def next_position(session: AsyncSession, conversation: Conversation) -> in
         )
     ).scalar_one()
     return 0 if highest is None else highest + 1
+
+
+# A turn that has not finished after this long is taken to have died with
+# its server, so the conversation is free again.
+TURN_CLAIM_TIMEOUT = timedelta(minutes=15)
+
+
+async def claim_turn(session: AsyncSession, conversation: Conversation) -> None:
+    """Mark a turn as running, or raise conversation_busy if one already is.
+
+    One atomic update, so two requests cannot both win.
+    """
+    started = now()
+    result = await session.execute(
+        update(Conversation)
+        .where(
+            Conversation.id == conversation.id,
+            or_(
+                Conversation.turn_started_at.is_(None),
+                Conversation.turn_started_at < started - TURN_CLAIM_TIMEOUT,
+            ),
+        )
+        .values(turn_started_at=started)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        await session.rollback()
+        raise conversation_busy()
+    await session.commit()
+    conversation.turn_started_at = started
+
+
+async def release_turn(session: AsyncSession, conversation_id: uuid.UUID) -> None:
+    await session.execute(
+        update(Conversation)
+        .where(Conversation.id == conversation_id)
+        .values(turn_started_at=None)
+        .execution_options(synchronize_session=False)
+    )
+    await session.commit()

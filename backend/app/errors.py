@@ -34,11 +34,20 @@ class ErrorCode:
 
 
 class ApiError(Exception):
-    def __init__(self, status_code: int, code: str, message: str):
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        headers: dict[str, str] | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
+        # Extra response headers, for example the conversation a refused chat
+        # message was stored in.
+        self.headers = headers or {}
 
 
 def model_not_set() -> ApiError:
@@ -111,15 +120,18 @@ _HTTP_STATUS_CODES = {
 }
 
 
-def error_response(status_code: int, code: str, message: str) -> JSONResponse:
+def error_response(
+    status_code: int, code: str, message: str, headers: dict[str, str] | None = None
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={"error": {"code": code, "message": message}},
+        headers=headers,
     )
 
 
 async def _handle_api_error(_request: Request, exc: ApiError) -> JSONResponse:
-    return error_response(exc.status_code, exc.code, exc.message)
+    return error_response(exc.status_code, exc.code, exc.message, exc.headers)
 
 
 async def _handle_validation_error(

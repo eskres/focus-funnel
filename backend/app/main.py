@@ -7,7 +7,7 @@ from app.config import get_settings
 from app.errors import register_error_handlers
 from app.log_masking import install_log_masking
 from app.provider_config import get_providers_config
-from app.routers import conversations, health, me, providers, settings_models
+from app.routers import chat, conversations, health, me, providers, settings_models
 
 
 @asynccontextmanager
@@ -29,3 +29,4 @@ app.include_router(me.router)
 app.include_router(providers.router)
 app.include_router(settings_models.router)
 app.include_router(conversations.router)
+app.include_router(chat.router)
