@@ -11,7 +11,7 @@
 
 ## 3. Data
 
-- [x] 3.1 Add the `ProviderKey` model and one migration that renames `nebius_api_keys`, adds `provider_id` (default `nebius`) and `base_url`, and keeps existing rows, then reset any local database that cannot run it. Check that `alembic upgrade head` then `downgrade -1` runs cleanly on an empty SQLite database and on the compose Postgres, that a Nebius row survives the upgrade as the `nebius` provider, and that there is a single Alembic head
+- [x] 3.1 Add the `ProviderKey` model and one migration that renames `nebius_api_keys`, adds `provider_id` (default `nebius`) and `base_url`, and keeps existing rows, then reset any local database that cannot run it. Check that `alembic upgrade head` then `downgrade -1` runs cleanly on an empty SQLite database and on the compose Postgres, that a Nebius row survives the upgrade as the `nebius` provider row (its key is not readable and is entered again, see design decision 3), and that there is a single Alembic head
 - [x] 3.2 Bind the ciphertext to the provider id as well as the user. Check with pytest that a record copied to another user, or to another provider of the same user, fails to decrypt
 
 ## 4. Client and errors
@@ -25,6 +25,7 @@
 - [x] 5.2 Add `PUT` and `DELETE /api/providers/{id}/key` with the check before saving. Check with pytest for a valid key, an invalid key giving `provider_key_invalid`, an unreachable provider giving `provider_unreachable` with nothing stored, an empty key, a replacement that fails leaving the old key, a delete leaving other providers alone, and a keyless local provider saved with no key
 - [x] 5.3 Add the custom provider rules: `base_url` accepted only for `custom`, only `http` and `https`, refused when custom providers are off, and preset URLs unchangeable. Check with pytest for each, with `validation_error` on refusal
 - [x] 5.4 Check that keys never leak. Check with pytest that no response and no log entry holds a full key, that the key status holds at most 4 characters, and that two users' keys for one provider never mix
+- [x] 5.5 Check a key with an authenticated call when the provider's model list needs no key: add the optional `key_check_url` to `providers.yaml` and set it for NVIDIA and OpenRouter. Check with pytest that the check calls that URL and not the model list, that a 401 or 403 gives `provider_key_invalid`, that a timeout, connection failure, or 5xx gives `provider_unreachable`, that a `key_check_url` that is not an http or https URL fails at load naming the preset, and that NVIDIA and OpenRouter ship with one and Nebius does not
 
 ## 6. Model list
 
@@ -42,5 +43,5 @@
 
 - [x] 8.1 Remove `/api/settings/api-key`, `NEBIUS_BASE_URL`, the `nebius_*` error codes, and the old Nebius key screen and its tests. Check that a search of `backend/` and `frontend/` for `nebius_` finds only the Nebius preset and its config, and that the suites pass
 - [x] 8.2 Run the backend suite on SQLite and on the compose Postgres, and `npm run test`, `npm run lint`, and `npm run build` in `frontend/`. Check that all pass
-- [x] 8.3 On a fresh `docker compose up --build`, save a key for Nebius and one other preset, list each provider's models, and check that a wrong key shows `provider_key_invalid` with the provider's name and that a stored Nebius key from before the upgrade still works
-- [x] 8.4 With an Ollama server and no key, save the custom provider and list its models. Check that it works, and that turning `ALLOW_CUSTOM_PROVIDER` off refuses the same request
+- [x] 8.3 On a fresh `docker compose up --build`, save a key for Nebius and one other preset, list each provider's models, and check that a wrong key shows `provider_key_invalid` with the provider's name and that a wrong key is refused for NVIDIA and OpenRouter as well (their model lists need no key)
+- [x] 8.4 With an Ollama server and no key, save the custom provider and list its models. Check that it works, and that turning `ALLOW_CUSTOM_PROVIDER` off refuses the same request. Checked 2026-09-23 against a running Ollama (model list only, no model loaded) and a stub server, on SQLite with the login token stubbed

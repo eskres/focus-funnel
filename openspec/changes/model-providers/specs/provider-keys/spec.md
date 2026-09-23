@@ -34,6 +34,12 @@ The system SHALL check a key against its provider before storing it, and SHALL s
 - **THEN** the system does not store the key
 - **AND** the system responds with error code `provider_key_invalid` and a message that says the provider rejected the key
 
+#### Scenario: Provider whose model list needs no key
+
+- **WHEN** a user submits a wrong key for a provider that serves its model list without authentication
+- **THEN** the system checks the key with an authenticated call that the provider rejects for a wrong key
+- **AND** the system does not store the key, and responds with error code `provider_key_invalid`
+
 #### Scenario: Provider cannot be reached
 
 - **WHEN** a user submits a key and the provider does not answer, times out, or returns a server error

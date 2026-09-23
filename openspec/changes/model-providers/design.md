@@ -40,12 +40,15 @@ providers:
     key_url: <where to get a key>
     notice: <data-handling text>
     key_required: true
+    key_check_url: <optional, see below>
     capabilities:
       model_list: { prices: true, context_length: true, features: true }
       stream_usage: final_chunk        # final_chunk | incremental | none
 ```
 
-The startup check refuses a missing base URL, an unknown `stream_usage` value, a missing capability, or a duplicate id. The file holds no key. The `custom` provider is not a preset: its base URL is entered by the user and its capabilities are the most cautious set (nothing reported, usage read from a final chunk when present).
+`key_check_url` is optional. Saving a key lists models by default. A provider whose model list needs no key answers 200 to any key, so listing models cannot tell a wrong key from a right one. Such a provider sets `key_check_url` to an authenticated URL that answers 401 or 403 to a wrong key, and the check calls that URL instead.
+
+The startup check refuses a missing base URL, a `key_check_url` that is not an http or https URL, an unknown `stream_usage` value, a missing capability, or a duplicate id. The file holds no key. The `custom` provider is not a preset: its base URL is entered by the user and its capabilities are the most cautious set (nothing reported, usage read from a final chunk when present).
 
 `NEBIUS_BASE_URL` is retired in favour of the preset. An operator who needs another base URL edits the file.
 
@@ -67,7 +70,7 @@ key_last4 TEXT null, created_at, updated_at
 UNIQUE (user_id, provider_id)
 ```
 
-The existing encryption and the "record copied to another user fails to decrypt" binding are kept, and the provider id is added to what the ciphertext is bound to, so a key cannot be moved between providers. One migration renames the table, adds `provider_id` with a server default of `nebius` and `base_url`, and keeps existing rows. The downgrade restores the old name and drops the new columns.
+The existing encryption and the "record copied to another user fails to decrypt" binding are kept, and the provider id is added to what the ciphertext is bound to, so a key cannot be moved between providers. One migration renames the table, adds `provider_id` with a server default of `nebius` and `base_url`, and keeps existing rows. The provider id joins the ciphertext binding, so a row saved before the upgrade no longer decrypts. Nothing is live, so this is accepted: local databases are reset and the key is entered again, and no fallback for the old binding is added. The downgrade restores the old name and drops the new columns.
 
 ### 4. Routes
 
@@ -119,6 +122,12 @@ Groq is dropped from this change (2026-09-22, user decision): only Nebius, NVIDI
 - Tool calling returned a clean `tool_calls` response.
 - Ships with the full capability set: `model_list: { prices: true, context_length: true, features: true }`, `stream_usage: final_chunk`.
 
+**Key check probe (2026-09-23):** `GET /models` answers 200 to any key on NVIDIA and OpenRouter (and to no key), so a wrong key was saved as valid. Checks that tell keys apart:
+
+- OpenRouter: `GET https://openrouter.ai/api/v1/auth/key` answers 401 to a wrong key and 200 to a right one.
+- NVIDIA: `GET https://api.nvcf.nvidia.com/v2/nvcf/functions` answers 401 to a wrong key and 200 to a right one, with a response of about 100 KB, fetched only when a key is saved. A one-token chat also tells keys apart, but needs a model, and the model tried first (`meta/llama-3.2-1b-instruct`) had been retired. `api.ngc.nvidia.com/v3/keys/get-caller-info` also works, but takes a form-encoded POST.
+- Nebius: `GET /models` answers 401 to a wrong key, so it needs no `key_check_url`.
+
 **Ollama probe (2026-09-22, local `mistral-small3.2` via `ollama serve`, no key, `PROVIDERS_CONFIG_PATH` not involved since Ollama is exercised through the `custom` provider):**
 
 - Model list (`GET /v1/models`) reports only `id`, `object`, `created`, `owned_by` — no `context_length`, no `pricing`, no `supported_features`. Confirms the `custom` provider's cautious `model_list` capabilities (nothing reported).
@@ -137,7 +146,7 @@ Groq is dropped from this change (2026-09-22, user decision): only Nebius, NVIDI
 ## Migration Plan
 
 1. Ship the migration, backend, and frontend together, because routes and error codes change.
-2. The migration keeps an existing Nebius key as the `nebius` provider's key.
+2. The migration keeps an existing Nebius row as the `nebius` provider's, but its key is not readable after the binding change (decision 3). Reset local databases and enter the key again.
 3. Rollback: `alembic downgrade -1` restores the old table name. Keys saved for other providers are dropped.
 
 ## Open Questions

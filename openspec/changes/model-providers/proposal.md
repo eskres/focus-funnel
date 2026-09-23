@@ -13,7 +13,7 @@ The app talks to one provider, Nebius, with one saved key. Users want a free NVI
 - Use provider-neutral error codes: `provider_key_missing`, `provider_key_invalid`, `provider_key_rejected`, `provider_unreachable`, `provider_rate_limited`, and `provider_request_refused`. A 429 and any other unmapped client error no longer surface as internal errors.
 - Let an operator disable the custom provider URL in server configuration, so a public instance cannot be pointed at internal addresses.
 - Show a provider's data-handling notice before its key is first used.
-- **BREAKING (internal):** replace the `nebius_api_keys` table, the `/api/settings/api-key` routes, the `nebius_*` error codes, and the Nebius key settings screen. A migration renames the table and keeps existing rows as the `nebius` provider.
+- **BREAKING (internal):** replace the `nebius_api_keys` table, the `/api/settings/api-key` routes, the `nebius_*` error codes, and the Nebius key settings screen. A migration renames the table and keeps existing rows as the `nebius` provider, but the ciphertext binding changes (decision 3), so a key saved before the upgrade cannot be read and is entered again. Nothing is live, so local databases are reset.
 
 ## Capabilities
 
