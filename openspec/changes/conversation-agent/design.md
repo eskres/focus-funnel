@@ -176,7 +176,7 @@ Codes: `model_not_set` (409), `model_unknown` (400), `model_unsupported` (400), 
 
 The prototype on `backup/gate-build` is a source, not a base. The build brings over, with `gate` removed from names: the SSE writer, the slash-command parser, the chat UI (composer, message list, error display, command list), `lib/sse.ts`, `lib/chat.ts`, `redirect-to-login`, the five shadcn components, and the proxy SSE test. The provider client, error mapper, model list, feature classifier, and `FakeProvider` double come from `model-providers`, which lands first. Not brought over: the gate registry, `gates.yaml`, overrides and their storage and resolution, the gate handlers, the router, the gate settings API and cards, or the `gate_overrides` migration.
 
-One Alembic revision creates the new tables, with `down_revision` `d06a9fe12cba` (the API key migration). There are no users yet, so no data is migrated. A developer's local database that already ran the prototype's overrides migration is reset (delete the Postgres volume, or recreate the SQLite file), since Alembic cannot find that revision. The downgrade drops the new tables.
+One Alembic revision creates the new tables, with `down_revision` `bf3f5a046190` (the provider keys rename from `model-providers`). There are no users yet, so no data is migrated. A developer's local database that already ran the prototype's overrides migration is reset (delete the Postgres volume, or recreate the SQLite file), since Alembic cannot find that revision. The downgrade drops the new tables.
 
 ### 13. Several conversations on several models
 

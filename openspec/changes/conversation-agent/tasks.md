@@ -13,9 +13,9 @@
 
 ## 3. Data model and migration
 
-- [ ] 3.1 Add the `Conversation` and `Message` models from design decision 3, with cascade on user delete and the unique position per conversation. Check with pytest that a duplicate position is rejected, that deleting the user deletes both, and that deleting a conversation deletes its messages
-- [ ] 3.2 Add the `UsageEvent`, `ChatModel`, and `UserSettings` models. Check with pytest that a duplicate model per user is rejected, that deleting a conversation sets the usage event's conversation to null and keeps the row, and that deleting the user deletes all three
-- [ ] 3.3 Add one Alembic revision that creates the new tables, with `down_revision` `d06a9fe12cba` and no data migration, and reset the local database (it ran the prototype's overrides migration). Check that `alembic upgrade head` then `downgrade -1` runs cleanly on an empty SQLite database and on a fresh compose Postgres, that there is a single Alembic head, and that the app starts on the upgraded database
+- [x] 3.1 Add the `Conversation` and `Message` models from design decision 3, with cascade on user delete and the unique position per conversation. Check with pytest that a duplicate position is rejected, that deleting the user deletes both, and that deleting a conversation deletes its messages
+- [x] 3.2 Add the `UsageEvent`, `ChatModel`, and `UserSettings` models. Check with pytest that a duplicate model per user is rejected, that deleting a conversation sets the usage event's conversation to null and keeps the row, and that deleting the user deletes all three
+- [x] 3.3 Add one Alembic revision that creates the new tables, with `down_revision` `bf3f5a046190` and no data migration, and reset the local database (it ran the prototype's overrides migration). Check that `alembic upgrade head` then `downgrade -1` runs cleanly on an empty SQLite database and on a fresh compose Postgres, that there is a single Alembic head, and that the app starts on the upgraded database
 - [ ] 3.4 Check with a pytest test that one user's conversations, messages, usage, and loadout are never visible to or changed by another user, on each table
 
 ## 4. Model settings API
