@@ -93,9 +93,9 @@
 
 ## 11. Frontend: settings
 
-- [ ] 11.1 Add the model section to the settings page: loadout slots, the default marked, an effort choice per model, temperature, and the hint. Check with Vitest against mocked responses that a first visit shows "Not set" with the hint, that a model not reporting tool calling carries the unconfirmed note, that a sixth model is refused, and that no token limit field exists
-- [ ] 11.2 Add Test and the refusal reasons to the model section. Check with Vitest that a `model_unknown` response names the model, that an empty-answer failure names the effort, and that the displayed values are unchanged after a refusal
-- [ ] 11.3 Show the provider key alert, with a link to the provider settings and empty choosers, when a provider's model list loads without a key. Check with a Vitest test that the alert and its link appear
+- [x] 11.1 Add the model section to the settings page: loadout slots, the default marked, an effort choice per model, temperature, and the hint. Check with Vitest against mocked responses that a first visit shows "Not set" with the hint, that a model not reporting tool calling carries the unconfirmed note, that a sixth model is refused, and that no token limit field exists
+- [x] 11.2 Add Test and the refusal reasons to the model section. Check with Vitest that a `model_unknown` response names the model, that an empty-answer failure names the effort, and that the displayed values are unchanged after a refusal
+- [x] 11.3 Show the provider key alert, with a link to the provider settings and empty choosers, when a provider's model list loads without a key. Check with a Vitest test that the alert and its link appear
 - [ ] 11.4 Add the usage section with an SVG bar chart of daily spend, a period choice, the split by model, the month total, the estimate label, and the link to the provider's console for the balance when one is known. Check with Vitest that bars render for the mocked days, that an empty state shows, that changing the period refetches, and that no balance is shown
 - [ ] 11.5 Add the warning threshold field with a unit choice. Check with Vitest that saving sends the unit and amount and that a warning notice from the chat names the threshold
 
