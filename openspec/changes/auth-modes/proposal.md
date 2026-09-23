@@ -1,4 +1,4 @@
-> **Planning status:** Proposal only. Write the specs, design, and tasks when this change is picked up. Depends on `platform-foundation` and `model-providers`.
+> Depends on `platform-foundation` (archived), `model-providers`, and `conversation-agent`. Build it after both have landed.
 
 ## Why
 
@@ -16,12 +16,12 @@ Login is hard-wired to Auth0. Its hosted login page does not suit an open-source
 - In `demo` mode:
   - Each visitor gets an anonymous user behind a random, unguessable session cookie (128 bits or more, HttpOnly, Secure). Every read and write is scoped to that user, so another visitor's conversation returns 404 even with its URL.
   - Anonymous users and everything they own are deleted after a set time. A background task removes them, and the demo compose overlay runs Postgres on a temporary file system so nothing survives a restart.
-  - API keys are not stored on the server. The browser keeps a key for a short time (30 minutes idle and a 4 hour limit by default), sends it with each request, and the server uses it for that call only and never logs it. A "forget key" button clears it at once.
+  - API keys are not stored on the server. The browser keeps a key in an encrypted cookie that page scripts cannot read, for a short time (30 minutes idle and a 4 hour limit by default), sends it with each request, and the server uses it for that call only and never logs it. A "forget key" button clears it at once.
   - Custom provider URLs are turned off, so the server cannot be pointed at internal addresses.
   - Responses are marked `no-store`, a per-IP rate limit applies, and only one instance runs.
   - A notice is shown before the first message, saying what is stored, for how long, that the operator can technically read stored chats, and what the chosen provider does with prompts. It reuses the provider's own notice text.
   - The server refuses to start in `demo` mode if `oidc` or `firebase` settings are also present.
-- Settings for demo mode: `DEMO_KEY_TTL_MINUTES`, `DEMO_KEY_MAX_HOURS`, `DEMO_SESSION_TTL_HOURS`, and `DEMO_RATE_LIMIT`.
+- Settings for demo mode: `DEMO_KEY_TTL_MINUTES`, `DEMO_KEY_MAX_HOURS`, `DEMO_SESSION_TTL_HOURS`, `DEMO_RATE_LIMIT`, `DEMO_NEW_SESSIONS_PER_HOUR`, and `DEMO_MAX_SESSIONS`. A visitor can also end their demo session, which deletes their data at once.
 - There is no mode with no login and persistent data. Self-hosters choose `oidc` or `firebase`, or run demo mode for a throwaway instance.
 
 ## Capabilities
@@ -42,4 +42,4 @@ Login is hard-wired to Auth0. Its hosted login page does not suit an open-source
 - **Frontend:** a login flow per mode, replacing the Auth0 SDK and its `/auth/*` routes served by `proxy.ts`; the demo notice; the key holder with its expiry and "forget key" button.
 - **Deployment:** an optional compose service for Pocket ID and a demo overlay with Postgres on a temporary file system.
 - **Dependencies:** removes `@auth0/nextjs-auth0`. Adds a generic OIDC client library and the Firebase web SDK, with token verification for Firebase on the backend.
-- **Open questions for when it is picked up:** whether Pocket ID's passkey-only login needs a secure context (HTTPS or localhost) on a plain-HTTP LAN, which token the backend verifies in `oidc` mode, and whether the Firebase session cookie needs a service account.
+- **Decided in `design.md`:** the backend verifies the ID token in both real modes; Firebase needs no service account; Pocket ID's passkeys need HTTPS or `localhost`, so the docs cover a reverse proxy for LAN use.
