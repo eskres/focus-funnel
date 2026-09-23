@@ -126,11 +126,18 @@ async def check_provider_key(
     api_key: str,
     http_client: httpx2.AsyncClient | None = None,
 ) -> None:
-    """Raise provider_key_invalid or provider_unreachable unless the provider accepts the key."""
+    """Raise provider_key_invalid or provider_unreachable unless the provider accepts the key.
+
+    Lists models unless the provider has a key_check_url, for a provider whose
+    model list needs no key and so accepts any key.
+    """
     register_secret(api_key)
     client = make_client(provider, api_key, http_client=http_client)
     try:
-        await client.models.list()
+        if provider.key_check_url:
+            await client.get(provider.key_check_url, cast_to=object)
+        else:
+            await client.models.list()
     except openai.OpenAIError as exc:
         mapped = map_provider_error(exc, provider, saved_key=False)
         if mapped is None:

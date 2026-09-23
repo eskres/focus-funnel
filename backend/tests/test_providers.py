@@ -24,7 +24,10 @@ MODELS_OK = {"object": "list", "data": []}
 
 
 def make_provider(
-    provider_id: str = "nebius", key_required: bool = True, label: str = "Test Provider"
+    provider_id: str = "nebius",
+    key_required: bool = True,
+    label: str = "Test Provider",
+    key_check_url: str | None = None,
 ) -> ProviderPreset:
     return ProviderPreset(
         id=provider_id,
@@ -33,6 +36,7 @@ def make_provider(
         key_url="https://provider.test/keys",
         notice="A notice.",
         key_required=key_required,
+        key_check_url=key_check_url,
         capabilities=ProviderCapabilities(
             model_list=ModelListCapabilities(prices=True, context_length=True, features=True),
             stream_usage="final_chunk",
@@ -96,6 +100,44 @@ async def test_valid_key_passes(provider):
     assert len(fake.requests) == 1
     assert str(fake.requests[0].url) == f"{BASE_URL}models"
     assert fake.requests[0].headers["Authorization"] == "Bearer nb-good"
+
+
+CHECK_URL = "https://provider.test/v1/auth/key"
+
+
+async def test_key_check_url_is_called_instead_of_the_model_list():
+    provider = make_provider(key_check_url=CHECK_URL)
+    fake = FakeProvider(status(200, {"data": {}}))
+
+    await check_provider_key(provider, "nb-good", http_client=fake.http_client())
+
+    assert [str(r.url) for r in fake.requests] == [CHECK_URL]
+    assert fake.requests[0].method == "GET"
+    assert fake.requests[0].headers["Authorization"] == "Bearer nb-good"
+
+
+@pytest.mark.parametrize("code", [401, 403])
+async def test_key_check_url_rejection_means_invalid_key(code):
+    provider = make_provider(key_check_url=CHECK_URL)
+    fake = FakeProvider(status(code))
+    error = await assert_raises_code(
+        check_provider_key(provider, "nb-bad", http_client=fake.http_client()),
+        ErrorCode.PROVIDER_KEY_INVALID,
+    )
+    assert error.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "respond", [status(503), fail_with(httpx2.ConnectError), fail_with(httpx2.ReadTimeout)]
+)
+async def test_key_check_url_failure_means_unreachable(respond):
+    provider = make_provider(key_check_url=CHECK_URL)
+    fake = FakeProvider(respond)
+    error = await assert_raises_code(
+        check_provider_key(provider, "nb-key", http_client=fake.http_client()),
+        ErrorCode.PROVIDER_UNREACHABLE,
+    )
+    assert error.status_code == 502
 
 
 @pytest.mark.parametrize("code", [401, 403])

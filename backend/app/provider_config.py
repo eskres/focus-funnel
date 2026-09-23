@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 import yaml
 
@@ -44,6 +45,10 @@ class ProviderPreset:
     notice: str
     key_required: bool
     capabilities: ProviderCapabilities
+    # An authenticated URL that answers 401 or 403 to a wrong key. Needed when
+    # the provider serves its model list without a key, so listing models
+    # cannot tell a wrong key from a right one. None means "list models".
+    key_check_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -173,6 +178,14 @@ def _parse_preset(preset_id: str, raw: object) -> ProviderPreset:
 
     capabilities = _parse_capabilities(preset_id, raw.get("capabilities"))
 
+    key_check_url = raw.get("key_check_url")
+    if key_check_url is not None and (
+        not isinstance(key_check_url, str) or urlparse(key_check_url).scheme not in ("http", "https")
+    ):
+        raise ProviderConfigError(
+            f"Provider '{preset_id}' 'key_check_url' must be an http or https URL"
+        )
+
     return ProviderPreset(
         id=preset_id,
         label=label,
@@ -181,6 +194,7 @@ def _parse_preset(preset_id: str, raw: object) -> ProviderPreset:
         notice=notice,
         key_required=key_required,
         capabilities=capabilities,
+        key_check_url=key_check_url,
     )
 
 

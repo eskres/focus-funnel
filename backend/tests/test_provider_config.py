@@ -1,11 +1,14 @@
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
+from app.main import app
 from app.provider_config import (
     CUSTOM_PROVIDER_ID,
     ProviderConfigError,
     custom_provider,
+    get_providers_config,
     load_providers_config,
 )
 
@@ -102,3 +105,34 @@ def test_custom_provider_has_the_cautious_capability_set():
 def test_preset_named_custom_is_rejected():
     with pytest.raises(ProviderConfigError, match="custom"):
         load_providers_config(FIXTURES / "reserved_custom_id.yaml")
+
+
+def test_app_refuses_to_start_on_an_invalid_file(settings_env):
+    settings_env.setenv("PROVIDERS_CONFIG_PATH", str(FIXTURES / "missing_base_url.yaml"))
+    get_providers_config.cache_clear()
+    try:
+        with pytest.raises(ProviderConfigError):
+            with TestClient(app):
+                pass
+    finally:
+        get_providers_config.cache_clear()
+
+
+def test_key_check_url_is_optional_and_loaded():
+    config = load_providers_config(FIXTURES / "key_check_url.yaml")
+    assert config.get("gated").key_check_url == "https://gated.test/v1/auth/key"
+    assert load_providers_config(FIXTURES / "valid.yaml").get("nebius").key_check_url is None
+
+
+def test_key_check_url_must_be_a_web_address_naming_the_preset():
+    with pytest.raises(ProviderConfigError, match="gated.*key_check_url"):
+        load_providers_config(FIXTURES / "bad_key_check_url.yaml")
+
+
+def test_shipped_providers_whose_model_list_is_public_check_keys_elsewhere():
+    # NVIDIA and OpenRouter serve /models without authentication (probed
+    # 2026-09-23), so listing models cannot tell a wrong key from a right one.
+    config = load_providers_config()
+    assert config.get("nebius").key_check_url is None
+    assert config.get("nvidia").key_check_url
+    assert config.get("openrouter").key_check_url

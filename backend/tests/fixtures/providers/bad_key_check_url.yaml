@@ -1,0 +1,11 @@
+providers:
+  gated:
+    label: Gated Models Provider
+    base_url: https://gated.test/v1/
+    key_url: https://gated.test/keys
+    notice: A notice.
+    key_required: true
+    key_check_url: ftp://gated.test/auth/key
+    capabilities:
+      model_list: { prices: false, context_length: false, features: false }
+      stream_usage: final_chunk
