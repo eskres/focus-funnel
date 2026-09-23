@@ -28,10 +28,10 @@
 
 ## 5. Conversations API
 
-- [ ] 5.1 Add `GET /api/conversations` (main list newest activity first, and the archived list), `GET /api/conversations/{id}` with all messages including compacted ones, and `PATCH` for title, archived state, model, and effort. Check with pytest for ordering, archive and restore leaving messages unchanged, a title change persisting, and a model change persisting
-- [ ] 5.2 Add `DELETE /api/conversations/{id}`. Check with pytest that it removes the conversation and its messages, returns 204, keeps the user's usage records, and returns `not_found` for another user's conversation
+- [x] 5.1 Add `GET /api/conversations` (main list newest activity first, and the archived list), `GET /api/conversations/{id}` with all messages including compacted ones, and `PATCH` for title, archived state, model, and effort. Check with pytest for ordering, archive and restore leaving messages unchanged, a title change persisting, and a model change persisting
+- [x] 5.2 Add `DELETE /api/conversations/{id}`. Check with pytest that it removes the conversation and its messages, returns 204, keeps the user's usage records, and returns `not_found` for another user's conversation
 - [ ] 5.3 Set a new conversation's title from the start of the first message and its model and effort from the default, leaving the model empty when no default is set. Check with pytest that the title starts with the message, that a later change of the default does not change an existing conversation, and that a conversation with no model takes the default at its next message and stores it
-- [ ] 5.4 Apply a model change to a conversation: set the effort to the new model's loadout effort, or none, drop an effort the effort table refuses for it, and clear the stored prompt token count. Check with pytest for each of those, and that the earlier messages are unchanged
+- [x] 5.4 Apply a model change to a conversation: set the effort to the new model's loadout effort, or none, drop an effort the effort table refuses for it, and clear the stored prompt token count. Check with pytest for each of those, and that the earlier messages are unchanged
 
 ## 6. Chat turn and tool loop
 

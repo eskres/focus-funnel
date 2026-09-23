@@ -252,3 +252,67 @@ def save_models(client, headers, *entries: dict, temperature=None):
 
 def error_code(response) -> str:
     return response.json()["error"]["code"]
+
+
+def run_db(url: str, work):
+    """Run `await work(session)` against the test database and return its result."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from sqlalchemy.pool import NullPool
+
+    from app.db import create_engine
+
+    async def main():
+        engine = create_engine(url, poolclass=NullPool)
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                return await work(session)
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(main())
+
+
+def user_id_for(client, headers):
+    """Make sure the user exists (the first request creates it) and return its id."""
+    return client.get("/api/me", headers=headers).json()["id"]
+
+
+def seed_conversation(
+    url: str,
+    client,
+    headers,
+    title: str = "A conversation",
+    messages: tuple[str, ...] = ("hello", "Hi!"),
+    minutes_ago: int = 0,
+    **fields,
+):
+    """Store a conversation with alternating user and assistant messages; return its id."""
+    import uuid
+    from datetime import UTC, datetime, timedelta
+
+    from app.models import Conversation, Message
+
+    user_id = uuid.UUID(user_id_for(client, headers))
+
+    async def work(session):
+        conversation = Conversation(
+            user_id=user_id,
+            title=title,
+            last_activity_at=datetime.now(UTC) - timedelta(minutes=minutes_ago),
+            **fields,
+        )
+        session.add(conversation)
+        await session.flush()
+        for position, content in enumerate(messages):
+            role = "user" if position % 2 == 0 else "assistant"
+            session.add(
+                Message(
+                    conversation_id=conversation.id, position=position, role=role, content=content
+                )
+            )
+        await session.commit()
+        return str(conversation.id)
+
+    return run_db(url, work)
