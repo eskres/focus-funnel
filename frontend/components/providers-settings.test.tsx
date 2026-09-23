@@ -230,7 +230,7 @@ describe("ProvidersSettings", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Read data-handling notice" }));
     fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.change(screen.getByPlaceholderText("https://your-server.example/v1/"), {
+    fireEvent.change(screen.getByPlaceholderText("http://localhost:11434/v1"), {
       target: { value: "http://localhost:11434/v1/" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -244,6 +244,16 @@ describe("ProvidersSettings", () => {
         }),
       ),
     );
+  });
+
+  it("tells the user to include /v1 and to use host.docker.internal from Docker", async () => {
+    mockApi(listResponse([custom]));
+    render(<ProvidersSettings />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Read data-handling notice" }));
+
+    expect(screen.getByText(/include the \/v1 path/i)).toBeInTheDocument();
+    expect(screen.getByText(/host\.docker\.internal/)).toBeInTheDocument();
   });
 
   it("hides the custom provider card when the server says custom is off", async () => {

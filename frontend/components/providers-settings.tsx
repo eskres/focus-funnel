@@ -291,16 +291,22 @@ function ProviderCard({
         {showForm && (
           <form onSubmit={save} className="flex flex-col gap-2">
             {provider.is_custom && (
-              <Input
-                type="text"
-                name="base_url"
-                aria-label="Base URL"
-                placeholder="https://your-server.example/v1/"
-                autoComplete="off"
-                value={baseUrl}
-                onChange={(event) => setBaseUrl(event.target.value)}
-                disabled={busy}
-              />
+              <>
+                <Input
+                  type="text"
+                  name="base_url"
+                  aria-label="Base URL"
+                  placeholder="http://localhost:11434/v1"
+                  autoComplete="off"
+                  value={baseUrl}
+                  onChange={(event) => setBaseUrl(event.target.value)}
+                  disabled={busy}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Include the /v1 path and your server&apos;s port. If Focus Funnel runs in
+                  Docker, use host.docker.internal instead of localhost.
+                </p>
+              </>
             )}
             {needsNoticeGate && (
               <label className="flex items-center gap-2 text-sm">
