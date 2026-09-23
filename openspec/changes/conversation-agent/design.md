@@ -58,7 +58,7 @@ New tables, all cascading on user delete:
 ```
 conversations   id UUID pk, user_id FK, title TEXT, provider_id TEXT null, model TEXT null, reasoning_effort TEXT null,
                 archived_at TIMESTAMPTZ null, last_activity_at, created_at, updated_at,
-                last_prompt_tokens INT null, held_proposal JSONB null
+                last_prompt_tokens INT null, held_proposal JSONB null, turn_started_at TIMESTAMPTZ null
 
 messages        id UUID pk, conversation_id FK, position INT, role TEXT
                 ('user'|'assistant'|'tool'|'summary'), content TEXT null,
@@ -90,7 +90,7 @@ user_settings   user_id UUID pk FK, temperature FLOAT null, warning_unit TEXT nu
 
 ### 4. Chat endpoint and event stream
 
-`POST /api/chat` takes `{ conversation_id?, message }`. Before the first byte it validates, loads the conversation (404 if not the user's), creates one when `conversation_id` is absent, checks the model is set and the context has room, and checks that no other turn is running for that conversation (`409 conversation_busy`, from a row lock). These failures are ordinary error responses. After the first byte, failures are `error` events with the same envelope and the stream ends without `done`.
+`POST /api/chat` takes `{ conversation_id?, message }`. Before the first byte it validates, loads the conversation (404 if not the user's), creates one when `conversation_id` is absent, checks the model is set and the context has room, and checks that no other turn is running for that conversation (`409 conversation_busy`). A turn claims the conversation with one atomic update that sets `turn_started_at` only when it is empty or older than 15 minutes, and clears it when the turn ends. This works the same on SQLite and Postgres and holds no database connection while the answer streams. The 15 minutes free a conversation whose server stopped mid-turn. These failures are ordinary error responses. After the first byte, failures are `error` events with the same envelope and the stream ends without `done`.
 
 Events, each with a JSON payload:
 
@@ -123,7 +123,7 @@ One system prompt is kept in code and not user-editable. It tells the model to t
 
 **The three triggers for offering a held proposal are not all model judgment:**
 
-- **Topic change** is the only model judgment. The system note for a turn with a held proposal says: do not repeat it, unless this message is about an unrelated topic, in which case call `propose_thought` first with a summary of everything discussed so far, then answer. It is tested by a probe (task 12.2) and, if unreliable, replaced by a comparison of embeddings of the new message and the held summary.
+- **Topic change** is the only model judgment. The system note for a turn with a held proposal says: do not repeat it, unless this message is about an unrelated topic, in which case call `propose_thought` first with a summary of everything discussed so far, then answer. It is tested by a probe (task 12.3) and, if unreliable, replaced by a comparison of embeddings of the new message and the held summary.
 - **Archive or leave** and **`/compact`** are checked by the app. When a held proposal exists, the action first shows the proposal card. If the model has not produced one for the open discussion, the app asks it to (a forced `propose_thought` call, recorded as `kind = proposal`).
 
 Time never brings a proposal back. A user who returns to an old conversation carries on as normal, and the held proposal waits for one of the three triggers.
@@ -176,7 +176,7 @@ Codes: `model_not_set` (409), `model_unknown` (400), `model_unsupported` (400), 
 
 The prototype on `backup/gate-build` is a source, not a base. The build brings over, with `gate` removed from names: the SSE writer, the slash-command parser, the chat UI (composer, message list, error display, command list), `lib/sse.ts`, `lib/chat.ts`, `redirect-to-login`, the five shadcn components, and the proxy SSE test. The provider client, error mapper, model list, feature classifier, and `FakeProvider` double come from `model-providers`, which lands first. Not brought over: the gate registry, `gates.yaml`, overrides and their storage and resolution, the gate handlers, the router, the gate settings API and cards, or the `gate_overrides` migration.
 
-One Alembic revision creates the new tables, with `down_revision` `d06a9fe12cba` (the API key migration). There are no users yet, so no data is migrated. A developer's local database that already ran the prototype's overrides migration is reset (delete the Postgres volume, or recreate the SQLite file), since Alembic cannot find that revision. The downgrade drops the new tables.
+One Alembic revision creates the new tables, with `down_revision` `bf3f5a046190` (the provider keys rename from `model-providers`). There are no users yet, so no data is migrated. A developer's local database that already ran the prototype's overrides migration is reset (delete the Postgres volume, or recreate the SQLite file), since Alembic cannot find that revision. The downgrade drops the new tables.
 
 ### 13. Several conversations on several models
 
@@ -185,7 +185,7 @@ Nothing in the design shares state between conversations except the user's loado
 - **The model is stored on the conversation.** A conversation created with no default set stores no model and takes the default at its first successful message. Changing the default or the loadout later never rewrites an existing conversation. The dropdown always shows the conversation's own model, marked when it is not in the loadout.
 - **Switching model inside a conversation** clears `last_prompt_tokens`, sets the effort to the new model's loadout effort (or none), and drops an effort the effort table says the new model refuses. The history carries over unchanged. Tool calls and results are stored in the OpenAI-compatible format that chat models on every supported provider receive, and a model that rejects tools fails with `model_unsupported` on its first turn instead of part-way through a conversation.
 - **Context differs per model.** The meter and the `context_full` check always use the conversation's current model's `context_length`. `/compact` summarises with the conversation's model. When the conversation does not fit that model, the dialog lists the loadout models that are large enough, with their context lengths, and the user picks one for that one summary. There is no automatic choice, in line with the rule against falling back.
-- **Concurrency.** The row lock is per conversation, so turns in different conversations run at the same time. Each writes only its own conversation's messages, and each usage record names the model that made the call. Parallel turns share the provider account's rate limit. A 429 is retried by the SDK and then reported as `provider_rate_limited`. The design adds no client-side cap on parallel turns, and the first real use will show whether one is needed.
+- **Concurrency.** The turn claim is per conversation, so turns in different conversations run at the same time. Each writes only its own conversation's messages, and each usage record names the model that made the call. Parallel turns share the provider account's rate limit. A 429 is retried by the SDK and then reported as `provider_rate_limited`. The design adds no client-side cap on parallel turns, and the first real use will show whether one is needed.
 - **The held proposal, the meter, and the compaction state belong to the conversation**, so nothing leaks between conversations.
 
 ### 14. Tests
@@ -206,12 +206,12 @@ Nothing in the design shares state between conversations except the user's loado
 - [A `/compact` summary loses something important] → The user reads and edits it before it takes effect, and the full transcript stays visible.
 - [Storing conversations changes the privacy promise] → Plain-text storage like thoughts, cascade delete with the account, `/delete` and the sidebar delete for single conversations, and usage records that hold no text.
 - [The `context_full` estimate is off] → A too-low estimate lets the provider refuse instead, and that error is mapped to the same code.
-- [Two tabs write to one conversation] → A row lock allows one turn at a time and the second gets `conversation_busy`.
+- [Two tabs write to one conversation] → The turn claim allows one turn at a time and the second gets `conversation_busy`.
 - [The prototype's code is reused in a new shape] → Only the parts listed in decision 12 come over, each with its existing tests, so the suite guards the reuse.
 
 ## Migration Plan
 
-1. Bring over the reusable prototype code (task 1.1 and task 1.5).
+1. Bring over the reusable prototype code (task 1.1 and task 1.4).
 2. Ship the backend, the Alembic revision, and the frontend together, because the chat request, the events, the tables, and the error codes all change.
 3. Reset local databases that ran the prototype's overrides migration.
 4. Rollback: `alembic downgrade -1` drops conversations, messages, usage, and the loadout.

@@ -8,8 +8,9 @@ Error codes and HTTP statuses:
   returned a server error.
 - provider_rate_limited (429): the provider refused the call as too many requests.
 - provider_request_refused (422): any other client error, carrying the provider's
-  message. An optional model_id lets a caller that knows the model
-  (conversation-agent) build a clearer message; this module does not branch on it.
+  message.
+- model_unavailable (409): with a model_id, a 404, or a 400 saying that model
+  is not found, which is how a provider reports a model the key can't use.
 
 The openai SDK sends requests through the httpx2 package. Tests inject an
 httpx2.AsyncClient with a mock transport through the http_client arguments.
@@ -23,10 +24,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.crypto import DecryptionError, EncryptedSecret, decrypt_secret
-from app.errors import ApiError, ErrorCode
+from app.errors import ApiError, ErrorCode, model_unavailable
 from app.log_masking import register_secret
 from app.models import ProviderKey, User
-from app.provider_config import ProviderPreset
+from app.provider_config import (
+    CUSTOM_PROVIDER_ID,
+    ProviderPreset,
+    custom_provider,
+    get_providers_config,
+)
 
 KEY_CHECK_TIMEOUT_SECONDS = 10.0
 # Sent for a provider that needs no key; OpenAI-compatible servers that don't
@@ -58,7 +64,7 @@ def unreachable(provider: ProviderPreset) -> ApiError:
     return ApiError(
         502,
         ErrorCode.PROVIDER_UNREACHABLE,
-        f"Couldn't reach {provider.label} to check the key. Try again.",
+        f"Couldn't reach {provider.label}. Try again.",
     )
 
 
@@ -84,13 +90,28 @@ def make_client(
     api_key: str,
     timeout: float = KEY_CHECK_TIMEOUT_SECONDS,
     http_client: httpx2.AsyncClient | None = None,
+    max_retries: int = 0,
 ) -> AsyncOpenAI:
     return AsyncOpenAI(
         api_key=api_key,
         base_url=provider.base_url,
         timeout=timeout,
-        max_retries=0,
+        max_retries=max_retries,
         http_client=http_client,
+    )
+
+
+def _names_model(exc: openai.APIStatusError, model_id: str) -> bool:
+    """True when a refusal is about the model: a 404, or an error naming it.
+
+    A 404 on a chat call can only mean the model; a 400 has many causes, so
+    it counts only when its message names the model.
+    """
+    if exc.status_code == 404:
+        return True
+    text = str(exc).lower()
+    return model_id.lower() in text and any(
+        phrase in text for phrase in ("not found", "does not exist", "not available")
     )
 
 
@@ -107,12 +128,13 @@ def map_provider_error(
     the key is invalid); saved_key=True while using a stored key (auth failure
     means the saved key stopped working).
     """
-    del model_id  # not yet used for branching; kept for a future caller's message
     if isinstance(exc, (openai.AuthenticationError, openai.PermissionDeniedError)):
         return key_rejected(provider) if saved_key else key_invalid(provider)
     if isinstance(exc, (openai.APITimeoutError, openai.APIConnectionError)):
         return unreachable(provider)
     if isinstance(exc, openai.APIStatusError):
+        if model_id is not None and exc.status_code in (400, 404) and _names_model(exc, model_id):
+            return model_unavailable(model_id)
         if exc.status_code == 429:
             return rate_limited(provider)
         if exc.status_code >= 500:
@@ -193,8 +215,58 @@ async def client_for(
     provider: ProviderPreset,
     settings: Settings | None = None,
     http_client: httpx2.AsyncClient | None = None,
+    *,
+    timeout: float = KEY_CHECK_TIMEOUT_SECONDS,
+    max_retries: int = 0,
 ) -> AsyncOpenAI:
     """A client for one request to this provider, using only this user's key."""
     settings = settings or get_settings()
     api_key = await load_api_key(session, user, provider, settings)
-    return make_client(provider, api_key, http_client=http_client)
+    return make_client(
+        provider, api_key, timeout=timeout, http_client=http_client, max_retries=max_retries
+    )
+
+
+def provider_not_found() -> ApiError:
+    return ApiError(404, ErrorCode.NOT_FOUND, "No such provider.")
+
+
+async def find_key_row(session: AsyncSession, user: User, provider_id: str) -> ProviderKey | None:
+    return (
+        await session.execute(
+            select(ProviderKey).where(
+                ProviderKey.user_id == user.id, ProviderKey.provider_id == provider_id
+            )
+        )
+    ).scalar_one_or_none()
+
+
+def resolve_provider(
+    provider_id: str, settings: Settings, saved_row: ProviderKey | None = None
+) -> ProviderPreset:
+    """Look up a preset, or build the custom provider from the user's saved row.
+
+    The custom provider's base URL comes only from saved_row, never from a
+    request body.
+    """
+    if provider_id == CUSTOM_PROVIDER_ID:
+        if not settings.allow_custom_provider:
+            raise ApiError(
+                422, ErrorCode.VALIDATION_ERROR, "Custom providers are turned off on this server."
+            )
+        base_url = saved_row.base_url if saved_row is not None else None
+        if not base_url:
+            raise provider_not_found()
+        return custom_provider(base_url)
+
+    preset = get_providers_config().get(provider_id)
+    if preset is None:
+        raise provider_not_found()
+    return preset
+
+
+async def provider_for_user(
+    session: AsyncSession, user: User, provider_id: str, settings: Settings
+) -> ProviderPreset:
+    """The provider as this user has it configured."""
+    return resolve_provider(provider_id, settings, await find_key_row(session, user, provider_id))

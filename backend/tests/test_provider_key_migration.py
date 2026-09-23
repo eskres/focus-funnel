@@ -6,6 +6,8 @@ import uuid
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
+# Later revisions exist, so these tests stop at the rename to test it alone.
+RENAME_REVISION = "bf3f5a046190"
 
 
 def run_alembic(database_url: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -27,7 +29,7 @@ def test_upgrade_downgrade_upgrade_cleanly_on_empty_database(tmp_path):
     db_file = tmp_path / "migration_test.sqlite3"
     db_url = f"sqlite+aiosqlite:///{db_file}"
 
-    res = run_alembic(db_url, "upgrade", "head")
+    res = run_alembic(db_url, "upgrade", RENAME_REVISION)
     assert res.returncode == 0, res.stderr
 
     with sqlite3.connect(db_file) as conn:
@@ -54,7 +56,7 @@ def test_upgrade_downgrade_upgrade_cleanly_on_empty_database(tmp_path):
         assert "nebius_api_keys" in tables
         assert "provider_keys" not in tables
 
-    res = run_alembic(db_url, "upgrade", "head")
+    res = run_alembic(db_url, "upgrade", RENAME_REVISION)
     assert res.returncode == 0, res.stderr
     with sqlite3.connect(db_file) as conn:
         cursor = conn.cursor()
@@ -87,7 +89,7 @@ def test_nebius_row_survives_upgrade_as_nebius_provider(tmp_path):
         )
         conn.commit()
 
-    res = run_alembic(db_url, "upgrade", "head")
+    res = run_alembic(db_url, "upgrade", RENAME_REVISION)
     assert res.returncode == 0, res.stderr
 
     with sqlite3.connect(db_file) as conn:
@@ -101,7 +103,7 @@ def test_downgrade_drops_keys_for_other_providers(tmp_path):
     db_file = tmp_path / "migration_test.sqlite3"
     db_url = f"sqlite+aiosqlite:///{db_file}"
 
-    res = run_alembic(db_url, "upgrade", "head")
+    res = run_alembic(db_url, "upgrade", RENAME_REVISION)
     assert res.returncode == 0, res.stderr
 
     user_id = uuid.uuid4()

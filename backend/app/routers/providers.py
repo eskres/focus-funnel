@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 import httpx2
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, field_validator
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -23,13 +23,16 @@ from app.provider_config import (
     get_providers_config,
 )
 from app.provider_models import ModelItem, fetch_models
-from app.providers import PLACEHOLDER_KEY, check_provider_key, get_provider_http_client
+from app.providers import (
+    PLACEHOLDER_KEY,
+    check_provider_key,
+    find_key_row,
+    get_provider_http_client,
+    provider_not_found,
+    resolve_provider,
+)
 
 router = APIRouter(prefix="/api/providers")
-
-
-def _not_found() -> ApiError:
-    return ApiError(404, ErrorCode.NOT_FOUND, "No such provider.")
 
 
 def _validation_error(message: str) -> ApiError:
@@ -73,16 +76,6 @@ class ModelsResponse(BaseModel):
     models: list[ModelItem]
 
 
-async def _find_key(session: AsyncSession, user: User, provider_id: str) -> ProviderKey | None:
-    return (
-        await session.execute(
-            select(ProviderKey).where(
-                ProviderKey.user_id == user.id, ProviderKey.provider_id == provider_id
-            )
-        )
-    ).scalar_one_or_none()
-
-
 def _status_for(provider: ProviderPreset, row: ProviderKey | None) -> ProviderStatus:
     is_custom = provider.id == CUSTOM_PROVIDER_ID
     return ProviderStatus(
@@ -97,28 +90,6 @@ def _status_for(provider: ProviderPreset, row: ProviderKey | None) -> ProviderSt
         key_last4=row.last4 if row is not None else None,
         key_saved_at=row.updated_at if row is not None else None,
     )
-
-
-def _resolve_provider(
-    provider_id: str, settings: Settings, saved_row: ProviderKey | None = None
-) -> ProviderPreset:
-    """Look up a preset, or build the custom provider descriptor.
-
-    For the custom provider, the base URL comes from saved_row when one is
-    given (an existing saved row) rather than from the request body.
-    """
-    if provider_id == CUSTOM_PROVIDER_ID:
-        if not settings.allow_custom_provider:
-            raise _validation_error("Custom providers are turned off on this server.")
-        base_url = saved_row.base_url if saved_row is not None else None
-        if not base_url:
-            raise _not_found()
-        return custom_provider(base_url)
-
-    preset = get_providers_config().get(provider_id)
-    if preset is None:
-        raise _not_found()
-    return preset
 
 
 def _validate_custom_base_url(base_url: str) -> None:
@@ -136,11 +107,11 @@ async def list_providers(
     config = get_providers_config()
     statuses = []
     for preset in config.providers.values():
-        row = await _find_key(session, user, preset.id)
+        row = await find_key_row(session, user, preset.id)
         statuses.append(_status_for(preset, row))
 
     if settings.allow_custom_provider:
-        row = await _find_key(session, user, CUSTOM_PROVIDER_ID)
+        row = await find_key_row(session, user, CUSTOM_PROVIDER_ID)
         provider = custom_provider(row.base_url if row is not None else "")
         statuses.append(_status_for(provider, row))
 
@@ -168,7 +139,7 @@ async def save_provider_key(
     else:
         preset = get_providers_config().get(provider_id)
         if preset is None:
-            raise _not_found()
+            raise provider_not_found()
         if body.base_url is not None:
             raise _validation_error(f"{preset.label}'s base URL can't be changed.")
         provider = preset
@@ -183,7 +154,7 @@ async def save_provider_key(
     # replaces a saved one, and an unreachable provider stores nothing.
     await check_provider_key(provider, body.key or PLACEHOLDER_KEY, http_client=http_client)
 
-    row = await _find_key(session, user, provider_id)
+    row = await find_key_row(session, user, provider_id)
     if row is None:
         row = ProviderKey(user_id=user.id, provider_id=provider_id)
         session.add(row)
@@ -231,7 +202,7 @@ async def get_provider_models(
     settings: Settings = Depends(get_settings),
     http_client: httpx2.AsyncClient | None = Depends(get_provider_http_client),
 ) -> ModelsResponse:
-    row = await _find_key(session, user, provider_id)
-    provider = _resolve_provider(provider_id, settings, saved_row=row)
+    row = await find_key_row(session, user, provider_id)
+    provider = resolve_provider(provider_id, settings, saved_row=row)
     models = await fetch_models(session, user, provider, settings, http_client=http_client)
     return ModelsResponse(models=models)

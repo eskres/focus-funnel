@@ -22,14 +22,94 @@ class ErrorCode:
     PROVIDER_UNREACHABLE = "provider_unreachable"
     PROVIDER_RATE_LIMITED = "provider_rate_limited"
     PROVIDER_REQUEST_REFUSED = "provider_request_refused"
+    MODEL_NOT_SET = "model_not_set"
+    MODEL_UNKNOWN = "model_unknown"
+    MODEL_UNSUPPORTED = "model_unsupported"
+    MODEL_UNAVAILABLE = "model_unavailable"
+    CONTEXT_FULL = "context_full"
+    CONVERSATION_BUSY = "conversation_busy"
+    # Only ever sent as an `error` event inside a chat stream.
+    OUTPUT_LIMIT_REACHED = "output_limit_reached"
+    TOOL_LOOP_LIMIT = "tool_loop_limit"
 
 
 class ApiError(Exception):
-    def __init__(self, status_code: int, code: str, message: str):
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        headers: dict[str, str] | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
+        # Extra response headers, for example the conversation a refused chat
+        # message was stored in.
+        self.headers = headers or {}
+
+
+def model_not_set() -> ApiError:
+    return ApiError(
+        409, ErrorCode.MODEL_NOT_SET, "No chat model is set. Choose one in the model settings."
+    )
+
+
+def model_unknown(provider_label: str, model: str) -> ApiError:
+    return ApiError(
+        400,
+        ErrorCode.MODEL_UNKNOWN,
+        f"{provider_label} does not list the model '{model}' for your key.",
+    )
+
+
+def model_unsupported(model: str, what: str) -> ApiError:
+    return ApiError(400, ErrorCode.MODEL_UNSUPPORTED, f"The model '{model}' does not support {what}.")
+
+
+def model_unavailable(model: str) -> ApiError:
+    return ApiError(
+        409,
+        ErrorCode.MODEL_UNAVAILABLE,
+        f"The model '{model}' is not available to your key. Choose another in the model settings.",
+    )
+
+
+def context_full() -> ApiError:
+    return ApiError(
+        409,
+        ErrorCode.CONTEXT_FULL,
+        "This conversation is too long for the model. Use /compact, choose a model "
+        "with a larger context, or start a new conversation.",
+    )
+
+
+def conversation_busy() -> ApiError:
+    return ApiError(
+        409,
+        ErrorCode.CONVERSATION_BUSY,
+        "This conversation is still answering another message. Wait for it to finish.",
+    )
+
+
+# The two stream-only errors never become a response, so their status is unused.
+def output_limit_reached(thinking_only: bool) -> ApiError:
+    message = (
+        "The model ran out of room while thinking and wrote no answer. "
+        "Try a lower reasoning effort or another model."
+        if thinking_only
+        else "The model ran out of room before finishing. Try again, or use a lower reasoning effort."
+    )
+    return ApiError(200, ErrorCode.OUTPUT_LIMIT_REACHED, message)
+
+
+def tool_loop_limit() -> ApiError:
+    return ApiError(
+        200,
+        ErrorCode.TOOL_LOOP_LIMIT,
+        "The model kept using tools without finishing its answer. Try again.",
+    )
 
 
 _HTTP_STATUS_CODES = {
@@ -40,15 +120,18 @@ _HTTP_STATUS_CODES = {
 }
 
 
-def error_response(status_code: int, code: str, message: str) -> JSONResponse:
+def error_response(
+    status_code: int, code: str, message: str, headers: dict[str, str] | None = None
+) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={"error": {"code": code, "message": message}},
+        headers=headers,
     )
 
 
 async def _handle_api_error(_request: Request, exc: ApiError) -> JSONResponse:
-    return error_response(exc.status_code, exc.code, exc.message)
+    return error_response(exc.status_code, exc.code, exc.message, exc.headers)
 
 
 async def _handle_validation_error(
