@@ -1,47 +1,68 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { redirectToLogin } from "@/lib/redirect-to-login";
+import {
+  conversationEvent,
+  delta,
+  done,
+  errorEvent,
+  errorResponse,
+  fakeApi,
+  json,
+  loadout,
+  loadoutEntry,
+  openStream,
+  storedMessage,
+  streamOf,
+  toolEvent,
+} from "@/test/fake-api";
 
 import { Chat } from "./chat";
 
 vi.mock("@/lib/redirect-to-login", () => ({ redirectToLogin: vi.fn() }));
+const push = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push }),
+  usePathname: () => "/app",
+}));
 
-const encoder = new TextEncoder();
+const NANO = "vendor/nano";
+const BIG = "vendor/big";
+const withDefault = loadout([
+  loadoutEntry(NANO, { is_default: true, reasoning_effort: "low" }),
+  loadoutEntry(BIG, { efforts: ["low", "medium", "high"] }),
+]);
 
-const delta = (text: string) => `event: delta\ndata: ${JSON.stringify({ text })}\n\n`;
-const done = "event: done\ndata: {}\n\n";
-const errorEvent = (code: string, message: string) =>
-  `event: error\ndata: ${JSON.stringify({ error: { code, message } })}\n\n`;
-
-/** A response whose body the test feeds one part at a time. */
-function openStream() {
-  let controller!: ReadableStreamDefaultController<Uint8Array>;
-  const body = new ReadableStream<Uint8Array>({
-    start(c) {
-      controller = c;
-    },
-  });
+function conversation(extra: Record<string, unknown> = {}) {
   return {
-    response: new Response(body, {
-      status: 200,
-      headers: { "Content-Type": "text/event-stream" },
-    }),
-    push: (text: string) => act(async () => controller.enqueue(encoder.encode(text))),
-    close: () => act(async () => controller.close()),
-    fail: () => act(async () => controller.error(new TypeError("network error"))),
+    id: "c1",
+    title: "Rent",
+    provider_id: "nebius",
+    model: NANO,
+    reasoning_effort: null,
+    archived: false,
+    last_activity_at: "2026-09-23T10:00:00Z",
+    created_at: "2026-09-23T10:00:00Z",
+    last_prompt_tokens: null,
+    held_proposal: null,
+    messages: [storedMessage(0, "user", "about rent"), storedMessage(1, "assistant", "Tell me more.")],
+    ...extra,
   };
 }
 
-const errorResponse = (status: number, code: string, message: string) =>
-  Response.json({ error: { code, message } }, { status });
+function send(text: string) {
+  fireEvent.change(screen.getByLabelText("Message"), { target: { value: text } });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+}
 
-let fetchMock: ReturnType<typeof vi.fn>;
+function chatBodies(calls: { method: string; path: string; body: unknown }[]) {
+  return calls.filter((c) => c.path === "/api/chat").map((c) => c.body as Record<string, unknown>);
+}
 
 beforeEach(() => {
-  fetchMock = vi.fn();
-  vi.stubGlobal("fetch", fetchMock);
+  window.history.replaceState(null, "", "/app");
 });
 
 afterEach(() => {
@@ -49,116 +70,318 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function send(text: string) {
-  fireEvent.change(screen.getByLabelText("Message"), { target: { value: text } });
-  fireEvent.click(screen.getByRole("button", { name: "Send" }));
-}
-
 describe("Chat", () => {
-  it("lists the commands on a chat with no messages", () => {
-    render(<Chat />);
+  describe("an empty conversation", () => {
+    it("lists /push, /pull, /explore, and /compact, and not /delete", async () => {
+      fakeApi({ "GET /api/settings/models": json(200, withDefault) });
+      render(<Chat />);
 
-    for (const command of ["/push", "/pull", "/explore"]) {
-      expect(screen.getByText(command, { selector: "code" })).toBeInTheDocument();
+      for (const command of ["/push", "/pull", "/explore", "/compact"]) {
+        expect(screen.getByText(command, { selector: "code" })).toBeInTheDocument();
+      }
+      expect(screen.queryByText("/delete")).not.toBeInTheDocument();
+      expect(screen.queryByText(/delete/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("sending", () => {
+    it("adds the user's message, clears the input, and sends the message", async () => {
+      const stream = openStream();
+      const { calls } = fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "POST /api/chat": () => stream.response,
+      });
+      render(<Chat />);
+      await screen.findByRole("option", { name: NANO });
+
+      send("buy oat milk");
+
+      const list = await screen.findByRole("list", { name: "Conversation" });
+      expect(within(list).getByText("buy oat milk")).toBeInTheDocument();
+      expect(screen.getByLabelText("Message")).toHaveValue("");
+      expect(chatBodies(calls)[0]).toMatchObject({ message: "buy oat milk" });
+      await stream.close();
+    });
+
+    it.each(["", "   ", "\n\t "])("sends nothing for the message %j", async (text) => {
+      const { calls } = fakeApi({ "GET /api/settings/models": json(200, withDefault) });
+      render(<Chat />);
+
+      send(text);
+
+      expect(chatBodies(calls)).toEqual([]);
+      expect(screen.queryByRole("list", { name: "Conversation" })).not.toBeInTheDocument();
+    });
+
+    it("sends on Enter and adds a line on Shift+Enter", async () => {
+      const { calls } = fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "POST /api/chat": () => streamOf(delta("Hi"), done),
+      });
+      render(<Chat />);
+      const input = screen.getByLabelText("Message");
+      fireEvent.change(input, { target: { value: "hello" } });
+
+      fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+      expect(chatBodies(calls)).toEqual([]);
+
+      fireEvent.keyDown(input, { key: "Enter" });
+      await waitFor(() => expect(chatBodies(calls)).toHaveLength(1));
+    });
+
+    it("disables the composer while an answer arrives and enables it after", async () => {
+      const stream = openStream();
+      fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "POST /api/chat": () => stream.response,
+      });
+      render(<Chat />);
+
+      send("hello");
+
+      await waitFor(() => expect(screen.getByLabelText("Message")).toBeDisabled());
+      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+
+      await stream.push(delta("Hi") + done);
+      await stream.close();
+
+      await waitFor(() => expect(screen.getByLabelText("Message")).toBeEnabled());
+    });
+
+    it("shows that the model is thinking before the first text, then the text", async () => {
+      const stream = openStream();
+      fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "POST /api/chat": () => stream.response,
+      });
+      render(<Chat />);
+
+      send("hello");
+
+      expect(await screen.findByText("Thinking…")).toBeInTheDocument();
+
+      await stream.push(delta("\nHi "));
+      expect(await screen.findByText("Hi")).toBeInTheDocument();
+      expect(screen.queryByText("Thinking…")).not.toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent("Writing");
+
+      await stream.push(delta("there.") + done);
+      await stream.close();
+      await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
+      expect(screen.getByText("Hi there.")).toBeInTheDocument();
+    });
+
+    it("shows a tool indication before the text that follows it", async () => {
+      const stream = openStream();
+      fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "POST /api/chat": () => stream.response,
+      });
+      render(<Chat />);
+
+      send("what did I say about rent?");
+      await stream.push(toolEvent("search_thoughts", "start"));
+
+      const indication = await screen.findByTestId("tool-indication");
+      expect(indication).toHaveTextContent("Searching your thoughts…");
+      expect(screen.queryByText("Thinking…")).not.toBeInTheDocument();
+
+      await stream.push(toolEvent("search_thoughts", "end", "Searched your thoughts for “rent”"));
+      await stream.push(delta("Search is not available yet."));
+      expect(await screen.findByText("Search is not available yet.")).toBeInTheDocument();
+      expect(screen.getByTestId("tool-indication")).toHaveTextContent(
+        "Searched your thoughts for “rent”",
+      );
+      const answer = screen.getByText("Search is not available yet.").closest("li")!;
+      expect(answer.firstElementChild).toBe(screen.getByTestId("tool-indication"));
+      await stream.close();
+    });
+
+    it("moves to the new conversation's address and keeps sending there", async () => {
+      const { calls } = fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "POST /api/chat": [
+          () => streamOf(conversationEvent("c7", "hello"), delta("Hi"), done),
+          () => streamOf(delta("Again"), done),
+        ],
+      });
+      render(<Chat />);
+      await screen.findByRole("option", { name: NANO });
+
+      send("hello");
+      await screen.findByText("Hi");
+      expect(window.location.pathname).toBe("/app/c7");
+
+      send("again");
+      await screen.findByText("Again");
+      expect(chatBodies(calls)[1]).toEqual({ message: "again", conversation_id: "c7" });
+    });
+  });
+
+  describe("resuming a conversation", () => {
+    it("loads and shows every stored message", async () => {
+      fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "GET /api/conversations/c1": json(
+          200,
+          conversation({
+            messages: [
+              storedMessage(0, "user", "what about milk?"),
+              storedMessage(1, "assistant", null, {
+                tool_calls: [
+                  {
+                    id: "t",
+                    type: "function",
+                    function: { name: "search_thoughts", arguments: "{}" },
+                  },
+                ],
+              }),
+              storedMessage(2, "tool", "not available", { tool_call_id: "t" }),
+              storedMessage(3, "assistant", "Not available yet."),
+              storedMessage(4, "user", "ok"),
+            ],
+          }),
+        ),
+      });
+      render(<Chat conversationId="c1" />);
+
+      const list = await screen.findByRole("list", { name: "Conversation" });
+      expect(within(list).getByText("what about milk?")).toBeInTheDocument();
+      expect(within(list).getByText("Searched your thoughts")).toBeInTheDocument();
+      expect(within(list).getByText("Not available yet.")).toBeInTheDocument();
+      expect(within(list).getByText("ok")).toBeInTheDocument();
+      expect(within(list).queryByText("not available")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("choosing a model", () => {
+    it("starts a new conversation from the default model and effort", async () => {
+      fakeApi({ "GET /api/settings/models": json(200, withDefault) });
+      render(<Chat />);
+
+      await waitFor(() => expect(screen.getByLabelText("Model")).toHaveDisplayValue(NANO));
+      expect(screen.getByLabelText("Reasoning effort")).toHaveDisplayValue("low");
+      expect(screen.getByRole("link", { name: "Model settings" })).toHaveAttribute(
+        "href",
+        "/settings#models",
+      );
+    });
+
+    it("sends a chosen model with the next message", async () => {
+      const { calls } = fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "GET /api/conversations/c1": json(200, conversation()),
+        "POST /api/chat": [
+          () => streamOf(delta("Big here."), done),
+          () => streamOf(delta("Still big."), done),
+        ],
+      });
+      render(<Chat conversationId="c1" />);
+      await screen.findByText("Tell me more.");
+
+      fireEvent.change(screen.getByLabelText("Model"), { target: { value: `nebius\u0000${BIG}` } });
+      fireEvent.change(screen.getByLabelText("Reasoning effort"), { target: { value: "high" } });
+      send("next");
+      await screen.findByText("Big here.");
+      send("and more");
+      await screen.findByText("Still big.");
+
+      expect(chatBodies(calls)).toEqual([
+        {
+          message: "next",
+          conversation_id: "c1",
+          provider_id: "nebius",
+          model: BIG,
+          reasoning_effort: "high",
+        },
+        // The choice is stored with the conversation, so it is not sent again.
+        { message: "and more", conversation_id: "c1" },
+      ]);
+    });
+
+    it("offers only the efforts the table allows", async () => {
+      fakeApi({
+        "GET /api/settings/models": json(
+          200,
+          loadout([loadoutEntry(NANO, { is_default: true, efforts: ["low", "medium", "high"] })]),
+        ),
+      });
+      render(<Chat />);
+
+      const effort = await screen.findByLabelText("Reasoning effort");
+      const offered = within(effort)
+        .getAllByRole("option")
+        .map((o) => o.textContent);
+      expect(offered).toEqual(["Default effort", "low", "medium", "high"]);
+    });
+
+    it("lists the conversation's own model, marked, when it left the loadout", async () => {
+      fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "GET /api/conversations/c1": json(200, conversation({ model: "vendor/old" })),
+        "GET /api/settings/models/efforts": json(200, { efforts: ["low"] }),
+      });
+      render(<Chat conversationId="c1" />);
+
+      const model = await screen.findByLabelText("Model");
+      await waitFor(() => expect(model).toHaveDisplayValue("vendor/old (not in your loadout)"));
+      expect(within(model).getByRole("option", { name: NANO })).toBeInTheDocument();
+    });
+  });
+
+  describe("/delete", () => {
+    function openStored() {
+      return fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "GET /api/conversations/c1": json(200, conversation()),
+        "DELETE /api/conversations/c1": new Response(null, { status: 204 }),
+      });
     }
-    expect(screen.getByText("Propose a thought to file")).toBeInTheDocument();
-  });
 
-  it("adds the user's message to the conversation and clears the input", async () => {
-    const stream = openStream();
-    fetchMock.mockResolvedValue(stream.response);
-    render(<Chat />);
+    it("asks, then deletes the conversation and opens a new one", async () => {
+      const { calls } = openStored();
+      render(<Chat conversationId="c1" />);
+      await screen.findByText("Tell me more.");
 
-    send("/push buy milk");
+      send("/delete");
 
-    const conversation = await screen.findByRole("list", { name: "Conversation" });
-    expect(within(conversation).getByText("/push buy milk")).toBeInTheDocument();
-    expect(screen.getByLabelText("Message")).toHaveValue("");
-    expect(screen.queryByText("Propose a thought to file")).not.toBeInTheDocument();
+      const dialog = await screen.findByRole("dialog");
+      expect(dialog).toHaveTextContent("Delete this conversation?");
+      expect(dialog).toHaveTextContent("Rent");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
-    const [path, init] = fetchMock.mock.calls[0];
-    expect(path).toBe("/api/chat");
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body)).toEqual({ message: "/push buy milk" });
-    expect(new Headers(init.headers).get("Accept")).toBe("text/event-stream");
-    await stream.close();
-  });
+      await waitFor(() => expect(push).toHaveBeenCalledWith("/app"));
+      expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/conversations/c1")).toBe(
+        true,
+      );
+      expect(chatBodies(calls)).toEqual([]);
+    });
 
-  it.each(["", "   ", "\n\t "])("sends nothing for the message %j", (text) => {
-    render(<Chat />);
+    it("changes nothing when cancelled", async () => {
+      const { calls } = openStored();
+      render(<Chat conversationId="c1" />);
+      await screen.findByText("Tell me more.");
 
-    send(text);
+      send("/delete");
+      fireEvent.click(
+        within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }),
+      );
 
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(screen.queryByRole("list", { name: "Conversation" })).not.toBeInTheDocument();
-    expect(screen.getByText("Propose a thought to file")).toBeInTheDocument();
-  });
-
-  it("sends on Enter and adds a line on Shift+Enter", async () => {
-    const stream = openStream();
-    fetchMock.mockResolvedValue(stream.response);
-    render(<Chat />);
-    const input = screen.getByLabelText("Message");
-    fireEvent.change(input, { target: { value: "hello" } });
-
-    fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
-    expect(fetchMock).not.toHaveBeenCalled();
-
-    fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    await stream.close();
-  });
-
-  it("disables the composer while an answer is arriving and enables it after", async () => {
-    const stream = openStream();
-    fetchMock.mockResolvedValue(stream.response);
-    render(<Chat />);
-
-    send("hello");
-
-    await waitFor(() => expect(screen.getByLabelText("Message")).toBeDisabled());
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
-
-    await stream.push(delta("Hi") + done);
-    await stream.close();
-
-    await waitFor(() => expect(screen.getByLabelText("Message")).toBeEnabled());
-    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("re-enables the composer after an error", async () => {
-    fetchMock.mockResolvedValue(errorResponse(500, "internal_error", "Something went wrong."));
-    render(<Chat />);
-
-    send("/push x");
-
-    await screen.findByRole("alert");
-    expect(screen.getByLabelText("Message")).toBeEnabled();
-  });
-
-  it("shows partial text before the answer completes, then stops showing progress", async () => {
-    const stream = openStream();
-    fetchMock.mockResolvedValue(stream.response);
-    render(<Chat />);
-
-    send("what did I file?");
-    await stream.push(delta("You filed "));
-
-    expect(await screen.findByText("You filed")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Writing");
-
-    await stream.push(delta("milk."));
-    expect(await screen.findByText("You filed milk.")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toBeInTheDocument();
-
-    await stream.push(done);
-    await stream.close();
-    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
-    expect(screen.getByText("You filed milk.")).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+      expect(screen.getByText("Tell me more.")).toBeInTheDocument();
+      expect(push).not.toHaveBeenCalled();
+    });
   });
 
   describe("errors", () => {
+    function failWith(handler: () => Response) {
+      return fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "POST /api/chat": handler,
+      });
+    }
+
     it.each([
       ["provider_key_missing", 409, "No API key saved", "Go to provider settings", "/settings"],
       [
@@ -168,116 +391,171 @@ describe("Chat", () => {
         "Go to provider settings",
         "/settings",
       ],
-    ])("%s links to the provider settings", async (code, status, title, link, href) => {
-      fetchMock.mockResolvedValue(errorResponse(status, code, "Key problem."));
+      ["model_not_set", 409, "No chat model chosen", "Go to model settings", "/settings#models"],
+      [
+        "model_unavailable",
+        409,
+        "This model is not available",
+        "Go to model settings",
+        "/settings#models",
+      ],
+    ])("%s links to the place that fixes it", async (code, status, title, link, href) => {
+      failWith(() => errorResponse(status, code, "The backend's message."));
       render(<Chat />);
 
-      send("/push x");
+      send("hello");
 
       const alert = await screen.findByRole("alert");
       expect(alert).toHaveTextContent(title);
+      expect(alert).toHaveTextContent("The backend's message.");
       expect(within(alert).getByRole("link", { name: link })).toHaveAttribute("href", href);
-      expect(screen.getByText("/push x")).toBeInTheDocument();
+      expect(screen.getByText("hello")).toBeInTheDocument();
     });
 
-    it("shows other errors with the backend message and keeps the user's message", async () => {
-      fetchMock.mockResolvedValue(errorResponse(500, "internal_error", "Something went wrong."));
+    it("model_unavailable names the model", async () => {
+      failWith(() =>
+        errorResponse(409, "model_unavailable", `The model '${NANO}' is not available to your key.`),
+      );
       render(<Chat />);
 
-      send("/push x");
+      send("hello");
 
-      expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong.");
-      expect(screen.getByText("/push x")).toBeInTheDocument();
+      expect(await screen.findByRole("alert")).toHaveTextContent(NANO);
+    });
+
+    it.each([
+      [
+        "context_full",
+        409,
+        "This conversation is full",
+        "Use /compact, choose a model with a larger context, or start a new conversation.",
+      ],
+      ["provider_request_refused", 422, null, "Nebius: messages must not be empty"],
+      [
+        "conversation_busy",
+        409,
+        "Still answering",
+        "This conversation is still answering another message.",
+      ],
+    ])("%s shows its message", async (code, status, title, message) => {
+      failWith(() => errorResponse(status, code, message));
+      render(<Chat />);
+
+      send("hello");
+
+      const alert = await screen.findByRole("alert");
+      if (title) expect(alert).toHaveTextContent(title);
+      expect(alert).toHaveTextContent(message);
+      expect(within(alert).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+      expect(screen.getByText("hello")).toBeInTheDocument();
+    });
+
+    it.each([
+      ["output_limit_reached", "The model ran out of room"],
+      ["tool_loop_limit", "The answer could not be completed"],
+    ])("%s keeps the text and offers to try again in place", async (code, title) => {
+      const { calls } = fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "POST /api/chat": [
+          () =>
+            streamOf(
+              conversationEvent("c2", "hello"),
+              delta("A long answer"),
+              errorEvent(code, "Out of room."),
+            ),
+          () => streamOf(delta("Short answer."), done),
+        ],
+      });
+      render(<Chat />);
+
+      send("hello");
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(title);
+      expect(screen.getByText("A long answer")).toBeInTheDocument();
+
+      fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+
+      expect(await screen.findByText("Short answer.")).toBeInTheDocument();
+      expect(screen.queryByText("A long answer")).not.toBeInTheDocument();
+      expect(screen.getAllByText("hello")).toHaveLength(1);
+      expect(chatBodies(calls)[1]).toMatchObject({ message: "hello", conversation_id: "c2" });
+    });
+
+    it("provider_rate_limited says to wait and offers to try again", async () => {
+      failWith(() =>
+        errorResponse(
+          429,
+          "provider_rate_limited",
+          "Nebius is rate limiting requests. Wait and try again.",
+        ),
+      );
+      render(<Chat />);
+
+      send("hello");
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("Wait and try again.");
+      expect(within(alert).getByRole("button", { name: "Try again" })).toBeEnabled();
+    });
+
+    it("keeps using the conversation a refused first message was stored in", async () => {
+      const { calls } = fakeApi({
+        "GET /api/settings/models": json(200, loadout()),
+        "POST /api/chat": [
+          () =>
+            errorResponse(409, "model_not_set", "No chat model is set.", {
+              "X-Conversation-Id": "c5",
+            }),
+          () => streamOf(delta("Hi"), done),
+        ],
+      });
+      render(<Chat />);
+
+      send("hello");
+      await screen.findByRole("alert");
+      expect(window.location.pathname).toBe("/app/c5");
+      send("hello");
+      await screen.findByText("Hi");
+
+      expect(chatBodies(calls)[1]).toEqual({ message: "hello", conversation_id: "c5" });
     });
 
     it("shows a message when the server cannot be reached", async () => {
-      fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+      failWith(() => {
+        throw new TypeError("Failed to fetch");
+      });
       render(<Chat />);
 
-      send("/push x");
+      send("hello");
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "The server could not be reached.",
       );
-      expect(screen.getByText("/push x")).toBeInTheDocument();
       expect(screen.getByLabelText("Message")).toBeEnabled();
     });
 
-    it("shows an error event that arrives mid-stream the same way, and keeps the text", async () => {
-      const stream = openStream();
-      fetchMock.mockResolvedValue(stream.response);
-      render(<Chat />);
-
-      send("/pull x");
-      await stream.push(
-        delta("Partial") +
-          errorEvent("provider_key_rejected", "Nebius rejected the key."),
-      );
-      await stream.close();
-
-      const alert = await screen.findByRole("alert");
-      expect(alert).toHaveTextContent("Your API key no longer works");
-      expect(within(alert).getByRole("link", { name: "Go to provider settings" })).toBeInTheDocument();
-      expect(screen.getByText("Partial")).toBeInTheDocument();
-      expect(screen.queryByText(/cut short/)).not.toBeInTheDocument();
-    });
-
     it("sends a logged-out user to log in and back to the chat", async () => {
-      fetchMock.mockResolvedValue(errorResponse(401, "unauthenticated", "Log in to continue."));
+      failWith(() => errorResponse(401, "unauthenticated", "Log in to continue."));
       render(<Chat />);
 
-      send("/push x");
+      send("hello");
 
       await waitFor(() => expect(redirectToLogin).toHaveBeenCalledWith("/app"));
     });
-  });
 
-  describe("a stream that stops early", () => {
     it("keeps the received text and says the answer was cut short when the connection breaks", async () => {
       const stream = openStream();
-      fetchMock.mockResolvedValue(stream.response);
+      failWith(() => stream.response);
       render(<Chat />);
 
-      send("/explore x");
+      send("hello");
       await stream.push(delta("Half an ans"));
       await stream.fail();
 
       expect(await screen.findByText(/cut short/)).toBeInTheDocument();
       expect(screen.getByText("Half an ans")).toBeInTheDocument();
-        expect(screen.queryByRole("status")).not.toBeInTheDocument();
       expect(screen.getByLabelText("Message")).toBeEnabled();
-    });
-
-    it("treats a stream that closes without done as cut short", async () => {
-      const stream = openStream();
-      fetchMock.mockResolvedValue(stream.response);
-      render(<Chat />);
-
-      send("/explore x");
-      await stream.push(delta("Half an ans"));
-      await stream.close();
-
-      expect(await screen.findByText(/cut short/)).toBeInTheDocument();
-      expect(screen.getByText("Half an ans")).toBeInTheDocument();
-    });
-
-    it("sends the same message again from a cut-short answer", async () => {
-      const first = openStream();
-      const second = openStream();
-      fetchMock.mockResolvedValueOnce(first.response).mockResolvedValueOnce(second.response);
-      render(<Chat />);
-
-      send("/explore x");
-      await first.push(delta("Half"));
-      await first.fail();
-      fireEvent.click(await screen.findByRole("button", { name: "Send again" }));
-
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-      expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ message: "/explore x" });
-      await second.push(delta("Whole answer") + done);
-      await second.close();
-      expect(await screen.findByText("Whole answer")).toBeInTheDocument();
-      expect(screen.getByText("Half")).toBeInTheDocument();
     });
   });
 });

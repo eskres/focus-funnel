@@ -22,18 +22,30 @@ async function collect(stream: ReadableStream<Uint8Array>): Promise<SseEvent[]> 
 }
 
 const wire =
+  'event: conversation\ndata: {"id":"c1","title":"buy oat milk"}\n\n' +
+  'event: tool\ndata: {"name":"search_thoughts","phase":"start"}\n\n' +
+  'event: tool\ndata: {"name":"search_thoughts","phase":"end","summary":"Searched"}\n\n' +
+  'event: proposal\ndata: {"title":"Oat milk","summary":"Buy it.","tags":["shopping"]}\n\n' +
   'event: delta\ndata: {"text":"Hel"}\n\n' +
   'event: delta\ndata: {"text":"lo"}\n\n' +
+  'event: usage\ndata: {"prompt_tokens":550,"completion_tokens":36,"context_length":131072}\n\n' +
+  'event: notice\ndata: {"kind":"compact_suggested"}\n\n' +
   "event: done\ndata: {}\n\n";
 
 const expected: SseEvent[] = [
+  { type: "conversation", id: "c1", title: "buy oat milk" },
+  { type: "tool", name: "search_thoughts", phase: "start" },
+  { type: "tool", name: "search_thoughts", phase: "end", summary: "Searched" },
+  { type: "proposal", title: "Oat milk", summary: "Buy it.", tags: ["shopping"] },
   { type: "delta", text: "Hel" },
   { type: "delta", text: "lo" },
+  { type: "usage", promptTokens: 550, completionTokens: 36, contextLength: 131072 },
+  { type: "notice", kind: "compact_suggested", data: { kind: "compact_suggested" } },
   { type: "done" },
 ];
 
 describe("parseSse", () => {
-  it("parses delta and done events in order", async () => {
+  it("parses each event in order", async () => {
     expect(await collect(streamOf(wire))).toEqual(expected);
   });
 
@@ -42,6 +54,13 @@ describe("parseSse", () => {
       streamOf('event: error\ndata: {"error":{"code":"provider_key_rejected","message":"No."}}\n\n'),
     );
     expect(events).toEqual([{ type: "error", code: "provider_key_rejected", message: "No." }]);
+  });
+
+  it("leaves out a usage event's context length when the model has none", async () => {
+    const events = await collect(
+      streamOf('event: usage\ndata: {"prompt_tokens":1,"completion_tokens":2}\n\n'),
+    );
+    expect(events).toEqual([{ type: "usage", promptTokens: 1, completionTokens: 2 }]);
   });
 
   it("parses events split across chunk boundaries", async () => {
@@ -75,7 +94,7 @@ describe("parseSse", () => {
     const events = await collect(
       streamOf(
         'event: delta\ndata: {"text":"a"}\n\n' +
-          'event: ping\ndata: {"anything":true}\n\n' +
+          'event: routing\ndata: {"gate":"push"}\n\n' +
           'event: delta\ndata: {"text":"b"}\n\n',
       ),
     );
@@ -91,6 +110,8 @@ describe("parseSse", () => {
         ": keep-alive\n\n" +
           "event: delta\ndata: not json\n\n" +
           'event: delta\ndata: {"text":5}\n\n' +
+          'event: tool\ndata: {"name":"x","phase":"middle"}\n\n' +
+          'event: proposal\ndata: {"title":"x","summary":"y","tags":"z"}\n\n' +
           'event: error\ndata: {"error":{"code":5}}\n\n' +
           "event: done\ndata: {}\n\n",
       ),

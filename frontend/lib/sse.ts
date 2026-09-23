@@ -1,16 +1,32 @@
 // Parses the chat event stream (`POST /api/chat`) into typed events.
 // The backend sends named events, each with a JSON payload:
-//   event: delta    data: {"text":"..."}
-//   event: error    data: {"error":{"code":"...","message":"..."}}
-//   event: done     data: {}
+//   event: conversation  data: {"id":"...","title":"..."}    first, for a new conversation
+//   event: tool          data: {"name":"...","phase":"start"|"end","summary":"..."}
+//   event: proposal      data: {"title":"...","summary":"...","tags":["..."]}
+//   event: delta         data: {"text":"..."}
+//   event: usage         data: {"prompt_tokens":1,"completion_tokens":1,"context_length":1}
+//   event: notice        data: {"kind":"compact_suggested"|"usage_warning", ...}
+//   event: error         data: {"error":{"code":"...","message":"..."}}
+//   event: done          data: {}
+
+export type Proposal = { title: string; summary: string; tags: string[] };
 
 export type SseEvent =
+  | { type: "conversation"; id: string; title: string }
+  | { type: "tool"; name: string; phase: "start" | "end"; summary?: string }
+  | ({ type: "proposal" } & Proposal)
   | { type: "delta"; text: string }
+  | { type: "usage"; promptTokens: number; completionTokens: number; contextLength?: number }
+  | { type: "notice"; kind: string; data: Record<string, unknown> }
   | { type: "error"; code: string; message: string }
   | { type: "done" };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function toEvent(name: string, data: string): SseEvent | null {
@@ -23,8 +39,50 @@ function toEvent(name: string, data: string): SseEvent | null {
   if (!isRecord(payload)) return null;
 
   switch (name) {
+    case "conversation":
+      return typeof payload.id === "string" && typeof payload.title === "string"
+        ? { type: "conversation", id: payload.id, title: payload.title }
+        : null;
+    case "tool":
+      if (
+        typeof payload.name === "string" &&
+        (payload.phase === "start" || payload.phase === "end")
+      ) {
+        return {
+          type: "tool",
+          name: payload.name,
+          phase: payload.phase,
+          ...(typeof payload.summary === "string" ? { summary: payload.summary } : {}),
+        };
+      }
+      return null;
+    case "proposal":
+      return typeof payload.title === "string" &&
+        typeof payload.summary === "string" &&
+        isStringArray(payload.tags)
+        ? { type: "proposal", title: payload.title, summary: payload.summary, tags: payload.tags }
+        : null;
     case "delta":
       return typeof payload.text === "string" ? { type: "delta", text: payload.text } : null;
+    case "usage":
+      if (
+        typeof payload.prompt_tokens === "number" &&
+        typeof payload.completion_tokens === "number"
+      ) {
+        return {
+          type: "usage",
+          promptTokens: payload.prompt_tokens,
+          completionTokens: payload.completion_tokens,
+          ...(typeof payload.context_length === "number"
+            ? { contextLength: payload.context_length }
+            : {}),
+        };
+      }
+      return null;
+    case "notice":
+      return typeof payload.kind === "string"
+        ? { type: "notice", kind: payload.kind, data: payload }
+        : null;
     case "error": {
       const error = payload.error;
       if (isRecord(error) && typeof error.code === "string" && typeof error.message === "string") {
