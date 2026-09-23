@@ -213,6 +213,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
       ...a,
       text: "",
       tools: [],
+      proposal: undefined,
       error: undefined,
       status: "streaming",
     }));
@@ -244,6 +245,11 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
           case "tool":
             updateAnswer(answerId, (a) => ({ ...a, tools: withTool(a.tools, event) }));
             break;
+          case "proposal": {
+            const { title, summary, tags } = event;
+            updateAnswer(answerId, (a) => ({ ...a, proposal: { title, summary, tags } }));
+            break;
+          }
           case "delta":
             updateAnswer(answerId, (a) => ({ ...a, text: a.text + event.text }));
             break;
@@ -314,7 +320,9 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
             <CommandList />
           </div>
         ) : (
-          <MessageList messages={messages} canAct={!answering} onRetry={retry} />
+          <MessageList
+            conversationId={conversationId}
+            messages={messages} canAct={!answering} onRetry={retry} />
         )}
       </div>
       <div className="border-t p-4">

@@ -25,6 +25,8 @@ export const conversationEvent = (id: string, title: string) =>
   `event: conversation\ndata: ${JSON.stringify({ id, title })}\n\n`;
 export const toolEvent = (name: string, phase: "start" | "end", summary?: string) =>
   `event: tool\ndata: ${JSON.stringify({ name, phase, ...(summary ? { summary } : {}) })}\n\n`;
+export const proposalEvent = (proposal: { title: string; summary: string; tags: string[] }) =>
+  `event: proposal\ndata: ${JSON.stringify(proposal)}\n\n`;
 export const errorEvent = (code: string, message: string) =>
   `event: error\ndata: ${JSON.stringify({ error: { code, message } })}\n\n`;
 
