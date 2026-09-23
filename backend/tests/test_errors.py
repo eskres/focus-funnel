@@ -63,3 +63,36 @@ def test_unexpected_error_hides_details():
     response = client.get("/boom")
     error = assert_error_shape(response, 500, ErrorCode.INTERNAL_ERROR)
     assert "secret" not in error["message"]
+
+
+def test_chat_error_constructors_have_their_documented_status():
+    from app import errors
+
+    cases = [
+        (errors.model_not_set(), 409, ErrorCode.MODEL_NOT_SET),
+        (errors.model_unknown("Nebius", "org/m"), 400, ErrorCode.MODEL_UNKNOWN),
+        (errors.model_unsupported("org/m", "tool calling"), 400, ErrorCode.MODEL_UNSUPPORTED),
+        (errors.model_unavailable("org/m"), 409, ErrorCode.MODEL_UNAVAILABLE),
+        (errors.context_full(), 409, ErrorCode.CONTEXT_FULL),
+        (errors.conversation_busy(), 409, ErrorCode.CONVERSATION_BUSY),
+    ]
+    for error, status_code, code in cases:
+        assert (error.status_code, error.code) == (status_code, code)
+        assert error.message
+
+
+def test_model_errors_name_the_model():
+    from app import errors
+
+    assert "org/m" in errors.model_unknown("Nebius", "org/m").message
+    assert "Nebius" in errors.model_unknown("Nebius", "org/m").message
+    assert "org/m" in errors.model_unavailable("org/m").message
+    assert "tool calling" in errors.model_unsupported("org/m", "tool calling").message
+
+
+def test_stream_only_errors_have_their_codes():
+    from app import errors
+
+    assert errors.output_limit_reached(False).code == ErrorCode.OUTPUT_LIMIT_REACHED
+    assert "thinking" in errors.output_limit_reached(True).message
+    assert errors.tool_loop_limit().code == ErrorCode.TOOL_LOOP_LIMIT

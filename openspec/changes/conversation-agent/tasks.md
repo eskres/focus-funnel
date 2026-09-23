@@ -7,9 +7,9 @@
 
 ## 2. Chat configuration and error codes
 
-- [ ] 2.1 Add `chat.yaml` and its loader with `CHAT_CONFIG_PATH` support and validation (temperature default and range, reply length limit, tool round limit, soft context share, recent messages kept by `/compact`, model hint, effort table), loaded in the lifespan. Check with pytest fixture files that a valid file loads, that each missing or out-of-range value fails at load with a message naming it, that the file holds no model id, and that the app refuses to start on an invalid file
-- [ ] 2.2 Add the backend error codes `model_not_set` (409), `model_unknown` (400), `model_unsupported` (400), `model_unavailable` (409), and `context_full` (409) and `conversation_busy` (409), plus the stream-only `output_limit_reached` and `tool_loop_limit`, and give the provider error mapper from `model-providers` a `model_id` argument. Check with pytest that each constructor returns its documented status and that a provider 404 naming the model maps to `model_unavailable` while other errors map as before
-- [ ] 2.3 Add the new codes and classes to `frontend/lib/api.ts` and a model alert that links to the model settings. Check with Vitest that each new code becomes its error type and that the model alert links to the model settings
+- [x] 2.1 Add `chat.yaml` and its loader with `CHAT_CONFIG_PATH` support and validation (temperature default and range, reply length limit, tool round limit, soft context share, recent messages kept by `/compact`, model hint, effort table), loaded in the lifespan. Check with pytest fixture files that a valid file loads, that each missing or out-of-range value fails at load with a message naming it, that the file holds no model id, and that the app refuses to start on an invalid file
+- [x] 2.2 Add the backend error codes `model_not_set` (409), `model_unknown` (400), `model_unsupported` (400), `model_unavailable` (409), and `context_full` (409) and `conversation_busy` (409), plus the stream-only `output_limit_reached` and `tool_loop_limit`, and give the provider error mapper from `model-providers` a `model_id` argument. Check with pytest that each constructor returns its documented status and that a provider 404 naming the model maps to `model_unavailable` while other errors map as before
+- [x] 2.3 Add the new codes and classes to `frontend/lib/api.ts` and a model alert that links to the model settings. Check with Vitest that each new code becomes its error type and that the model alert links to the model settings
 
 ## 3. Data model and migration
 

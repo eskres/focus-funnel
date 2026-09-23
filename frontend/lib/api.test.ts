@@ -121,3 +121,28 @@ describe("apiFetch", () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe("createApiError", () => {
+  it.each([
+    ["model_not_set", "ModelNotSetError"],
+    ["model_unknown", "ModelUnknownError"],
+    ["model_unsupported", "ModelUnsupportedError"],
+    ["model_unavailable", "ModelUnavailableError"],
+    ["context_full", "ContextFullError"],
+    ["conversation_busy", "ConversationBusyError"],
+    ["output_limit_reached", "OutputLimitReachedError"],
+    ["tool_loop_limit", "ToolLoopLimitError"],
+  ])("turns %s into %s", async (code, className) => {
+    const api = await import("./api");
+    const ErrorClass = api[className as keyof typeof api] as typeof ApiError;
+    const error = api.createApiError(code, "A message.", 409);
+    expect(error).toBeInstanceOf(ErrorClass);
+    expect(error).toMatchObject({ code, message: "A message.", status: 409 });
+  });
+
+  it("keeps an unknown code as a plain ApiError", async () => {
+    const { createApiError } = await import("./api");
+    const error = createApiError("something_new", "x", 400);
+    expect(error.constructor).toBe(ApiError);
+  });
+});

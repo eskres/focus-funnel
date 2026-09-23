@@ -1,0 +1,37 @@
+# Chat settings the user cannot change. Loaded once at startup; an invalid
+# file stops the server. CHAT_CONFIG_PATH points tests or an operator at
+# another file. This file never chooses a model for a user.
+
+temperature:
+  default: 0.3
+  min: 0.0
+  max: 2.0
+
+# Sent as max_tokens on every call. Room for the worst probed reasoning
+# (about 2,300 tokens) plus an answer.
+reply_max_tokens: 8192
+
+# Model calls in one turn before the answer ends with tool_loop_limit.
+tool_rounds: 3
+
+# Share of the context length past which the chat suggests /compact.
+compact_suggest_share: 0.7
+
+# Most recent messages /compact keeps as they are.
+compact_keep_recent: 6
+
+model_hint: >-
+  Pick a chat model that supports tool calling and streams its answer.
+  A small, fast reasoning model works well, for example
+  nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B on Nebius.
+
+efforts:
+  # Every reasoning effort a user may pick, in order.
+  documented: [none, minimal, low, medium, high]
+  # Efforts known not to work with a model, matched on the model id with
+  # shell-style wildcards. A model not listed offers every documented effort.
+  unsupported:
+    - match: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B
+      efforts: [none]   # probed: empty answers on 10 of 10 calls
+    - match: openai/gpt-oss-*
+      efforts: [none, minimal]   # refused by the provider

@@ -308,3 +308,44 @@ async def test_another_users_key_is_never_used(session, settings_env):
         await client_for(session, bob2, provider, settings, http_client=fake.http_client())
     assert error.value.code == ErrorCode.PROVIDER_KEY_MISSING
     assert fake.requests == []
+
+
+# --- a model the key can't use ---
+
+MODEL = "org/some-model"
+
+
+def test_404_on_a_model_call_means_model_unavailable(provider):
+    mapped = map_provider_error(
+        status_error(openai.NotFoundError, 404), provider, saved_key=True, model_id=MODEL
+    )
+    assert mapped.code == ErrorCode.MODEL_UNAVAILABLE
+    assert mapped.status_code == 409
+    assert MODEL in mapped.message
+
+
+def test_400_saying_the_model_is_not_found_means_model_unavailable(provider):
+    request = httpx2.Request("POST", f"{BASE_URL}chat/completions")
+    err = openai.BadRequestError(
+        f"The model `{MODEL}` does not exist",
+        response=httpx2.Response(400, request=request),
+        body=None,
+    )
+    mapped = map_provider_error(err, provider, saved_key=True, model_id=MODEL)
+    assert mapped.code == ErrorCode.MODEL_UNAVAILABLE
+
+
+def test_other_errors_map_as_before_with_a_model_id(provider):
+    cases = [
+        (status_error(openai.BadRequestError, 400), ErrorCode.PROVIDER_REQUEST_REFUSED),
+        (status_error(openai.RateLimitError, 429), ErrorCode.PROVIDER_RATE_LIMITED),
+        (status_error(openai.AuthenticationError, 401), ErrorCode.PROVIDER_KEY_REJECTED),
+        (status_error(openai.InternalServerError, 500), ErrorCode.PROVIDER_UNREACHABLE),
+    ]
+    for err, code in cases:
+        assert map_provider_error(err, provider, saved_key=True, model_id=MODEL).code == code
+
+
+def test_404_without_a_model_id_is_a_refused_request(provider):
+    mapped = map_provider_error(status_error(openai.NotFoundError, 404), provider, saved_key=True)
+    assert mapped.code == ErrorCode.PROVIDER_REQUEST_REFUSED

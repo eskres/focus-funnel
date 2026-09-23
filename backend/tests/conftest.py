@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.pool import NullPool
 
 from app.auth import JwksCache
+from app.chat.config import get_chat_config
 from app.config import get_settings
 from app.db import create_engine, get_engine, get_sessionmaker
 from app.models import Base, User
@@ -26,12 +27,15 @@ TEST_ISSUER = f"https://{REQUIRED_ENV['AUTH0_DOMAIN']}/"
 TEST_KID = "test-key-1"
 
 
+CACHED = (get_settings, get_engine, get_sessionmaker, get_providers_config, get_chat_config)
+
+
 @pytest.fixture(autouse=True)
 def clear_settings_cache():
-    for cached in (get_settings, get_engine, get_sessionmaker, get_providers_config):
+    for cached in CACHED:
         cached.cache_clear()
     yield
-    for cached in (get_settings, get_engine, get_sessionmaker, get_providers_config):
+    for cached in CACHED:
         cached.cache_clear()
 
 

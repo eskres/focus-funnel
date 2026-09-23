@@ -8,8 +8,9 @@ Error codes and HTTP statuses:
   returned a server error.
 - provider_rate_limited (429): the provider refused the call as too many requests.
 - provider_request_refused (422): any other client error, carrying the provider's
-  message. An optional model_id lets a caller that knows the model
-  (conversation-agent) build a clearer message; this module does not branch on it.
+  message.
+- model_unavailable (409): with a model_id, a 404, or a 400 saying that model
+  is not found, which is how a provider reports a model the key can't use.
 
 The openai SDK sends requests through the httpx2 package. Tests inject an
 httpx2.AsyncClient with a mock transport through the http_client arguments.
@@ -23,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.crypto import DecryptionError, EncryptedSecret, decrypt_secret
-from app.errors import ApiError, ErrorCode
+from app.errors import ApiError, ErrorCode, model_unavailable
 from app.log_masking import register_secret
 from app.models import ProviderKey, User
 from app.provider_config import ProviderPreset
@@ -94,6 +95,20 @@ def make_client(
     )
 
 
+def _names_model(exc: openai.APIStatusError, model_id: str) -> bool:
+    """True when a refusal is about the model: a 404, or an error naming it.
+
+    A 404 on a chat call can only mean the model; a 400 has many causes, so
+    it counts only when its message names the model.
+    """
+    if exc.status_code == 404:
+        return True
+    text = str(exc).lower()
+    return model_id.lower() in text and any(
+        phrase in text for phrase in ("not found", "does not exist", "not available")
+    )
+
+
 def map_provider_error(
     exc: openai.OpenAIError,
     provider: ProviderPreset,
@@ -107,12 +122,13 @@ def map_provider_error(
     the key is invalid); saved_key=True while using a stored key (auth failure
     means the saved key stopped working).
     """
-    del model_id  # not yet used for branching; kept for a future caller's message
     if isinstance(exc, (openai.AuthenticationError, openai.PermissionDeniedError)):
         return key_rejected(provider) if saved_key else key_invalid(provider)
     if isinstance(exc, (openai.APITimeoutError, openai.APIConnectionError)):
         return unreachable(provider)
     if isinstance(exc, openai.APIStatusError):
+        if model_id is not None and exc.status_code in (400, 404) and _names_model(exc, model_id):
+            return model_unavailable(model_id)
         if exc.status_code == 429:
             return rate_limited(provider)
         if exc.status_code >= 500:

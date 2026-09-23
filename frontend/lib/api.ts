@@ -12,6 +12,14 @@ export type ApiErrorCode =
   | "provider_unreachable"
   | "provider_rate_limited"
   | "provider_request_refused"
+  | "model_not_set"
+  | "model_unknown"
+  | "model_unsupported"
+  | "model_unavailable"
+  | "context_full"
+  | "conversation_busy"
+  | "output_limit_reached"
+  | "tool_loop_limit"
   | "backend_unreachable"
   | "internal_error";
 
@@ -36,6 +44,14 @@ export class ProviderKeyRejectedError extends ApiError {}
 export class ProviderUnreachableError extends ApiError {}
 export class ProviderRateLimitedError extends ApiError {}
 export class ProviderRequestRefusedError extends ApiError {}
+export class ModelNotSetError extends ApiError {}
+export class ModelUnknownError extends ApiError {}
+export class ModelUnsupportedError extends ApiError {}
+export class ModelUnavailableError extends ApiError {}
+export class ContextFullError extends ApiError {}
+export class ConversationBusyError extends ApiError {}
+export class OutputLimitReachedError extends ApiError {}
+export class ToolLoopLimitError extends ApiError {}
 export class BackendUnreachableError extends ApiError {}
 export class InternalError extends ApiError {}
 
@@ -49,6 +65,14 @@ const errorClasses: Record<ApiErrorCode, typeof ApiError> = {
   provider_unreachable: ProviderUnreachableError,
   provider_rate_limited: ProviderRateLimitedError,
   provider_request_refused: ProviderRequestRefusedError,
+  model_not_set: ModelNotSetError,
+  model_unknown: ModelUnknownError,
+  model_unsupported: ModelUnsupportedError,
+  model_unavailable: ModelUnavailableError,
+  context_full: ContextFullError,
+  conversation_busy: ConversationBusyError,
+  output_limit_reached: OutputLimitReachedError,
+  tool_loop_limit: ToolLoopLimitError,
   backend_unreachable: BackendUnreachableError,
   internal_error: InternalError,
 };

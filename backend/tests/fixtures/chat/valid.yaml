@@ -1,0 +1,13 @@
+temperature: { default: 0.3, min: 0.0, max: 2.0 }
+reply_max_tokens: 8192
+tool_rounds: 3
+compact_suggest_share: 0.7
+compact_keep_recent: 6
+model_hint: Pick a model that supports tool calling.
+efforts:
+  documented: [none, minimal, low, medium, high]
+  unsupported:
+    - match: vendor/nano-model
+      efforts: [none]
+    - match: openai/gpt-oss-*
+      efforts: [none, minimal]

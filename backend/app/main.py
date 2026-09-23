@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.chat.config import get_chat_config
 from app.config import get_settings
 from app.errors import register_error_handlers
 from app.log_masking import install_log_masking
@@ -11,10 +12,11 @@ from app.routers import health, me, providers
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Fail at startup, not on first request, when settings or the provider
-    # configuration are missing or invalid.
+    # Fail at startup, not on first request, when settings or the provider or
+    # chat configuration are missing or invalid.
     get_settings()
     get_providers_config()
+    get_chat_config()
     yield
 
 
