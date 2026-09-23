@@ -18,7 +18,7 @@ vi.mock("@/lib/auth0", () => ({
   auth0: { getSession, getAccessToken },
 }));
 
-import { DELETE, GET, PUT } from "./route";
+import { DELETE, GET, POST, PUT } from "./route";
 
 type Handler = (req: IncomingMessage, body: string, res: ServerResponse) => void;
 
@@ -328,6 +328,56 @@ describe("API proxy", () => {
     expect(received.map((chunk) => chunk.text)).toEqual(parts);
     // Each part reaches the client before the backend sends the next one,
     // so the proxy did not wait for the full response.
+    for (let i = 0; i < parts.length - 1; i++) {
+      expect(received[i].at).toBeLessThan(sentAt[i + 1]);
+    }
+  });
+
+  it("keeps the event-stream content type and streams a POST chat answer in parts", async () => {
+    const parts = [
+      'event: delta\ndata: {"text":"one"}\n\n',
+      'event: delta\ndata: {"text":"two"}\n\n',
+      "event: done\ndata: {}\n\n",
+    ];
+    const sentAt: number[] = [];
+    backend = await startBackend(async (_req, _body, res) => {
+      res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8" });
+      for (const part of parts) {
+        sentAt.push(performance.now());
+        res.write(part);
+        await sleep(150);
+      }
+      res.end();
+    });
+    vi.stubEnv("BACKEND_URL", backend.url);
+
+    const response = await POST(
+      new Request("http://localhost:3000/api/chat", {
+        method: "POST",
+        headers: { Accept: "text/event-stream", "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "/push buy milk" }),
+      }),
+      ctx("chat"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("text/event-stream; charset=utf-8");
+    expect(response.headers.get("Cache-Control")).toBe("no-cache");
+    expect(response.headers.get("X-Accel-Buffering")).toBe("no");
+    // The backend sees the event-stream Accept header and the message body.
+    expect(backend.requests[0].headers.accept).toBe("text/event-stream");
+    expect(JSON.parse(backend.requests[0].body)).toEqual({ message: "/push buy milk" });
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    const received: { text: string; at: number }[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received.push({ text: decoder.decode(value), at: performance.now() });
+    }
+
+    expect(received.map((chunk) => chunk.text)).toEqual(parts);
     for (let i = 0; i < parts.length - 1; i++) {
       expect(received[i].at).toBeLessThan(sentAt[i + 1]);
     }

@@ -1,9 +1,9 @@
 ## 1. Groundwork and probes
 
-- [ ] 1.1 With `model-providers` landed, bring the reusable backend code over from the local branch `backup/gate-build`, as listed in `design.md` decision 12, with `gate` removed from module, class, and test names (for example `git checkout backup/gate-build -- <path>`, then rename). Check that `uv run pytest` passes for the brought-over code and its tests and that nothing imports a gate registry, resolution, storage, or handler module
+- [x] 1.1 With `model-providers` landed, bring the reusable backend code over from the local branch `backup/gate-build`, as listed in `design.md` decision 12, with `gate` removed from module, class, and test names (for example `git checkout backup/gate-build -- <path>`, then rename). Check that `uv run pytest` passes for the brought-over code and its tests and that nothing imports a gate registry, resolution, storage, or handler module
 - [x] 1.2 Probe forced tool use (`tool_choice` naming a function) on `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B`. Done: honoured on 8 of 8 calls including streamed, `required` works, and a forced call ends with `finish_reason: stop`. Recorded in `design.md` decisions 2 and 5
 - [x] 1.3 Probe `stream_options.include_usage` on a streamed call. Done: usage arrives on a final chunk with no choices only when the option is set, and matched the non-streamed prompt count. Recorded in `design.md` decision 9. The price unit is not verified: task 14.8 checks it against the Nebius console
-- [ ] 1.4 With `model-providers` landed, bring the reusable frontend code over from `backup/gate-build` as listed in `design.md` decision 12, with `gate` removed from names. Check that `npm run test`, `npm run lint`, and `npm run build` pass and that a search of `frontend/` for `gate`, `routing_failed`, and `GateModel` finds nothing
+- [x] 1.4 With `model-providers` landed, bring the reusable frontend code over from `backup/gate-build` as listed in `design.md` decision 12, with `gate` removed from names. Check that `npm run test`, `npm run lint`, and `npm run build` pass and that a search of `frontend/` for `gate`, `routing_failed`, and `GateModel` finds nothing
 
 ## 2. Chat configuration and error codes
 

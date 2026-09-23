@@ -1,10 +1,11 @@
 import Link from "next/link";
 
+import { Chat } from "@/components/chat/chat";
 import { Button } from "@/components/ui/button";
 
 export default function AppPage() {
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex h-screen flex-col">
       <header className="flex items-center justify-between border-b px-6 py-3">
         <span className="font-semibold">Focus Funnel</span>
         <nav className="flex items-center gap-2">
@@ -16,8 +17,8 @@ export default function AppPage() {
           </Button>
         </nav>
       </header>
-      <main className="flex flex-1 items-center justify-center p-8">
-        <p className="text-muted-foreground">Chat is coming soon.</p>
+      <main className="flex min-h-0 flex-1 flex-col">
+        <Chat />
       </main>
     </div>
   );

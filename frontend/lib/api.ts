@@ -68,13 +68,19 @@ function readErrorBody(body: unknown): { code?: string; message?: string } {
   };
 }
 
-async function toApiError(response: Response): Promise<ApiError> {
+/** Builds the error class for a code, for example from an `error` event in a stream. */
+export function createApiError(code: string, message: string, status: number): ApiError {
+  const ErrorClass = isKnownCode(code) ? errorClasses[code] : ApiError;
+  return new ErrorClass(code, message, status);
+}
+
+/** Reads the shared error format from a failed response. */
+export async function toApiError(response: Response): Promise<ApiError> {
   // A body that is not JSON is not the shared error format: use a generic error.
   const body: unknown = await response.json().catch(() => null);
   const { code = "unknown_error", message = `Request failed with status ${response.status}.` } =
     readErrorBody(body);
-  const ErrorClass = isKnownCode(code) ? errorClasses[code] : ApiError;
-  return new ErrorClass(code, message, response.status);
+  return createApiError(code, message, response.status);
 }
 
 /**
