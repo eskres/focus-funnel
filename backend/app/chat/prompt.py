@@ -2,6 +2,7 @@
 
 import json
 import math
+from datetime import UTC, date, datetime
 from typing import Any
 
 from app.chat.commands import parse_message
@@ -18,7 +19,10 @@ Keep replies short.
 
 You have two tools:
 - search_thoughts: search the thoughts the user filed before. Use it when the \
-user asks what they said, noted, or decided earlier.
+user asks what they said, noted, or decided earlier. Pass the key words and \
+names to look for, not a question. When the user names a time, such as this \
+month, also pass the start date; when they name a kind of thought, such as \
+work, also pass it as a tag.
 - propose_thought: propose a thought to file, with a short title, a summary, \
 and tags. Use it when the user states something clearly worth keeping, such \
 as a to-do or an idea, and when a discussion reaches a conclusion or a \
@@ -159,13 +163,21 @@ def _as_model_message(message: Message) -> dict[str, Any] | None:
     return None
 
 
+def system_prompt(today: date | None = None) -> str:
+    """The system prompt with today's date, so the model can pass a start date."""
+    today = today or datetime.now(UTC).date()
+    return f"{SYSTEM_PROMPT}\n\nToday is {today.strftime('%A')} {today.isoformat()}."
+
+
 def build_context(
-    messages: list[Message], held_proposal: dict[str, Any] | None = None
+    messages: list[Message],
+    held_proposal: dict[str, Any] | None = None,
+    today: date | None = None,
 ) -> list[dict[str, Any]]:
     """The system prompt, the latest summary if any, every message not
     compacted, then the held-proposal note if a proposal is held. The note
     comes last because the model follows it far more often there."""
-    context: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    context: list[dict[str, Any]] = [{"role": "system", "content": system_prompt(today)}]
     summaries = [m for m in messages if m.role == "summary" and not m.compacted]
     if summaries:
         context.append(

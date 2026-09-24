@@ -9,7 +9,7 @@ from openai import AsyncOpenAI
 from sqlalchemy import select, update
 
 import app.chat.turn as turn_module
-from app.chat.prompt import SYSTEM_PROMPT, build_context
+from app.chat.prompt import system_prompt, build_context
 from app.chat.tools import SearchToolResult
 from app.errors import ErrorCode
 from app.models import Conversation, Message
@@ -67,7 +67,7 @@ def message(position, role, content=None, **fields) -> Message:
 def test_the_context_is_the_prompt_then_the_messages():
     context = build_context([message(0, "user", "hi"), message(1, "assistant", "Hello")])
     assert context == [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt()},
         {"role": "user", "content": "hi"},
         {"role": "assistant", "content": "Hello"},
     ]
