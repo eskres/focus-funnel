@@ -2,11 +2,13 @@
 
 concept_embedder maps each text to counts of concept words, one dimension
 per concept, so texts that share a concept are close and texts that share
-none are far apart. The last dimension is a small constant, so no vector is
-all zeros.
+none are far apart. A lighter bag of hashed words follows, so texts with no
+concept word still differ, and a small constant ends it, so no vector is all
+zeros.
 """
 
 import re
+import zlib
 from collections.abc import Callable, Iterable
 
 EMBED_MODEL = "vendor/embed-model"
@@ -21,6 +23,8 @@ DEFAULT_CONCEPTS: list[set[str]] = [
 ]
 
 Embedder = Callable[[str], list[float]]
+HASH_BUCKETS = 64
+HASH_WEIGHT = 0.2
 
 
 def words(text: str) -> list[str]:
@@ -33,7 +37,10 @@ def concept_embedder(concepts: Iterable[set[str]] = DEFAULT_CONCEPTS) -> Embedde
     def embed(text: str) -> list[float]:
         tokens = words(text)
         vector = [float(sum(token in concept for token in tokens)) for concept in concept_list]
-        return [*vector, 0.05]
+        buckets = [0.0] * HASH_BUCKETS
+        for token in tokens:
+            buckets[zlib.crc32(token.encode()) % HASH_BUCKETS] += HASH_WEIGHT
+        return [*vector, *buckets, 0.05]
 
     return embed
 

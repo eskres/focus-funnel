@@ -40,11 +40,29 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": SEARCH_TOOL,
-            "description": "Search the thoughts the user filed before, by meaning.",
+            "description": (
+                "Search the thoughts the user filed before, by meaning and by words. "
+                "Returns the best matches, or says that none matched."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "What to look for."}
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "The key words and names to look for, not a question. "
+                            "For example: 'dentist appointment' or 'ACME-4471 invoice'."
+                        ),
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Only thoughts with at least one of these tags.",
+                    },
+                    "since": {
+                        "type": "string",
+                        "description": "Only thoughts filed on or after this date, YYYY-MM-DD.",
+                    },
                 },
                 "required": ["query"],
             },
