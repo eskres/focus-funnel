@@ -115,11 +115,16 @@ export function DeleteDataSection() {
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {ACTIONS.map((item) => (
-          <div key={item.id} className="flex items-center justify-between gap-4">
-            <p className="text-sm text-muted-foreground">{item.description}</p>
-            <Button variant="destructive" className="shrink-0" onClick={() => open(item)}>
+          <div key={item.id} className="flex items-center gap-4">
+            {/* One width for all three; the longest label wraps onto two lines. */}
+            <Button
+              variant="destructive"
+              className="h-auto min-h-8 w-32 py-1.5 whitespace-normal"
+              onClick={() => open(item)}
+            >
               {item.label}
             </Button>
+            <p className="text-sm text-muted-foreground">{item.description}</p>
           </div>
         ))}
         {done && (
