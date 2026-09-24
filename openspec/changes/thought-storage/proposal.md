@@ -14,7 +14,7 @@ The chat's two tools, `search_thoughts` and `propose_thought`, need somewhere du
 - Embed the title and summary of each thought. Store `thought_id`, tags, `created_at`, and `embedding_model` in each vector's metadata.
 - Before a search runs, check that the query's embedding model matches the collection. A mismatch returns a clear error instead of wrong results.
 - Offer internal operations: store a thought, update a thought, delete a thought, and search by meaning with an optional tag filter and newest-first sort.
-- Replace the `search_thoughts` stub from `conversation-agent` with a real search over the user's thoughts. The stub sits behind one function, so this change swaps that function. Saving a confirmed proposal is `push-and-pull-gates`, which uses the store operation from this change.
+- Replace the `search_thoughts` stub from `conversation-agent` with a real search over the user's thoughts. The stub sits behind one function, so this change swaps that function. Saving a confirmed proposal is `push-and-pull`, which uses the store operation from this change.
 - Add an admin-only command-line re-embed job. It builds a new collection version from Postgres, checks the vector count, switches the user to the new collection, and marks the old one retired. It runs for one user or for all users, and search keeps working during the rebuild.
 - Add a "delete my data" endpoint. It deletes the user's thoughts and collections, their provider keys, their model loadout and chat settings, and their conversations, messages, and usage records.
 

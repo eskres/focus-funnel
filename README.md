@@ -142,4 +142,4 @@ openspec/        specs and planned changes
 
 Work is planned with [OpenSpec](https://github.com/Fission-AI/OpenSpec). Each change in `openspec/changes/` has a proposal, a design, specs, and a task list. The specs of finished changes live in `openspec/specs/`.
 
-The change in progress is `conversation-agent`. After it come `thought-storage`, `push-and-pull-gates`, `explore-gate`, `auth-modes`, `mcp-connectors`, and `self-hosting-setup`.
+`model-providers` and `conversation-agent` are done. The next change is `auth-modes`. After it come `thought-storage`, `push-and-pull`, `explore`, `mcp-connectors`, and `self-hosting-setup`.

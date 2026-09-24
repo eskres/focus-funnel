@@ -1,4 +1,4 @@
-> **Planning status:** Proposal only. Write the specs, design, and tasks when this change is picked up. Depends on `conversation-agent`, `thought-storage`, and `push-and-pull-gates`.
+> **Planning status:** Proposal only. Write the specs, design, and tasks when this change is picked up. Depends on `conversation-agent`, `thought-storage`, and `push-and-pull`.
 
 ## Why
 
@@ -8,7 +8,7 @@ Two parts are left. The user should see which past thoughts informed an answer w
 
 ## What Changes
 
-- Each time `search_thoughts` runs during a discussion, show the related thoughts it returned next to the answer, using the sources list from `push-and-pull-gates`, so the user sees what informed the answer.
+- Each time `search_thoughts` runs during a discussion, show the related thoughts it returned next to the answer, using the sources list from `push-and-pull`, so the user sees what informed the answer.
 - Link a thought saved from a conversation back to that conversation and the message position of its proposal. The thought detail view opens the conversation at that point.
 - If the conversation is deleted, the thought keeps its content and loses only the link.
 

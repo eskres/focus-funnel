@@ -61,7 +61,7 @@ class SaveOutcome:
 
 
 async def save_thought(user: User, proposal: Proposal) -> SaveOutcome:
-    """Hand a confirmed proposal to thought storage. Replaced by push-and-pull-gates."""
+    """Hand a confirmed proposal to thought storage. Replaced by push-and-pull."""
     return SaveOutcome(
         saved=False, message="Saving thoughts is not available yet. Copy the text to keep it."
     )
