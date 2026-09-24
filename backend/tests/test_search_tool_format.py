@@ -103,6 +103,13 @@ def test_words_only_names_the_provider_for_a_missing_key(env):
     )
 
 
+def test_words_only_names_the_provider_of_the_users_index(env):
+    config, settings = env
+    provider = get_providers_config().get("openrouter")
+    result = SearchResult(words_only=key_missing(provider), embedding_provider="openrouter")
+    assert "add your OpenRouter API key" in format_search_result(result, config, settings).text
+
+
 def test_words_only_for_other_reasons(env):
     config, settings = env
     provider = get_providers_config().get(settings.embedding_provider)

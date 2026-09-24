@@ -97,10 +97,10 @@ def _shorten(text: str, limit: int) -> str:
     return text[:limit].rsplit(" ", 1)[0].rstrip(",;:.") + "…"
 
 
-def words_only_note(error: ApiError, settings: Settings) -> str:
+def words_only_note(error: ApiError, provider_id: str) -> str:
     if error.code == ErrorCode.PROVIDER_KEY_MISSING:
-        provider = get_providers_config().get(settings.embedding_provider)
-        label = provider.label if provider else settings.embedding_provider
+        provider = get_providers_config().get(provider_id)
+        label = provider.label if provider else provider_id
         return (
             f"Searched by words only: add your {label} API key in settings to also "
             "search by meaning. Tell the user."
@@ -122,7 +122,8 @@ def format_search_result(
     excerpt only for a raw-text match, and entries added best first until the
     next would pass budget_chars.
     """
-    note = [words_only_note(result.words_only, settings)] if result.words_only else []
+    provider_id = result.embedding_provider or settings.embedding_provider
+    note = [words_only_note(result.words_only, provider_id)] if result.words_only else []
     if not result.hits:
         return SearchToolResult(text="\n".join([NO_MATCH, *note]))
     order = "newest first" if newest_first else "best first"

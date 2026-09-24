@@ -51,6 +51,8 @@ class SearchResult:
     total: int = 0
     # Set when the search ran by words only, with the reason.
     words_only: ApiError | None = None
+    # The provider of the embedding model the search used or tried.
+    embedding_provider: str | None = None
 
     @property
     def rebuild_needed(self) -> bool:
@@ -255,6 +257,9 @@ async def search_thoughts(
         config=config,
     )
     result.words_only = outcome.error
+    result.embedding_provider = (
+        index.embedding_provider if index is not None else settings.embedding_provider
+    )
     return result
 
 

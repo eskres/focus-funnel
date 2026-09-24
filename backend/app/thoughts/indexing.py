@@ -96,6 +96,7 @@ async def create_index(
         embedding_provider=choice.provider_id,
         embedding_model=choice.model,
         dimension=dimension,
+        requested_dimensions=choice.dimensions,
         status=status,
     )
     try:
@@ -109,16 +110,11 @@ async def create_index(
     return index
 
 
-def choice_of(index: SearchIndex, settings: Settings) -> EmbeddingChoice:
-    # The index keeps its own model. Dimensions are only sent for a model
-    # the instance still configures with them.
-    dimensions = (
-        settings.embedding_dimensions
-        if settings.embedding_model == index.embedding_model
-        and settings.embedding_provider == index.embedding_provider
-        else None
+def choice_of(index: SearchIndex) -> EmbeddingChoice:
+    """The model an index was built with, asked for vectors of the same size."""
+    return EmbeddingChoice(
+        index.embedding_provider, index.embedding_model, index.requested_dimensions
     )
-    return EmbeddingChoice(index.embedding_provider, index.embedding_model, dimensions)
 
 
 async def write_entries(
@@ -189,7 +185,7 @@ async def embed_for_index(
     texts = extra + [piece.text for _, thought_pieces_ in items for piece in thought_pieces_]
     if not texts:
         return EmbedOutcome(index=index)
-    choice = choice_of(index, settings) if index is not None else resolve_embedding_model(user, settings)
+    choice = choice_of(index) if index is not None else resolve_embedding_model(user, settings)
     try:
         vectors = await embed_texts(
             session,

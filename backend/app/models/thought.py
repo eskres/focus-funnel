@@ -107,6 +107,8 @@ class SearchIndex(Base):
     embedding_provider: Mapped[str] = mapped_column(String(64), nullable=False)
     embedding_model: Mapped[str] = mapped_column(Text, nullable=False)
     dimension: Mapped[int] = mapped_column(Integer, nullable=False)
+    # The `dimensions` asked of the model, if any; every later call asks the same.
+    requested_dimensions: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

@@ -62,6 +62,7 @@ def upgrade() -> None:
     sa.Column('embedding_provider', sa.String(length=64), nullable=False),
     sa.Column('embedding_model', sa.Text(), nullable=False),
     sa.Column('dimension', sa.Integer(), nullable=False),
+    sa.Column('requested_dimensions', sa.Integer(), nullable=True),
     sa.Column('status', sa.String(length=16), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('retired_at', sa.DateTime(timezone=True), nullable=True),

@@ -296,3 +296,20 @@ def test_delete_removes_the_thought_and_its_entries(test_database_url, fake, ali
     run_as(test_database_url, alice_id, fake, delete)
     assert entries(test_database_url, thought_id) == {}
     assert found_by_words(test_database_url, alice_id, "oat") == []
+
+
+def test_the_index_keeps_asking_for_its_vector_size(test_database_url, fake, alice_id, settings_env):
+    from app.config import get_settings
+
+    settings_env.setenv("EMBEDDING_DIMENSIONS", "256")
+    get_settings.cache_clear()
+    store(test_database_url, alice_id, fake)
+    [index] = indexes(test_database_url, alice_id)
+    assert index.requested_dimensions == 256
+
+    settings_env.delenv("EMBEDDING_DIMENSIONS")
+    get_settings.cache_clear()
+    fake.embed_requests.clear()
+    store(test_database_url, alice_id, fake, title="Dentist", summary="Book the dentist.")
+
+    assert [body.get("dimensions") for body in fake.embed_requests] == [256]
