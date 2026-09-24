@@ -72,6 +72,12 @@ function redirectToLogin() {
   window.location.assign(new URL("/auth/login?returnTo=/settings", window.location.origin));
 }
 
+/**
+ * Fired on `window` when a key is saved or deleted, so other sections on the
+ * page (the chat model chooser) can read the providers again.
+ */
+export const PROVIDER_KEYS_CHANGED = "focus-funnel:provider-keys-changed";
+
 export function ProvidersSettings() {
   const [providers, setProviders] = useState<ProviderStatus[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -100,6 +106,7 @@ export function ProvidersSettings() {
     setProviders((current) =>
       (current ?? []).map((p) => (p.id === updated.id ? updated : p)),
     );
+    window.dispatchEvent(new Event(PROVIDER_KEYS_CHANGED));
   }
 
   return (

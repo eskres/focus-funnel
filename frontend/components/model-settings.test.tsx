@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { errorResponse, fakeApi, json, loadout, loadoutEntry } from "@/test/fake-api";
 
 import { ModelSettingsSection } from "./model-settings";
+import { ProvidersSettings } from "./providers-settings";
 
 vi.mock("@/lib/redirect-to-login", () => ({ redirectToLogin: vi.fn() }));
 
@@ -286,6 +287,37 @@ describe("ModelSettingsSection", () => {
       const alert = await screen.findByRole("alert");
       expect(alert).toHaveTextContent("Add a provider API key to choose chat models.");
       expect(within(alert).getByRole("link", { name: "Go to provider settings" })).toBeInTheDocument();
+    });
+
+    it("drops the key alert once a key is saved in the providers section", async () => {
+      const nvidiaSaved = { ...nvidiaNoKey, key_saved: true, key_saved_at: "2026-09-24T10:00:00Z" };
+      const noKey = json(200, { providers: [nvidiaNoKey], custom_provider_allowed: true });
+      fakeApi({
+        "GET /api/settings/models": json(200, loadout()),
+        // Once for each section as the page loads, then after the save.
+        "GET /api/providers": [
+          noKey,
+          noKey,
+          json(200, { providers: [nvidiaSaved], custom_provider_allowed: true }),
+        ],
+        "PUT /api/providers/nvidia/key": json(200, nvidiaSaved),
+      });
+      render(
+        <>
+          <ProvidersSettings />
+          <ModelSettingsSection />
+        </>,
+      );
+      expect(await screen.findByText("Add a provider API key to choose chat models.")).toBeInTheDocument();
+
+      fireEvent.change(screen.getByPlaceholderText("Paste your NVIDIA API key"), {
+        target: { value: "nv-secret-abcd" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() =>
+        expect(screen.queryByText("Add a provider API key to choose chat models.")).not.toBeInTheDocument(),
+      );
     });
   });
 });
