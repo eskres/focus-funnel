@@ -1,4 +1,4 @@
-> **Planning status:** Proposal only. Write the specs, design, and tasks when this change is picked up. Depends on `model-providers` and `conversation-agent`.
+> Depends on `model-providers` and `conversation-agent` (both archived), and on `auth-modes` for `delete_user_data()` and demo keys.
 
 ## Why
 
@@ -16,7 +16,8 @@ The chat's two tools, `search_thoughts` and `propose_thought`, need somewhere du
 - Offer internal operations: store a thought, update a thought, delete a thought, and search by meaning with an optional tag filter and newest-first sort.
 - Replace the `search_thoughts` stub from `conversation-agent` with a real search over the user's thoughts. The stub sits behind one function, so this change swaps that function. Saving a confirmed proposal is `push-and-pull`, which uses the store operation from this change.
 - Add an admin-only command-line re-embed job. It builds a new collection version from Postgres, checks the vector count, switches the user to the new collection, and marks the old one retired. It runs for one user or for all users, and search keeps working during the rebuild.
-- Add a "delete my data" endpoint. It deletes the user's thoughts and collections, their provider keys, their model loadout and chat settings, and their conversations, messages, and usage records.
+- Record every embedding call in usage, like any other model call.
+- Add a "delete my data" endpoint and a button for it in settings. It deletes the user's thoughts and collections, their provider keys, their model loadout and chat settings, and their conversations, messages, and usage records.
 
 ## Capabilities
 
@@ -28,11 +29,14 @@ The chat's two tools, `search_thoughts` and `propose_thought`, need somewhere du
 
 ### Modified Capabilities
 - `conversation-agent`: The search tool returns matching thoughts instead of "not available yet".
+- `usage-tracking`: Embedding calls are recorded like chat calls.
 
 ## Impact
 
 - **Backend:** new `thoughts` and `vector_collections` tables and migrations, a ChromaDB client wrapper, the embedding resolver, the real `search_thoughts` function, the re-embed CLI (`python -m app.reembed`), and the data deletion endpoint.
+- **Frontend:** a "Delete my data" section in settings, with a confirmation step.
 - **Configuration:** a system-wide embedding provider and model setting.
 - **External services:** an embeddings API from a provider in `model-providers`, called with each user's own key for that provider. A re-embed job needs a valid stored key for each affected user.
 - **Data:** the deletion endpoint covers the `conversations`, `messages`, `usage_events`, `chat_models`, and `user_settings` tables from `conversation-agent` and the `provider_keys` table from `model-providers`. They cascade from the user.
 - **Out of scope:** a UI for per-user embedding model selection. That is the first post-MVP upgrade, and this change must not block it.
+- **Future option:** a small local embedding model run inside the backend (for example an ONNX model through fastembed). It needs no key and no per-call cost, and works in demo mode and air-gapped installs. It was considered and deferred on 2026-09-24; the resolver and the collection record leave room for it as another provider.
