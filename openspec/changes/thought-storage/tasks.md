@@ -1,7 +1,7 @@
 ## 1. Probes and evaluation set
 
 - [ ] 1.1 With a real key each, call `/embeddings` on Nebius, NVIDIA, and OpenRouter with two short texts. Check by recording in design decision 4 which presets serve embeddings, two or three candidate models for each with their dimensions, whether each honors the `dimensions` parameter, whether the response reports `usage.prompt_tokens`, whether the model list shows the embedding models with a price, and a provisional `EMBEDDING_MODEL` default
-- [ ] 1.2 Write the evaluation set in `backend/tests/fixtures/search_eval/`: about 60 thoughts and about 40 queries with their expected thoughts, covering every kind listed in design decision 9. Check by reading it against that list, and that every expected id exists
+- [x] 1.2 Write the evaluation set in `backend/tests/fixtures/search_eval/`: about 60 thoughts and about 40 queries with their expected thoughts, covering every kind listed in design decision 9. Check by reading it against that list, and that every expected id exists
 
 ## 2. Postgres with pgvector
 

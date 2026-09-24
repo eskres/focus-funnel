@@ -142,7 +142,7 @@ Loaded and checked at startup like the rest of `chat.yaml`.
 
 ### 9. The evaluation set and probe
 
-`backend/tests/fixtures/search_eval/` holds about 60 hand-written thoughts and about 40 queries with the thoughts each should find. They cover to-dos, ideas, decisions, names and codes, paraphrases, details only in raw text, a few in Norwegian, queries that should find nothing, and date and tag filters.
+`backend/tests/fixtures/search_eval/` holds about 60 hand-written thoughts and about 40 queries with the thoughts each should find. They cover to-dos, ideas, decisions, names and codes, paraphrases, details only in raw text, queries that should find nothing, and date and tag filters.
 
 `backend/scripts/search_eval.py` embeds the set with a given provider, model, and dimension (using a key from the environment), runs meaning-only, words-only, and hybrid search, and reports recall at 5, mean reciprocal rank, the rate of empty results for the "nothing" queries, and the median tool-result size in characters. The probe runs it for the candidate models and dimensions and records the choice and the tuning in this decision and in `chat.yaml`.
 

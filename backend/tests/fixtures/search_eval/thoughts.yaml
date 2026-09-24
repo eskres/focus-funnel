@@ -1,0 +1,524 @@
+# Evaluation corpus for thought search (openspec thought-storage, design
+# decision 9). Hand-written thoughts of the kinds a user files: to-dos, ideas,
+# decisions, meeting notes, names and codes, and a few with raw text whose
+# details are not in the summary. Queries are in queries.yaml.
+
+thoughts:
+  - id: t01
+    created: 2026-09-20
+    title: Oat milk
+    tags: [groceries, errands]
+    summary: Buy oat milk on the way home from the gym.
+
+  - id: t02
+    created: 2026-09-18
+    title: Dentist appointment
+    tags: [health, errands]
+    summary: Book a check-up with Dr. Halvorsen before the end of October; the last cleaning was in March.
+
+  - id: t03
+    created: 2026-07-04
+    title: Rust for CLI tools, Go for services
+    tags: [work, decision, engineering]
+    summary: >-
+      Decided: new command-line tools are written in Rust for fast startup and
+      single binaries; backend services stay in Go because the team knows it
+      and the deploy pipeline is built for it.
+
+  - id: t04
+    created: 2026-09-02
+    title: Server invoice ACME-4471
+    tags: [finance, work]
+    summary: >-
+      Invoice ACME-4471 from the hosting company is 312 EUR, due 30 September.
+      Check whether the extra backup storage line is right.
+
+  - id: t05
+    created: 2026-08-02
+    title: Lisbon trip
+    tags: [travel]
+    summary: Plan a long weekend in Lisbon in October.
+    raw_text: |
+      Long weekend in Lisbon, probably the second weekend of October. Flights
+      on TAP from Oslo leave Friday afternoon and come back Monday morning,
+      about 2,900 NOK return if booked this month.
+
+      Places to stay: the flat near Alfama was cheaper than the hotel and has
+      a terrace with a view of the river. The hotel in Baixa is more central
+      but has no kitchen.
+
+      Things to do: ride tram 28 early in the morning before it gets crowded,
+      eat pastéis de Belém at the original bakery, walk up to the Miradouro da
+      Senhora do Monte at sunset, and take the train to Sintra for a day if
+      the weather is good.
+
+      Budget: keep it under 8,000 NOK for everything including food.
+
+  - id: t06
+    created: 2026-06-15
+    title: "Podcast idea: debugging stories"
+    tags: [idea, side-project]
+    summary: >-
+      A short podcast where developers tell the story of the worst bug they
+      ever chased, 20 minutes each, no editing tricks.
+
+  - id: t07
+    created: 2026-09-10
+    title: Standing desk
+    tags: [home, purchase]
+    summary: >-
+      Compare the Flexispot E7 and the IKEA Trotten before buying a standing
+      desk; want a memory preset and at least 160 cm width.
+
+  - id: t08
+    created: 2026-08-21
+    title: Kafka vs. Postgres queue
+    tags: [work, engineering, decision]
+    summary: >-
+      Chose a Postgres-backed job queue (SKIP LOCKED) over Kafka for the
+      billing jobs: volumes are low and it is one less system to run.
+
+  - id: t09
+    created: 2026-09-22
+    title: Mum's birthday
+    tags: [family, gifts]
+    summary: >-
+      Mum turns 65 on 12 November. She mentioned wanting a good pair of
+      gardening gloves and the new Ann Cleeves novel.
+
+  - id: t10
+    created: 2026-07-19
+    title: Sourdough starter
+    tags: [cooking, hobby]
+    summary: >-
+      Feed the starter twice a day at 1:1:1; it doubled in 6 hours at 24°C,
+      so it is ready for a loaf this weekend.
+
+  - id: t11
+    created: 2026-09-05
+    title: Car service
+    tags: [car, errands]
+    summary: >-
+      The Škoda needs its 60,000 km service and new winter tyres before
+      November; the garage is Bilservice Nord.
+
+  - id: t12
+    created: 2026-06-28
+    title: Learn Spanish
+    tags: [learning, goal]
+    summary: >-
+      Practise Spanish 15 minutes a day with a language app and one
+      conversation class a week; aim for B1 by next summer.
+
+  - id: t13
+    created: 2026-08-30
+    title: "Read: Designing Data-Intensive Applications"
+    tags: [reading, engineering]
+    summary: >-
+      Re-read chapters 5 to 9 on replication, partitioning, transactions, and
+      consistency before the architecture review.
+
+  - id: t14
+    created: 2026-09-12
+    title: "Meeting notes: Q4 roadmap"
+    tags: [work, meeting]
+    summary: >-
+      Q4 roadmap agreed: ship offline mode first, then the export feature; the
+      analytics dashboard slips to Q1.
+    raw_text: |
+      Attendees: Priya, Jonas, Mei, and me.
+
+      Offline mode: Priya owns it. Target is a beta in the first week of
+      November. The sync conflict rules from her design doc are accepted as
+      they are.
+
+      Export: Jonas owns it, starting once offline mode is in beta. CSV and
+      JSON first, PDF later if anyone asks.
+
+      Analytics dashboard: moves to Q1 because the event schema is not
+      settled. Mei will write up the open questions.
+
+      Budget for an external contractor approved: 40 hours, to be used for the
+      export feature's file format work.
+
+  - id: t15
+    created: 2026-07-08
+    title: Running plan
+    tags: [health, fitness, goal]
+    summary: >-
+      Build up to a 10 km run by the end of September: three runs a week,
+      adding 10 percent distance each week.
+
+  - id: t16
+    created: 2026-09-14
+    title: Passport renewal
+    tags: [travel, admin]
+    summary: >-
+      Passport expires in January; renew it before the Lisbon trip just in
+      case. The police office needs an appointment.
+
+  - id: t17
+    created: 2026-08-11
+    title: "App idea: shared grocery list with recipes"
+    tags: [idea, side-project]
+    summary: >-
+      An app where picking a recipe adds its ingredients to a shared household
+      grocery list, merging duplicates.
+
+  - id: t18
+    created: 2026-09-19
+    title: Fix flaky login test
+    tags: [work, bug]
+    summary: >-
+      The OIDC login end-to-end test fails about one run in ten; suspect the
+      token refresh timer racing the redirect.
+    raw_text: |
+      Seen three times this week on CI. The failing step is the redirect back
+      from the login provider. In the browser log the last line before the
+      failure is "TokenRefreshTimer fired after navigation", which suggests the
+      timer from the previous page is still alive.
+
+      Next step: clear the timer on unmount and add a test that navigates
+      during a refresh.
+
+  - id: t19
+    created: 2026-06-05
+    title: Home insurance
+    tags: [finance, home, admin]
+    summary: >-
+      Home insurance renews on 1 August; get quotes from two other insurers
+      first, the premium went up 18 percent.
+
+  - id: t20
+    created: 2026-09-08
+    title: Book club pick
+    tags: [reading, social]
+    summary: >-
+      My turn to pick for the book club in October: shortlist Klara and the
+      Sun, Piranesi, and Project Hail Mary.
+
+  - id: t21
+    created: 2026-07-25
+    title: Balcony tomatoes
+    tags: [garden, hobby]
+    summary: >-
+      The cherry tomatoes on the balcony have blossom end rot; water more
+      evenly and add some calcium.
+
+  - id: t22
+    created: 2026-09-16
+    title: "Decision: pgvector over Chroma"
+    tags: [work, decision, engineering]
+    summary: >-
+      Thought search moves to pgvector in the existing Postgres: one
+      transaction for thoughts and their vectors, hybrid search in one SQL
+      query, and no second store to keep in sync.
+
+  - id: t23
+    created: 2026-08-05
+    title: Electricity bill spike
+    tags: [finance, home]
+    summary: >-
+      The August electricity bill was double July's; check whether the heat
+      pump is stuck in heating mode.
+
+  - id: t24
+    created: 2026-09-21
+    title: Call the plumber
+    tags: [home, errands]
+    summary: >-
+      The kitchen tap drips and the dishwasher drain gurgles; call the plumber
+      and ask for a Monday morning slot.
+
+  - id: t25
+    created: 2026-06-20
+    title: Quarterly tax payment
+    tags: [finance, admin]
+    summary: >-
+      Pay the second quarterly advance tax instalment by 15 September; the
+      amount is on the tax portal.
+
+  - id: t26
+    created: 2026-08-15
+    title: "Idea: journal prompts from the calendar"
+    tags: [idea, side-project]
+    summary: >-
+      Generate evening journal prompts from the day's calendar events, for
+      example asking how the 1:1 with the manager went.
+
+  - id: t27
+    created: 2026-09-11
+    title: Mentoring Sam
+    tags: [work, people]
+    summary: >-
+      Sam wants to move from frontend to backend work; pair on the billing
+      service once a week and give them the queue migration as a first
+      project.
+
+  - id: t28
+    created: 2026-07-30
+    title: Wedding in Bergen
+    tags: [travel, family, social]
+    summary: >-
+      Cousin's wedding in Bergen on 14 September; book the train early, the
+      hotel block code is WED-BRG-14.
+
+  - id: t29
+    created: 2026-09-03
+    title: Laptop battery
+    tags: [tech, purchase]
+    summary: >-
+      The laptop battery lasts under three hours now; the replacement for the
+      ThinkPad X1 Carbon Gen 11 costs about 1,100 NOK.
+
+  - id: t30
+    created: 2026-08-25
+    title: "Blog post: why I stopped using a notes app for to-dos"
+    tags: [writing, idea]
+    summary: >-
+      Draft a post on why a notes app full of files did not work for recall: I
+      could never find anything without remembering the exact words.
+
+  - id: t31
+    created: 2026-09-17
+    title: Weekly review habit
+    tags: [productivity, habit]
+    summary: >-
+      Every Friday at 16:00: clear the inbox, review open thoughts, and pick
+      three priorities for next week.
+
+  - id: t32
+    created: 2026-07-14
+    title: "Tech debt: remove the old Auth0 code"
+    tags: [work, engineering]
+    summary: >-
+      After the auth-modes change lands, delete the remaining Auth0 helpers and
+      the legacy issuer migration notes.
+
+  - id: t33
+    created: 2026-06-10
+    title: Gym membership
+    tags: [health, finance]
+    summary: >-
+      Cancel the old gym membership; the notice period is one month and it must
+      be sent by letter.
+
+  - id: t34
+    created: 2026-09-23
+    title: Conference talk proposal
+    tags: [work, writing, idea]
+    summary: >-
+      Submit a talk to the autumn developer conference about hybrid search in
+      plain Postgres; the deadline is 5 October.
+
+  - id: t35
+    created: 2026-08-18
+    title: Swimming lessons for Ella
+    tags: [family, kids]
+    summary: >-
+      Sign Ella up for swimming lessons on Saturday mornings; the autumn term
+      starts 7 September and costs 1,450 NOK.
+
+  - id: t36
+    created: 2026-07-02
+    title: Retrospective outcome
+    tags: [work, meeting, decision]
+    summary: >-
+      Team retro: we stop doing Friday deploys and move the release to Tuesday
+      mornings.
+
+  - id: t37
+    created: 2026-09-06
+    title: "Recipe: lentil soup"
+    tags: [cooking, recipe]
+    summary: >-
+      Red lentil soup with cumin, lemon, and a spoon of harissa; freezes well,
+      good for weekday lunches.
+    raw_text: |
+      Ingredients: 400 g red lentils, 1 onion, 2 carrots, 3 cloves of garlic,
+      2 tsp ground cumin, 1 tbsp harissa, 1 litre vegetable stock, 1 tin of
+      chopped tomatoes, juice of half a lemon.
+
+      Soften the onion and carrots in olive oil, add garlic and cumin for a
+      minute, then the lentils, tomatoes, and stock. Simmer 25 minutes, blend
+      half of it, and finish with lemon juice and harissa.
+
+  - id: t38
+    created: 2026-08-09
+    title: Back up the photo library
+    tags: [tech, home]
+    summary: >-
+      The photo library is only on one disk; set up a nightly backup to the NAS
+      and an offsite copy to cloud storage.
+
+  - id: t39
+    created: 2026-09-01
+    title: Budget for September
+    tags: [finance]
+    summary: >-
+      Keep spending under 18,000 NOK this month; eating out is the category
+      that keeps going over.
+
+  - id: t40
+    created: 2026-06-22
+    title: "Idea: CLI to tidy Downloads"
+    tags: [idea, side-project, engineering]
+    summary: >-
+      A small Rust CLI that sorts the Downloads folder by file type and date
+      and deletes installers older than 30 days.
+
+  - id: t41
+    created: 2026-09-15
+    title: Feedback for Priya
+    tags: [work, people]
+    summary: >-
+      Priya's design doc for offline mode was excellent; tell her in the 1:1
+      and suggest she presents it at the guild meeting.
+
+  - id: t42
+    created: 2026-07-22
+    title: Vaccination reminder
+    tags: [health, admin]
+    summary: >-
+      The tetanus booster is due; the last one was ten years ago. Ask at the
+      next GP visit.
+
+  - id: t43
+    created: 2026-08-28
+    title: Rate limiting in the API
+    tags: [work, engineering, bug]
+    summary: >-
+      Clients hitting 429 from the provider should get provider_rate_limited,
+      not a generic 502; add a test for it.
+
+  - id: t44
+    created: 2026-09-09
+    title: Garage clear-out
+    tags: [home, weekend]
+    summary: >-
+      Sort the garage on Saturday: donate the old bike, sell the roof box, and
+      take paint cans to the recycling station.
+
+  - id: t45
+    created: 2026-06-30
+    title: Newsletter subscriptions
+    tags: [productivity, admin]
+    summary: >-
+      Unsubscribe from newsletters I have not opened in three months; keep
+      only two tech newsletters.
+
+  - id: t46
+    created: 2026-08-13
+    title: "Idea: family photo calendar"
+    tags: [idea, family, gifts]
+    summary: >-
+      Make a printed calendar with a family photo for each month as a
+      Christmas present for the grandparents.
+
+  - id: t47
+    created: 2026-09-13
+    title: Postgres upgrade
+    tags: [work, engineering]
+    summary: >-
+      Upgrade production Postgres from 16 to 18 in a maintenance window; test
+      pg_upgrade on a copy of the data first.
+
+  - id: t48
+    created: 2026-07-11
+    title: Meditation
+    tags: [health, habit]
+    summary: >-
+      Ten minutes of meditation after breakfast helped focus all week; keep it
+      going.
+
+  - id: t49
+    created: 2026-08-24
+    title: Sell old phone
+    tags: [tech, errands]
+    summary: Wipe and sell the old iPhone 12; the going rate is around 2,500 NOK.
+
+  - id: t50
+    created: 2026-09-24
+    title: Embedding model probe
+    tags: [work, engineering]
+    summary: >-
+      Compare embedding models on Nebius, NVIDIA, and OpenRouter: vector size,
+      whether dimensions can be shortened, and price.
+
+  - id: t51
+    created: 2026-06-12
+    title: Window cleaning
+    tags: [home, chores]
+    summary: >-
+      Book the window cleaner for the whole house before summer; last year's
+      company was Klar Sikt.
+
+  - id: t52
+    created: 2026-08-01
+    title: Hiking trip in Jotunheimen
+    tags: [travel, outdoors]
+    summary: >-
+      Two-day hike in Jotunheimen in late August: Gjendesheim to Memurubu over
+      Besseggen, overnight at the lodge.
+
+  - id: t53
+    created: 2026-09-07
+    title: Parent-teacher meeting
+    tags: [family, kids]
+    summary: >-
+      Parent-teacher meeting for Ella on 24 September at 17:30; ask about the
+      reading support.
+
+  - id: t54
+    created: 2026-07-16
+    title: "Idea: meal plan generator"
+    tags: [idea, cooking]
+    summary: >-
+      Plan the week's dinners from what is already in the fridge and freezer,
+      to waste less food.
+
+  - id: t55
+    created: 2026-08-27
+    title: On-call handover
+    tags: [work, process]
+    summary: >-
+      Write an on-call handover template: open incidents, flaky alerts, and
+      anything deployed in the last 24 hours.
+
+  - id: t56
+    created: 2026-09-04
+    title: Wi-Fi dead spot
+    tags: [home, tech]
+    summary: >-
+      The home office has weak Wi-Fi; try moving the router or add a mesh node
+      on the landing.
+
+  - id: t57
+    created: 2026-06-25
+    title: Charity donation
+    tags: [finance, giving]
+    summary: Set up a monthly donation of 300 NOK to the Red Cross.
+
+  - id: t58
+    created: 2026-08-20
+    title: Architecture review prep
+    tags: [work, meeting]
+    summary: >-
+      Prepare the diagram of the sync service and the list of failure modes for
+      the architecture review on 3 September.
+
+  - id: t59
+    created: 2026-07-06
+    title: Try climbing
+    tags: [health, fitness, idea]
+    summary: >-
+      Try the beginner bouldering class at the climbing gym; a friend goes on
+      Wednesday evenings.
+
+  - id: t60
+    created: 2026-09-18
+    title: Password manager migration
+    tags: [tech, security, admin]
+    summary: >-
+      Move all passwords from the browser to a proper password manager and turn
+      on two-factor authentication for email and the bank.
