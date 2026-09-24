@@ -79,7 +79,6 @@ async def _record(
             created_at=utc_now(),
         )
     )
-    await session.commit()
 
 
 async def embed_texts(
@@ -97,8 +96,8 @@ async def embed_texts(
 ) -> list[list[float]]:
     """One vector per text, from the provider with this user's own key.
 
-    Sends batches of at most BATCH_SIZE texts and records one usage event per
-    call, holding no text. Raises the provider_* errors as a chat call does,
+    Sends batches of at most BATCH_SIZE texts and adds one usage event per
+    call, holding no text, to the session; the caller commits. Raises the provider_* errors as a chat call does,
     model_unavailable for a model the key cannot use, and embedding_mismatch
     when the provider returns vectors of unequal length.
     """

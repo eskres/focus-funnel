@@ -24,16 +24,19 @@ def fake() -> FakeLLM:
 def embed(url, user_id, fake, texts, **options):
     async def work(session):
         user = await session.get(User, uuid.UUID(user_id))
-        return await embed_texts(
-            session,
-            user,
-            options.pop("provider_id", "nebius"),
-            options.pop("model", EMBED_MODEL),
-            texts,
-            settings=get_settings(),
-            http_client=fake.http_client(),
-            **options,
-        )
+        try:
+            return await embed_texts(
+                session,
+                user,
+                options.pop("provider_id", "nebius"),
+                options.pop("model", EMBED_MODEL),
+                texts,
+                settings=get_settings(),
+                http_client=fake.http_client(),
+                **options,
+            )
+        finally:
+            await session.commit()
 
     return run_db(url, work)
 

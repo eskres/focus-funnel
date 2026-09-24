@@ -47,3 +47,18 @@ def models_with_embedding(model_list: dict) -> dict:
             {"id": EMBED_MODEL, "pricing": {"prompt": EMBED_PRICE, "completion": "0"}},
         ],
     }
+
+
+def run_as(url: str, user_id, fake, work, **settings_overrides):
+    """Run `await work(session, user, settings, http_client)` against the test database."""
+    import uuid as uuid_module
+
+    from app.config import get_settings
+    from app.models import User
+    from tests.chat_helpers import run_db
+
+    async def main(session):
+        user = await session.get(User, uuid_module.UUID(str(user_id)))
+        return await work(session, user, get_settings(), fake.http_client())
+
+    return run_db(url, main)

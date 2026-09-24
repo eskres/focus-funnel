@@ -23,7 +23,7 @@
 
 ## 5. Thought store
 
-- [ ] 5.1 Add store, update, get, and delete from design decision 6, with the field checks, tag cleaning, `search_tsv`, index creation on a user's first vector, and filling in. Check with pytest on Postgres for each `thought-store` scenario: fields round-trip, the named-field refusals, tag cleaning, another user's thought treated as missing, a first store creating an active index that records the provider, model, and dimension, a store while the provider is down or with no key saving the thought and making it findable by words, the next successful call filling its entries in without an extra provider call, an update of the summary replacing the entries, an update of the category making no embedding call, a store during a rebuild embedding for both indexes, and a delete removing all entries
+- [x] 5.1 Add store, update, get, and delete from design decision 6, with the field checks, tag cleaning, `search_tsv`, index creation on a user's first vector, and filling in. Check with pytest on Postgres for each `thought-store` scenario: fields round-trip, the named-field refusals, tag cleaning, another user's thought treated as missing, a first store creating an active index that records the provider, model, and dimension, a store while the provider is down or with no key saving the thought and making it findable by words, the next successful call filling its entries in without an extra provider call, an update of the summary replacing the entries, an update of the category making no embedding call, a store during a rebuild embedding for both indexes, and a delete removing all entries
 
 ## 6. Search
 
