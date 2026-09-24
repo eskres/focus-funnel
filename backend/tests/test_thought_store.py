@@ -87,7 +87,7 @@ def found_by_words(url, user_id, words: str) -> list[str]:
         rows = await session.execute(
             select(Thought.title).where(
                 Thought.user_id == uuid.UUID(user_id),
-                Thought.search_tsv.op("@@")(func.plainto_tsquery(text("'simple'::regconfig"), words)),
+                Thought.search_tsv.op("@@")(func.plainto_tsquery(text("'english'::regconfig"), words)),
             )
         )
         return list(rows.scalars())

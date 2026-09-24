@@ -5,7 +5,8 @@ Revises: a97e96671d5c
 Create Date: 2026-09-24 18:00:00.000000
 
 Creates thoughts, search_indexes, and thought_embeddings, and on Postgres the
-pgvector extension and the GIN indexes for tags and full-text search. SQLite
+pgvector extension (0.7 or later, for halfvec) and the GIN indexes for tags
+and full-text search. SQLite
 gets the same tables with plain JSON and text columns, for tests of the rest
 of the app. No thought existed before, so no data is migrated. The downgrade
 drops the tables but keeps the extension, which other databases on the
@@ -15,7 +16,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from pgvector.sqlalchemy import Vector
+from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
@@ -26,7 +27,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 TAGS = postgresql.ARRAY(sa.Text()).with_variant(sa.JSON(), 'sqlite')
 TSVECTOR = postgresql.TSVECTOR().with_variant(sa.Text(), 'sqlite')
-VECTOR = Vector().with_variant(sa.JSON(), 'sqlite')
+VECTOR = HALFVEC().with_variant(sa.JSON(), 'sqlite')
 
 
 def upgrade() -> None:
@@ -88,6 +89,9 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id', name=op.f('pk_thought_embeddings')),
     sa.UniqueConstraint('index_id', 'thought_id', 'chunk', name='uq_thought_embeddings_index_thought_chunk')
     )
+    if is_postgres:
+        # Vectors stay in the row, so an exact search reads no TOAST table.
+        op.execute('ALTER TABLE thought_embeddings ALTER COLUMN embedding SET STORAGE MAIN')
 
 
 def downgrade() -> None:

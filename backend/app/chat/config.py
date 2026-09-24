@@ -45,7 +45,7 @@ class SearchConfig:
     rrf_k: int
     min_similarity: float
     similarity_rules: tuple[SimilarityRule, ...]
-    min_keyword_rank: float
+    min_word_share: float
     backfill_batch: int
     budget_chars: int
     summary_chars: int
@@ -137,13 +137,11 @@ def _parse_search(raw: object) -> SearchConfig:
         if not isinstance(rule, dict) or not isinstance(rule.get("match"), str) or not rule["match"]:
             raise ChatConfigError(f"'{where}' needs a 'match' model id")
         rules.append(SimilarityRule(match=rule["match"], value=_similarity(rule.get("value"), f"{where}.value")))
-    keyword_rank = _number(raw, "min_keyword_rank", "search.")
-    if keyword_rank < 0:
-        raise ChatConfigError("'search.min_keyword_rank' must not be negative")
+    word_share = _similarity(raw.get("min_word_share"), "search.min_word_share")
     return SearchConfig(
         min_similarity=default,
         similarity_rules=tuple(rules),
-        min_keyword_rank=keyword_rank,
+        min_word_share=word_share,
         **ints,
     )
 

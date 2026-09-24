@@ -2,10 +2,10 @@
 
 Meaning compares the query vector with every entry of the user's active
 index (exact, no approximate index). Words use Postgres full-text search
-with the `simple` configuration, the query's words OR-joined. The two
+with the `english` configuration, the query's words OR-joined. The two
 rankings are merged by reciprocal rank fusion. A thought passes when its
-similarity reaches the model's threshold, or its words match every query
-word or rank high enough. See openspec thought-storage design decision 5.
+similarity reaches the model's threshold, or it holds a large enough share
+of the query's words. See openspec thought-storage design decision 5.
 """
 
 import logging
@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chat.config import SearchConfig, get_chat_config
 from app.config import Settings
 from app.errors import ApiError, ErrorCode
-from app.models import Thought, User
+from app.models import SearchIndex, Thought, User
 from app.thoughts.indexing import (
     ACTIVE,
     embed_for_index,
@@ -86,7 +86,7 @@ filtered AS (
 _MEANING = """
 meaning_best AS (
     SELECT DISTINCT ON (e.thought_id)
-        e.thought_id, e.chunk, e.embedding <=> CAST(:query_vector AS vector) AS distance
+        e.thought_id, e.chunk, e.embedding <=> CAST(:query_vector AS halfvec) AS distance
     FROM thought_embeddings e
     JOIN filtered f ON f.id = e.thought_id
     WHERE e.index_id = :index_id
@@ -106,17 +106,19 @@ meaning AS (
 
 _WORDS = f"""
 terms AS (
-    SELECT plainto_tsquery('{TS_CONFIG}', :query) AS all_terms,
-           CAST(replace(CAST(plainto_tsquery('{TS_CONFIG}', :query) AS text), '&', '|')
-                AS tsquery) AS any_term
+    SELECT CAST(replace(CAST(plainto_tsquery('{TS_CONFIG}', :query) AS text), '&', '|')
+                AS tsquery) AS any_term,
+           tsvector_to_array(to_tsvector('{TS_CONFIG}', :query)) AS lexemes
 ),
 words AS (
-    SELECT thought_id, keyword_rank, all_terms,
+    SELECT thought_id, keyword_rank,
+           (SELECT count(*) FROM unnest(terms.lexemes) AS lexeme
+            WHERE best.search_tsv @@ CAST(quote_literal(lexeme) AS tsquery))::float8
+               / greatest(cardinality(terms.lexemes), 1) AS word_share,
            row_number() OVER (ORDER BY keyword_rank DESC) AS rank
     FROM (
-        SELECT t.id AS thought_id,
-               ts_rank_cd(t.search_tsv, terms.any_term) AS keyword_rank,
-               t.search_tsv @@ terms.all_terms AS all_terms
+        SELECT t.id AS thought_id, t.search_tsv,
+               ts_rank_cd(t.search_tsv, terms.any_term) AS keyword_rank
         FROM thoughts t
         JOIN filtered f ON f.id = t.id
         CROSS JOIN terms
@@ -124,6 +126,7 @@ words AS (
         ORDER BY keyword_rank DESC
         LIMIT :candidates
     ) best
+    CROSS JOIN terms
 )"""
 
 _MERGE = """
@@ -133,7 +136,7 @@ merged AS (
            1 - m.distance AS similarity,
            m.chunk,
            w.keyword_rank,
-           coalesce(w.all_terms, false) AS all_terms
+           coalesce(w.word_share, 0) AS word_share
     FROM meaning m
     FULL OUTER JOIN words w ON w.thought_id = m.thought_id
 ),
@@ -141,8 +144,7 @@ passed AS (
     SELECT merged.*, t.created_at
     FROM merged JOIN thoughts t ON t.id = merged.thought_id
     WHERE merged.similarity >= :min_similarity
-       OR merged.all_terms
-       OR merged.keyword_rank >= :min_keyword_rank
+       OR merged.word_share >= :min_word_share
 )
 SELECT thought_id, similarity, keyword_rank, chunk, count(*) OVER () AS total
 FROM passed
@@ -240,29 +242,68 @@ async def search_thoughts(
     index = outcome.index
     with_meaning = outcome.error is None and index is not None
 
+    result = await rank(
+        session,
+        user,
+        query,
+        index=index if with_meaning else None,
+        query_vector=outcome.extra_vectors[0] if with_meaning else None,
+        tags=tags,
+        since=since,
+        until=until,
+        newest_first=newest_first,
+        config=config,
+    )
+    result.words_only = outcome.error
+    return result
+
+
+async def rank(
+    session: AsyncSession,
+    user: User,
+    query: str,
+    *,
+    index: SearchIndex | None,
+    query_vector: list[float] | None,
+    config: SearchConfig,
+    tags: list[str] | None = None,
+    since: date | datetime | None = None,
+    until: date | datetime | None = None,
+    newest_first: bool = False,
+    use_words: bool = True,
+) -> SearchResult:
+    """Run the ranking SQL for a query already embedded (or not, for words only).
+
+    The evaluation calls this directly with stored vectors; use_words=False
+    ranks by meaning alone, for comparison.
+    """
+    with_meaning = index is not None and query_vector is not None
     params = {
         "user_id": user.id,
-        "tags": tags,
+        "tags": clean_tags(tags) or None,
         "since": _as_start(since),
         "until": _as_end(until),
-        "query": query,
+        "query": query if use_words else "",
         "candidates": config.candidates,
         "rrf_k": config.rrf_k,
-        "min_keyword_rank": config.min_keyword_rank,
+        "min_word_share": config.min_word_share,
         "limit": config.limit,
         "min_similarity": 2.0,
     }
     if with_meaning:
-        params["query_vector"] = _vector_literal(outcome.extra_vectors[0])
+        params["query_vector"] = _vector_literal(query_vector)
         params["index_id"] = index.id
         params["min_similarity"] = config.min_similarity_for(index.embedding_model)
+    # Plan for these values each time: a generic plan for the prepared
+    # statement, which Postgres switches to after five runs, is twice as slow.
+    await session.execute(text("SET LOCAL plan_cache_mode = force_custom_plan"))
     rows = (
         await session.execute(
             text(build_query(with_meaning=with_meaning, newest_first=newest_first)), params
         )
     ).all()
     if not rows:
-        return SearchResult(words_only=outcome.error)
+        return SearchResult()
 
     ids = [row.thought_id for row in rows]
     thoughts = {
@@ -287,4 +328,4 @@ async def search_thoughts(
                 excerpt=raw_text_excerpt(thought, row.chunk, query, config.excerpt_chars),
             )
         )
-    return SearchResult(hits=hits, total=rows[0].total, words_only=outcome.error)
+    return SearchResult(hits=hits, total=rows[0].total)

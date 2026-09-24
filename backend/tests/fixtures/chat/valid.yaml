@@ -20,7 +20,7 @@ search:
     models:
       - match: vendor/embed-*
         value: 0.6
-  min_keyword_rank: 0.1
+  min_word_share: 0.6
   backfill_batch: 16
   budget_chars: 2400
   summary_chars: 400

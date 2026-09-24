@@ -38,8 +38,9 @@ MAX_SUMMARY = 4_000
 MAX_RAW_TEXT = 20_000
 MAX_TAGS = 20
 MAX_TAG = 50
-# The text search configuration: words matched as written, in any language.
-TS_CONFIG = "simple"
+# The text search configuration: English stop words dropped and words matched
+# by their stem. Changing it needs every thought's search_tsv written again.
+TS_CONFIG = "english"
 TS_CONFIG_SQL = literal_column(f"'{TS_CONFIG}'::regconfig")
 
 

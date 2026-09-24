@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime
 
-from pgvector.sqlalchemy import Vector
+from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy import (
+    DDL,
     JSON,
     DateTime,
     ForeignKey,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    event,
     func,
     text,
 )
@@ -24,8 +26,10 @@ from app.db import Base
 # the test suite create every table on SQLite.
 TagsType = ARRAY(Text).with_variant(JSON(), "sqlite")
 TsVectorType = TSVECTOR().with_variant(Text(), "sqlite")
-# No fixed dimension: indexes built with different models share the table.
-VectorType = Vector().with_variant(JSON(), "sqlite")
+# Half precision halves what a search reads and does not change the cosine
+# ranking in any way that matters. No fixed dimension: indexes built with
+# different models share the table.
+VectorType = HALFVEC().with_variant(JSON(), "sqlite")
 # Marks an index that exists only on Postgres, so Alembic's comparison skips
 # it on SQLite (see alembic/env.py).
 POSTGRES_ONLY = {"only_dialect": "postgresql"}
@@ -58,7 +62,8 @@ class Thought(Base):
     raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list[str]] = mapped_column(TagsType, nullable=False, default=list)
-    search_tsv: Mapped[str | None] = mapped_column(TsVectorType, nullable=True)
+    # Only the database reads it, so it is not loaded with the row.
+    search_tsv: Mapped[str | None] = mapped_column(TsVectorType, nullable=True, deferred=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -134,3 +139,14 @@ class ThoughtEmbedding(Base):
     start_char: Mapped[int | None] = mapped_column(Integer, nullable=True)
     end_char: Mapped[int | None] = mapped_column(Integer, nullable=True)
     embedding: Mapped[list[float]] = mapped_column(VectorType, nullable=False)
+
+
+# Keep vectors in the row rather than in a TOAST table, so an exact search
+# does not fetch each one separately. A vector too large for the row (above
+# about 4,000 dimensions at half precision) is still moved out.
+EMBEDDING_STORAGE = "ALTER TABLE thought_embeddings ALTER COLUMN embedding SET STORAGE MAIN"
+event.listen(
+    ThoughtEmbedding.__table__,
+    "after_create",
+    DDL(EMBEDDING_STORAGE).execute_if(dialect="postgresql"),
+)

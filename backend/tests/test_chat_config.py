@@ -90,7 +90,7 @@ def test_search_settings_load():
     assert (search.limit, search.candidates, search.rrf_k) == (8, 50, 60)
     assert (search.budget_chars, search.summary_chars, search.excerpt_chars) == (2400, 400, 240)
     assert search.backfill_batch == 16
-    assert search.min_keyword_rank == 0.1
+    assert search.min_word_share == 0.6
 
 
 def test_min_similarity_is_picked_per_model():
@@ -111,7 +111,8 @@ def test_min_similarity_is_picked_per_model():
         ({"min_similarity": 0.3}, "search.min_similarity"),
         ({"min_similarity": {"default": 0.3, "models": [{"match": "m", "value": -0.1}]}}, "models"),
         ({"min_similarity": {"default": 0.3, "models": [{"value": 0.5}]}}, "match"),
-        ({"min_keyword_rank": -1}, "search.min_keyword_rank"),
+        ({"min_word_share": -1}, "search.min_word_share"),
+        ({"min_word_share": 1.5}, "search.min_word_share"),
     ],
 )
 def test_an_invalid_search_value_fails_naming_it(tmp_path, change, name):

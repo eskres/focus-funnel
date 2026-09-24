@@ -112,12 +112,56 @@ def test_upgrade_and_downgrade_on_an_empty_postgres_database():
         assert res.returncode == 0, res.stderr
         res = run_alembic(db_url, "check")
         assert res.returncode == 0, res.stdout + res.stderr
+        assert embedding_storage(db_url) == "m"
         res = run_alembic(db_url, "downgrade", "-1")
         assert res.returncode == 0, res.stderr
         res = run_alembic(db_url, "upgrade", "head")
         assert res.returncode == 0, res.stderr
     finally:
         drop()
+
+
+def embedding_storage(url: str) -> str:
+    async def read():
+        engine = create_engine(url, poolclass=NullPool)
+        async with engine.connect() as connection:
+            storage = (
+                await connection.execute(
+                    text(
+                        "SELECT attstorage::text FROM pg_attribute "
+                        "WHERE attrelid = 'thought_embeddings'::regclass AND attname = 'embedding'"
+                    )
+                )
+            ).scalar_one()
+        await engine.dispose()
+        return storage
+
+    return asyncio.run(read())
+
+
+@pytest.mark.postgres
+def test_vectors_are_kept_in_the_row(test_database_url):
+    # Tables made by the test fixture (create_all) match the migration.
+    assert embedding_storage(test_database_url) == "m"
+
+
+class OldPgvector:
+    """A connection that reports pgvector 0.6, which has no halfvec."""
+
+    class dialect:
+        name = "postgresql"
+
+    async def execute(self, _statement):
+        class Result:
+            def scalar(self):
+                return "0.6.0"
+
+        return Result()
+
+
+def test_startup_check_refuses_pgvector_before_0_7():
+    with pytest.raises(VectorExtensionMissing, match="version 0.6.0; thought search needs 0.7"):
+        asyncio.run(check_vector_extension(OldPgvector()))
 
 
 @pytest.mark.postgres
