@@ -45,8 +45,8 @@
 
 ## 8. Firebase login
 
-- [ ] 8.1 Add the `/login` page with the Firebase web SDK, `inMemoryPersistence`, Google and email-and-password sign-in, and the hand-off to `/auth/firebase/session` followed by `signOut()`. Check with Vitest against a mocked SDK that the tokens are posted and sign-out is called, and that nothing is written to local or session storage
-- [ ] 8.2 Add `/auth/firebase/session` and renewal through the securetoken endpoint. Check with Vitest that a valid token starts a session, that a token from another project is refused, and that renewal replaces the token
+- [x] 8.1 Add the `/login` page with the Firebase web SDK, `inMemoryPersistence`, Google and email-and-password sign-in, and the hand-off to `/auth/firebase/session` followed by `signOut()`. Check with Vitest against a mocked SDK that the tokens are posted and sign-out is called, and that nothing is written to local or session storage
+- [x] 8.2 Add `/auth/firebase/session` and renewal through the securetoken endpoint. Check with Vitest that a valid token starts a session, that a token from another project is refused, and that renewal replaces the token
 
 ## 9. Frontend demo mode
 
