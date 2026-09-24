@@ -1,0 +1,169 @@
+# Long conversations for the /compact probe (task 12.5). Each checklist item
+# names a decision, a name, or an open question from the part of the
+# conversation the summary replaces (everything but the most recent
+# messages). An item survives when any of its patterns (case-insensitive
+# regular expressions) is found in the summary.
+
+conversations:
+  - id: kitchen-renovation
+    turns:
+      - {user: "We're finally redoing the kitchen, I need help keeping track of everything"}
+      - {assistant: "Happy to help. What's the budget and the timeline?"}
+      - {user: "Budget is 18,000 euros. We want it done before Christmas"}
+      - {assistant: "That's a firm deadline. Who is doing the work?"}
+      - {user: "We got quotes from two builders: Kowalski Renovations and a guy called Dennis Hart. Kowalski is 14,500, Hart is 12,800"}
+      - {assistant: "What's the difference beyond the price?"}
+      - {user: "Kowalski can start October 1st. Hart can't start until November, which is cutting it close"}
+      - {assistant: "With a Christmas deadline, the October start gives you slack for delays."}
+      - {user: "Yeah, we're going with Kowalski. Decided."}
+      - {assistant: "Good. What about the worktops?"}
+      - {user: "My partner Lena wants quartz, I wanted oak. We settled on quartz for the main run and an oak top for the island"}
+      - {assistant: "A nice mix. Have you chosen appliances?"}
+      - {user: "Not yet. Still unsure whether to get an induction hob or keep gas. The gas line is already there"}
+      - {assistant: "Induction needs a dedicated circuit; worth asking Kowalski whether the wiring supports it."}
+      - {user: "Good point, I'll ask. Also we need to decide what to do about the old floor tiles, not sure if they go under the new cabinets"}
+      - {assistant: "That's another question for the builder."}
+      - {user: "OK. Other than that, we'll eat at my mum's on weekdays during the work"}
+      - {assistant: "That makes the weeks without a kitchen easier."}
+      - {user: "What colour should the cabinet fronts be? We like sage green"}
+      - {assistant: "Sage green goes well with quartz and oak. A matte finish shows fewer fingerprints."}
+      - {user: "Matte sage green it is"}
+      - {assistant: "Noted."}
+    checklist:
+      - {kind: decision, item: "Kowalski chosen as the builder", any: ["kowalski"]}
+      - {kind: name, item: "Dennis Hart, the other builder", any: ["hart"]}
+      - {kind: name, item: "Lena, the partner", any: ["lena"]}
+      - {kind: decision, item: "Budget of 18,000 euros", any: ["18[,. ]?000", "18k"]}
+      - {kind: decision, item: "Quartz main run, oak island", any: ["quartz[\\s\\S]*oak", "oak[\\s\\S]*quartz"]}
+      - {kind: open question, item: "Induction or gas hob", any: ["induction"]}
+      - {kind: open question, item: "Whether old floor tiles go under the cabinets", any: ["tile"]}
+
+  - id: book-club
+    turns:
+      - {user: "I'm starting a book club at work and want to plan it properly"}
+      - {assistant: "Nice. How many people are interested so far?"}
+      - {user: "Eight people signed up. Priya from finance offered to co-host with me"}
+      - {assistant: "Having a co-host helps. How often will you meet?"}
+      - {user: "We agreed on once a month, first Thursday, lunchtime in the big meeting room"}
+      - {assistant: "Monthly at lunch is manageable. How will you pick books?"}
+      - {user: "Everyone suggests one, then we vote. Priya suggested a rule: nothing over 400 pages"}
+      - {assistant: "A page limit keeps it realistic for busy people."}
+      - {user: "The first book is Klara and the Sun by Kazuo Ishiguro, that won the first vote"}
+      - {assistant: "Good choice for discussion."}
+      - {user: "Still undecided whether the company will pay for books. I need to ask my manager, Oliver"}
+      - {assistant: "Worth asking; some companies count it as learning budget."}
+      - {user: "Also not sure if remote colleagues can join by video, the meeting room camera is terrible"}
+      - {assistant: "A laptop with a good webcam could do for now."}
+      - {user: "Maybe. We also want a Slack channel, called book-club obviously"}
+      - {assistant: "Simple enough."}
+      - {user: "I'm thinking about snacks, should we bring food or everyone brings their own lunch?"}
+      - {assistant: "Bring-your-own is easiest; maybe treats for the first meeting."}
+      - {user: "Yeah I'll bring cake for the first one"}
+      - {assistant: "A nice welcome."}
+      - {user: "Should I send a calendar invite already?"}
+      - {assistant: "Yes, a recurring invite helps people protect the time."}
+    checklist:
+      - {kind: name, item: "Priya, the co-host", any: ["priya"]}
+      - {kind: decision, item: "Monthly, first Thursday, at lunch", any: ["first thursday"]}
+      - {kind: decision, item: "No books over 400 pages", any: ["400"]}
+      - {kind: name, item: "First book: Klara and the Sun", any: ["klara"]}
+      - {kind: open question, item: "Whether the company pays for books (ask Oliver)", any: ["oliver", "pay for (the )?books", "company (will )?pay"]}
+      - {kind: open question, item: "Whether remote colleagues can join by video", any: ["remote", "video"]}
+
+  - id: marathon-training
+    turns:
+      - {user: "I signed up for the Berlin marathon next September, it's my first one"}
+      - {assistant: "Congratulations! How much are you running now?"}
+      - {user: "About 25 km a week, longest run is 14 km"}
+      - {assistant: "That's a good base with almost a year to go. Do you have a target time?"}
+      - {user: "I'd be happy with under 4 hours 15"}
+      - {assistant: "Realistic for a first marathon with a steady build."}
+      - {user: "My friend Marco ran it last year and recommended the Hansons plan"}
+      - {assistant: "Hansons uses a lot of mileage with a 26 km longest run. Some find it hard as a first plan."}
+      - {user: "Hmm. I think we decided on a simpler 18-week plan starting in May, with 4 runs a week"}
+      - {assistant: "That's a sensible choice for a first marathon."}
+      - {user: "Until May I'll just keep base mileage and add one strength session a week"}
+      - {assistant: "Strength work helps prevent injury."}
+      - {user: "My left knee sometimes hurts after long runs. Not sure if I should see a physio before starting"}
+      - {assistant: "Seeing a physio before a big build is wise, especially with a recurring pain."}
+      - {user: "Also undecided about shoes, whether I should get carbon plate shoes for race day"}
+      - {assistant: "They can help, but test them in long runs first."}
+      - {user: "I'll think about it. What about nutrition during long runs?"}
+      - {assistant: "Practise with gels every 40 to 45 minutes on runs over 90 minutes."}
+      - {user: "OK I'll try that in spring"}
+      - {assistant: "Good."}
+      - {user: "I also want to do a half marathon in June as a test"}
+      - {assistant: "A half in June fits well in an 18-week plan."}
+    checklist:
+      - {kind: decision, item: "Berlin marathon next September", any: ["berlin"]}
+      - {kind: decision, item: "Target under 4:15", any: ["4 ?(:|h|hours?) ?15", "four hours"]}
+      - {kind: name, item: "Marco, who recommended Hansons", any: ["marco"]}
+      - {kind: decision, item: "18-week plan from May, 4 runs a week", any: ["18[- ]week"]}
+      - {kind: open question, item: "Whether to see a physio about the left knee", any: ["physio", "knee"]}
+      - {kind: open question, item: "Whether to get carbon plate shoes", any: ["carbon", "shoe"]}
+
+  - id: side-project-launch
+    turns:
+      - {user: "I want to launch my side project, a recipe scaling app called Pinch"}
+      - {assistant: "Fun name. Where does it stand?"}
+      - {user: "The core works: paste a recipe, pick servings, it scales and converts units. Built it with SvelteKit"}
+      - {assistant: "What's missing before launch?"}
+      - {user: "Payments and a landing page. I decided on Stripe for payments, 4 euros a month or 30 a year"}
+      - {assistant: "Clear pricing. Free tier?"}
+      - {user: "Yes, 5 recipes free. After that you need to subscribe"}
+      - {assistant: "That lets people try it properly."}
+      - {user: "My designer friend Yuki offered to do the landing page in exchange for a lifetime account"}
+      - {assistant: "A good trade."}
+      - {user: "Launch date target is March 15th, posting on Product Hunt and Hacker News"}
+      - {assistant: "Two channels with different audiences, sensible."}
+      - {user: "Still not sure about the domain. pinch.app is taken, pinchrecipes.com is available but long"}
+      - {assistant: "A shorter alternative might exist; worth a quick search."}
+      - {user: "Also haven't decided whether to handle VAT myself or use a merchant of record like Paddle"}
+      - {assistant: "A merchant of record handles EU VAT for you, at a higher fee."}
+      - {user: "Need to think about it. The app should also work offline, maybe later"}
+      - {assistant: "Offline could come after launch."}
+      - {user: "Yeah definitely later. What about analytics?"}
+      - {assistant: "A privacy-friendly option like Plausible avoids cookie banners."}
+      - {user: "Plausible sounds good"}
+      - {assistant: "Noted."}
+    checklist:
+      - {kind: name, item: "The app is called Pinch", any: ["pinch"]}
+      - {kind: decision, item: "Stripe, 4 euros a month or 30 a year", any: ["stripe"]}
+      - {kind: decision, item: "Free tier of 5 recipes", any: ["5 recipes", "five recipes", "5 free", "free tier"]}
+      - {kind: name, item: "Yuki does the landing page", any: ["yuki"]}
+      - {kind: decision, item: "Launch March 15th on Product Hunt and Hacker News", any: ["mar(ch)?\\.? 15", "15 mar", "15th"]}
+      - {kind: open question, item: "Which domain", any: ["domain"]}
+      - {kind: open question, item: "VAT: handle it or use Paddle", any: ["vat", "paddle", "merchant of record"]}
+
+  - id: moving-house
+    turns:
+      - {user: "We're moving to Utrecht in six weeks and I'm panicking a little"}
+      - {assistant: "Let's break it down. What's fixed already?"}
+      - {user: "The lease starts on the 1st of November. The flat is on Oudegracht, third floor, no lift"}
+      - {assistant: "No lift matters for the movers. Have you booked any?"}
+      - {user: "We booked Van Dijk Verhuizingen for October 30th. They quoted 1,150 euros with a furniture lift"}
+      - {assistant: "Good, that covers the stairs."}
+      - {user: "My brother Sam will help pack the weekend before"}
+      - {assistant: "Helpful. What about the current flat?"}
+      - {user: "We need to hand the keys back by October 31st and get the deposit back, 2,400 euros"}
+      - {assistant: "Photograph everything when you leave, to protect the deposit."}
+      - {user: "Good tip. Still need to figure out whether our cat Mochi should stay with Sam during the move"}
+      - {assistant: "A quiet place on moving day is kinder for most cats."}
+      - {user: "We also don't know yet which internet provider to use there, and whether the flat has fibre"}
+      - {assistant: "The landlord or the previous tenant might know."}
+      - {user: "I'll ask the landlord. We're selling the old sofa rather than moving it"}
+      - {assistant: "That makes the move lighter."}
+      - {user: "What should I pack first?"}
+      - {assistant: "Books and anything seasonal, then work down to the everyday things last."}
+      - {user: "Makes sense. I'll order boxes this week"}
+      - {assistant: "About 40 to 50 boxes is typical for a two-person flat."}
+      - {user: "OK 50 it is"}
+      - {assistant: "Noted."}
+    checklist:
+      - {kind: decision, item: "Moving to Utrecht, lease from 1 November", any: ["utrecht"]}
+      - {kind: name, item: "Movers: Van Dijk Verhuizingen on October 30th", any: ["van dijk"]}
+      - {kind: name, item: "Sam, the brother, helps pack", any: ["sam"]}
+      - {kind: decision, item: "Keys back by October 31st, 2,400 deposit", any: ["2[,. ]?400", "deposit"]}
+      - {kind: open question, item: "Whether Mochi stays with Sam", any: ["mochi"]}
+      - {kind: open question, item: "Which internet provider, and whether there is fibre", any: ["internet", "fibre", "fiber"]}
+      - {kind: decision, item: "Sell the old sofa", any: ["sofa"]}

@@ -1,0 +1,194 @@
+# Discussions that reached a conclusion the model already proposed, which is
+# now held. Used by the topic change probe (task 12.3) and the repeat
+# proposal probe (task 12.4).
+#
+# turns: the discussion, ending with the proposal and the model's reply.
+# unrelated: a next message on another topic (the held summary should be offered).
+# related: a next message on the same topic (nothing should be proposed).
+# continue: messages where the user keeps going on the same topic without a
+#   new conclusion (nothing should be proposed again).
+
+discussions:
+  - id: job-offer
+    turns:
+      - {user: "I got an offer from the startup, and I'm not sure whether to take it"}
+      - {assistant: "What pulls you towards it, and what holds you back?"}
+      - {user: "The work sounds more interesting and I'd lead a small team. But it pays 10% less and it's a 50 minute commute"}
+      - {assistant: "How much does the commute matter compared with the pay cut?"}
+      - {user: "The commute worries me more. They said two days remote is possible though"}
+      - {assistant: "With two remote days the commute is three days a week. Is the lead role worth the pay cut to you?"}
+      - {user: "Honestly yes. I've wanted to lead a team for years and I won't get that here soon"}
+      - {assistant: "Then the offer fits what you want most, as long as the remote days are in writing."}
+      - {user: "Right. I'll accept if they put the two remote days in the contract"}
+      - proposal: {title: "Accept the startup offer if remote days are in the contract", summary: "Decided to accept the startup offer, which gives a team lead role at 10% less pay, on the condition that two remote days a week are written into the contract. The lead role outweighs the pay cut; the 50 minute commute is acceptable three days a week.", tags: [career, decision, job-offer]}
+        reply: "I've put that decision on a card for you to check."
+    unrelated: "Anyway, totally different thing: what should I cook for dinner with some leftover rice and eggs?"
+    related: "How should I phrase the email asking them to put the remote days in the contract?"
+    continue:
+      - "I'm a bit nervous about telling my current manager"
+      - "She's been good to me, I don't want it to feel like I'm running away"
+      - "Maybe I'll tell her in person on Monday rather than by email"
+
+  - id: porto-trip
+    turns:
+      - {user: "Planning the October trip with Anna, can't decide between Lisbon and Porto"}
+      - {assistant: "What do you both want from the trip?"}
+      - {user: "Good food, walking around, not too many tourists. We have four days"}
+      - {assistant: "Porto is smaller and calmer, and four days covers it well. Lisbon has more sights but is busier and hillier."}
+      - {user: "Anna hates crowds. And I read Porto has great food markets"}
+      - {assistant: "Then Porto fits both of you. Do you want a day trip too, like the Douro valley?"}
+      - {user: "Yes! A Douro day trip with a wine tasting would be perfect"}
+      - {assistant: "Then you have a plan. Which week works for you both?"}
+      - {user: "So: Porto, four days, second week of October, one day in the Douro valley"}
+      - proposal: {title: "October trip: Porto with a Douro day trip", summary: "Decided on Porto for the October trip with Anna: four days in the second week of October, with one day trip to the Douro valley for a wine tasting. Chosen over Lisbon because it is calmer and has good food markets.", tags: [travel, porto, october]}
+        reply: "Done, the plan is on a card for you to check."
+    unrelated: "Unrelated, but do you know a good way to get rid of fruit flies in the kitchen?"
+    related: "Should we stay near the river in Ribeira or somewhere quieter?"
+    continue:
+      - "Anna asked if we should rent a car or take the train"
+      - "The train sounds more relaxing, and we'd both want to drink at the tasting"
+      - "I'll look at train times this weekend"
+
+  - id: morning-phone
+    turns:
+      - {user: "I keep checking my phone the moment I wake up and it ruins my mornings"}
+      - {assistant: "What happens when you check it?"}
+      - {user: "I read work email and news in bed and lose half an hour, then I'm stressed before breakfast"}
+      - {assistant: "One common fix is keeping the phone out of the bedroom. What do you use as an alarm?"}
+      - {user: "The phone. But I have an old alarm clock in a drawer"}
+      - {assistant: "That removes the reason to have the phone by the bed."}
+      - {user: "OK. Phone charges in the kitchen from tonight, the alarm clock goes on the nightstand, no email before breakfast"}
+      - proposal: {title: "Phone out of the bedroom", summary: "Plan to stop morning phone checking: the phone charges in the kitchen from tonight, an old alarm clock goes on the nightstand, and no email before breakfast. Checking the phone in bed cost about 30 minutes and started the day stressed.", tags: [habits, mornings, phone]}
+        reply: "Nice plan. It's on a card if you want to keep it."
+    unrelated: "By the way, what's the difference between a Roth IRA and a traditional one?"
+    related: "What should I do if I wake up at night and want to check the time?"
+    continue:
+      - "I'm worried I'll just grab it first thing when I walk into the kitchen"
+      - "Maybe I'll make coffee first before I even look at it"
+      - "Yeah, coffee and then maybe ten minutes of reading a real book"
+
+  - id: chores-split
+    turns:
+      - {user: "My flatmate and I keep arguing about chores"}
+      - {assistant: "What's the current arrangement?"}
+      - {user: "There isn't one really. I end up doing the dishes and bins, he does nothing unless I ask"}
+      - {assistant: "Would a fixed rota help, or does he respond better to a list of tasks?"}
+      - {user: "A rota. He's fine once something is clearly his job"}
+      - {assistant: "A weekly rota that swaps kitchen and bathroom tasks is simple. Bins could go with the kitchen week."}
+      - {user: "Good. Weekly swap: one of us kitchen and bins, the other bathroom and hoovering. I'll put it on the fridge and bring it up on Sunday"}
+      - proposal: {title: "Weekly chore rota with flatmate", summary: "Agreed plan for chores: a weekly rota that swaps between kitchen plus bins and bathroom plus hoovering. The rota goes on the fridge and gets raised with the flatmate on Sunday, since he does his share once a task is clearly his.", tags: [home, chores, flatmate]}
+        reply: "Sounds fair. The rota plan is on a card."
+    unrelated: "Totally separate thing, can you explain how compound interest works?"
+    related: "What if he just ignores the rota after a week or two?"
+    continue:
+      - "I'm a bit worried about how to bring it up without it sounding like an accusation"
+      - "Maybe I start with the dishes because that's what annoys me most"
+      - "Or I frame it as making things easier for both of us"
+
+  - id: newsletter-schedule
+    turns:
+      - {user: "The newsletter is taking too much of my time, I write it every week"}
+      - {assistant: "How long does one issue take you?"}
+      - {user: "About six hours. And open rates haven't gone up in months"}
+      - {assistant: "Would readers mind fewer issues if each one was stronger?"}
+      - {user: "Probably not. A few people said they can't keep up anyway"}
+      - {assistant: "Going fortnightly would halve the time and might lift open rates."}
+      - {user: "Let's do it. Fortnightly from next month, and I'll tell readers in the next issue"}
+      - proposal: {title: "Move the newsletter to fortnightly", summary: "Decided to move the newsletter from weekly to fortnightly from next month, since each issue takes about six hours and open rates are flat. Readers will be told in the next issue.", tags: [newsletter, writing, decision]}
+        reply: "Good call. The decision is on a card for you."
+    unrelated: "Changing the subject: my knee hurts after running, should I be worried?"
+    related: "How should I word the announcement in the next issue?"
+    continue:
+      - "I might use the extra week to do more research for each issue"
+      - "Some issues could be longer deep dives"
+      - "Though I don't want them to get so long nobody finishes them"
+
+  - id: garden-beds
+    turns:
+      - {user: "I want to grow vegetables this year but the garden is mostly lawn"}
+      - {assistant: "How much space could you give up, and how much sun does it get?"}
+      - {user: "The back corner gets sun all afternoon, about 3 by 4 metres"}
+      - {assistant: "Raised beds would work there and save digging up the lawn. Two beds of 1.2 by 2.5 metres fit with a path between."}
+      - {user: "I like that. What would I grow first?"}
+      - {assistant: "Easy starters are courgettes, lettuce, and bush beans."}
+      - {user: "Perfect. Two raised beds in the back corner, courgettes, lettuce, and beans. I'll build them in March"}
+      - proposal: {title: "Two raised vegetable beds in the back corner", summary: "Plan: build two raised beds of 1.2 by 2.5 metres in the sunny back corner in March, with a path between, and start with courgettes, lettuce, and bush beans.", tags: [garden, vegetables, spring]}
+        reply: "Lovely plan, it's on a card to keep."
+    unrelated: "Something else: what's a good gift for a ten year old who likes science?"
+    related: "What soil should I fill the raised beds with?"
+    continue:
+      - "My neighbour has some old scaffold boards, maybe I can use those"
+      - "They're a bit weathered but still solid"
+      - "I'd need to check they aren't treated with anything nasty"
+
+  - id: standing-desk
+    turns:
+      - {user: "My back hurts after long work days and I'm thinking about a standing desk"}
+      - {assistant: "How many hours a day do you sit?"}
+      - {user: "About nine. Mostly without breaks"}
+      - {assistant: "Standing all day brings its own problems. Changing position often helps most. A desk that moves up and down makes that easy."}
+      - {user: "Electric ones are around 400 euros. My employer might pay for it"}
+      - {assistant: "Worth asking. Many employers cover ergonomic equipment."}
+      - {user: "OK. I'll ask HR to pay for an electric sit-stand desk, and meanwhile take a short walk every hour"}
+      - proposal: {title: "Ask HR for a sit-stand desk", summary: "Back pain after about nine hours of sitting a day. Plan: ask HR to pay for an electric sit-stand desk (around 400 euros) and meanwhile take a short walk every hour.", tags: [health, work, ergonomics]}
+        reply: "Good plan, it's on a card for you."
+    unrelated: "Unrelated: how many cups is 500 ml?"
+    related: "How often should I switch between sitting and standing once I have it?"
+    continue:
+      - "The hourly walks are hard when I'm in meetings back to back"
+      - "Maybe I could stand for some of the calls instead"
+      - "Some of them are camera-off anyway"
+
+  - id: reading-goal
+    turns:
+      - {user: "I used to read loads but now I barely finish a book a year"}
+      - {assistant: "What gets in the way?"}
+      - {user: "I'm on my phone in the evenings, and by the time I go to bed I'm too tired"}
+      - {assistant: "Would reading earlier in the evening work, before you get tired?"}
+      - {user: "Maybe on the train to work actually, that's 25 minutes each way"}
+      - {assistant: "That's almost an hour a day, enough for a book every two weeks or so."}
+      - {user: "Yes. Book on the train instead of the phone, aim for one book a month to start"}
+      - proposal: {title: "Read on the train", summary: "Plan to read more: read a book on the 25 minute train ride each way instead of the phone, with a starting goal of one book a month.", tags: [reading, habits, commute]}
+        reply: "Great, it's on a card for you to keep."
+    unrelated: "Different topic: how do I get red wine out of a carpet?"
+    related: "Should I use an e-reader on the train or paper books?"
+    continue:
+      - "I think I'll start with something light so I don't give up"
+      - "Maybe a crime novel, those are hard to put down"
+      - "My sister keeps recommending one about a detective in Venice"
+
+  - id: team-meeting
+    turns:
+      - {user: "Our weekly team meeting is a waste of time, it runs 90 minutes"}
+      - {assistant: "What takes most of the time?"}
+      - {user: "Everyone gives a status update, most of which nobody else needs"}
+      - {assistant: "Written updates before the meeting could leave the meeting for discussion only."}
+      - {user: "I like that. We'd need a shared doc everyone fills in by Monday noon"}
+      - {assistant: "Then the meeting could shrink to 30 minutes for blockers and decisions."}
+      - {user: "Let's propose it: written updates by Monday noon, 30 minute meeting for blockers only. I'll raise it at the retro on Thursday"}
+      - proposal: {title: "Shorter team meeting with written updates", summary: "Proposal for the team: status updates written in a shared doc by Monday noon, and the weekly meeting cut from 90 to 30 minutes for blockers and decisions only. To be raised at Thursday's retro.", tags: [work, meetings, team]}
+        reply: "Good idea. It's on a card for you."
+    unrelated: "Unrelated, what should I get my dad for his 70th birthday?"
+    related: "How do I make sure people actually fill in the doc before the meeting?"
+    continue:
+      - "Some people will say they prefer talking to writing"
+      - "Especially Mark, he never writes anything down"
+      - "Maybe I can offer to try it for a month and then review"
+
+  - id: savings-plan
+    turns:
+      - {user: "I never manage to save money, it just disappears every month"}
+      - {assistant: "Do you know where most of it goes?"}
+      - {user: "Eating out and random online orders mostly"}
+      - {assistant: "One simple method is moving savings out on payday, before you can spend it."}
+      - {user: "Like a standing order to a savings account?"}
+      - {assistant: "Yes. Even a small amount works if it's automatic."}
+      - {user: "OK. Standing order of 300 a month on payday into a separate savings account, and I'll cap eating out at twice a week"}
+      - proposal: {title: "Automatic savings on payday", summary: "Plan to save: a standing order of 300 a month on payday into a separate savings account, and eating out capped at twice a week. Most money went on eating out and online orders.", tags: [money, savings, habits]}
+        reply: "Nice, that's on a card for you."
+    unrelated: "Oh, different thing: what's the best way to learn to touch type?"
+    related: "Should the savings account be one with instant access or a fixed term?"
+    continue:
+      - "Online orders are going to be the hard part, it's so easy to click buy"
+      - "Maybe I'll delete my saved card from the shopping sites"
+      - "Then I'd have to get up and find my wallet every time"
