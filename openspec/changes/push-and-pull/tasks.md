@@ -1,0 +1,41 @@
+## 1. Data
+
+- [ ] 1.1 Add the `Proposal` and `UserCategory` models, `messages.details`, and `conversations.held_proposal_id`, and drop `conversations.held_proposal`, in one migration from design decisions 1 and 5. Check that `alembic upgrade head` then `downgrade -1` runs cleanly on SQLite and on Postgres with pgvector, that there is a single Alembic head, that `alembic check` is clean, and with pytest that deleting a conversation removes its proposals, deleting a user removes their proposals and categories, a repeated category name for one user is refused, and deleting a proposal's conversation leaves no dangling `held_proposal_id`
+- [ ] 1.2 Update `delete_user_content()` so it removes proposals (through conversations) and keeps `user_categories`. Check with pytest on Postgres for both `account-data-deletion` scenarios: content deletion removes thoughts, conversations, messages, and proposals and keeps keys, settings, added categories, and usage; account deletion removes all of them
+
+## 2. Categories
+
+- [ ] 2.1 Add `app/thoughts/categories.py` with the five fixed kinds and `user_categories(session, user)`, and the `GET`, `POST`, and `DELETE /api/settings/categories` endpoints from design decision 5. Check with pytest that the list returns fixed and added separately, that ` Recipe` is stored as `recipe`, that `Idea` and a repeated added name answer 409 `category_exists`, that an empty or 31-character name and a 21st category answer 422 naming the field, that removing a fixed kind answers 422, that removing an added one leaves a thought with that category unchanged, and that another user sees none of them
+- [ ] 2.2 Add the "Categories" section to the settings page. Check with vitest that fixed kinds show without a remove button, that adding shows the cleaned name, that a duplicate shows the server's message, and that removing takes it off the list; and in the running app that an added category appears in the next proposal card's choices
+
+## 3. Proposing
+
+- [ ] 3.1 Change `propose_thought` to the `thoughts` list from design decision 2, with the flat shape still read as one part, and build the tool schema per turn with the user's category enum and known tags (design decision 6, `filing.known_tags` in `chat.yaml`). Check with pytest that a list of three gives three parts, that a flat call gives one, that 0 or 9 parts and a part without a title are tool argument errors, that an unknown category becomes null, that the schema lists the user's added category and not another user's, and on Postgres that the known tags come most used first and stop at the limit
+- [ ] 3.2 Write a `proposals` row for each proposal in `turn.py` and in `offer_proposal()`, with the raw text from design decision 3, point `held_proposal_id` at it, store `{"proposal_id"}` in the tool message's `details`, and send the proposal's id and parts in the `proposal` event. Check with pytest for each `thought-filing` raw-text scenario: `/push` gives the message without its command, a discussion gives only the user's messages in order, a second discussion starts after the last saved proposal, compacted messages count and summaries do not, and a text over 20,000 characters keeps the most recent whole messages; and that the held note lists only unsaved parts
+- [ ] 3.3 Include each conversation's proposals, with their parts and saved state, in the conversation's messages answer. Check with pytest that a reopened conversation returns every proposal in position order with each part's `thought_id` or null, and that another user's conversation answers 404
+
+## 4. Saving
+
+- [ ] 4.1 Split `store_thought()` into `add_thought()` and `store_thought()`, and replace `save_thought` and the old confirm route with `POST /api/conversations/{id}/proposals/{proposal_id}/confirm` from design decision 4. Check with pytest on Postgres for each "Confirming a proposal saves it" scenario: the edited title, tags, and category are stored with the proposal's raw text; two concurrent confirms of the same part store one thought and both answer its id; a merged confirm of all parts stores one thought and marks every part; a merge after one part is saved answers 409 `proposal_part_saved`; a 201-character title answers 422 naming the title and stores nothing; an unreachable embedding provider still saves; another user's conversation answers 404; the last saved part clears `held_proposal_id`; and a replaced proposal's card still saves
+- [ ] 4.2 Remove the "not available yet" paths and texts from the backend and frontend. Check that a search of `backend/app` and `frontend` outside tests finds no "not available yet", and that the full default and `postgres` pytest runs pass
+
+## 5. Sources and detail
+
+- [ ] 5.1 Return `sources` from `format_search_result()`, send them in the `tool` event's `end` phase, store them in the tool message's `details`, and change `NO_MATCH` and the system prompt line from design decision 9. Check with pytest through the chat endpoint that the event and the stored message hold each source's id, title, date, and tags in result order, that the text for the model still holds no ids, and that a search with no match stores an empty list
+- [ ] 5.2 Add `GET /api/thoughts/{id}` from design decision 8. Check with pytest that the owner gets every field, and that another user's thought and an unknown id both answer 404 `not_found` with the same body
+
+## 6. Chat screen
+
+- [ ] 6.1 Rework the proposal card for parts: one card per part in a group, a category `Select` with "None", confirm per part, a "Merge into one" button shown only while no part is saved and there are two or more parts, the saved state with an "Open" link to `?thought=<id>`, and the server's field error kept on the card. Check with vitest for each `thought-filing` split scenario and the `chat-interface` card scenarios, including that merge builds the first title and category, both summaries as paragraphs, and the tags without repeats, and makes no request
+- [ ] 6.2 Rebuild cards and sources from stored messages when a conversation opens. Check with vitest that a reopened conversation shows a saved card as saved with its link and an unsaved card as editable, and that each answer shows the sources it had
+- [ ] 6.3 Add the sources list under an answer from design decision 7: sources of every search in the answer, each once, a relevance / newest-first toggle, tag chips matching any picked tag, and no list when there are no sources. Check with vitest for each `thought-recall` scenario, and that sorting and filtering make no request
+- [ ] 6.4 Add the shadcn `Sheet` and the thought detail sheet driven by `?thought=<id>` from design decision 8. Check with vitest that it shows every field, hides the raw text when empty or equal to the summary, shows "This thought no longer exists." on a 404, and offers no edit or delete; and in the running app that Back closes it, that a copied address opens the same thought, and that closing keeps the scroll position and the composer's text
+
+## 7. Prompt probes
+
+- [ ] 7.1 Add the `split`, `filing`, and `nomatch` probes from design decision 10 with their data in `probe_data/`, and update the system prompt and tool descriptions for splitting, categories, tag reuse, agreed points in a summary, and no invented answers. Check with a fake model that each probe runs, then run them and `tools` and `discussions` twice with Nemotron 3 Nano on Nebius, and record the results in design decision 10. Pass: the bars in that decision, and `tools` and `discussions` no worse than the thought-storage results
+- [ ] 7.2 Add split thoughts to the search evaluation set and rerun `scripts/search_eval.py` with the chosen model. Check by recording in design decision 10 whether recall at 5 and the "nothing" queries hold when several thoughts share one raw text, and that `tests/test_search_quality.py` still passes
+
+## 8. End to end
+
+- [ ] 8.1 In the running app with a real key: `/push` three things, merge two, confirm both cards, ask `/pull` about one, sort and filter the sources, open a source, press Back, reload the conversation, and open a saved card's link. Check that every step matches the specs, and save screenshots of the cards, the sources, and the sheet under `.context/`
