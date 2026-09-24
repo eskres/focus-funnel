@@ -44,8 +44,8 @@ async def sessions(tmp_path):
 @pytest.fixture
 async def alice_bob_note(sessions):
     async with sessions() as session:
-        alice = await get_or_create_user(session, TEST_ISSUER, "auth0|alice")
-        bob = await get_or_create_user(session, TEST_ISSUER, "auth0|bob")
+        alice = await get_or_create_user(session, TEST_ISSUER, "user|alice")
+        bob = await get_or_create_user(session, TEST_ISSUER, "user|bob")
         note = Note(user_id=alice.id, text="alice's thought")
         session.add(note)
         await session.commit()
@@ -103,7 +103,7 @@ def test_http_response_is_identical_for_other_users_and_missing_records(
             await connection.run_sync(Base.metadata.create_all)
             await connection.run_sync(OwnershipTestBase.metadata.create_all)
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-            alice = await get_or_create_user(session, TEST_ISSUER, "auth0|alice")
+            alice = await get_or_create_user(session, TEST_ISSUER, "user|alice")
             note = Note(user_id=alice.id, text="private")
             session.add(note)
             await session.commit()
@@ -126,8 +126,8 @@ def test_http_response_is_identical_for_other_users_and_missing_records(
         return {"text": note.text}
 
     test_app.dependency_overrides[get_jwks_cache] = lambda: jwks_cache
-    bob_headers = {"Authorization": f"Bearer {make_token(sub='auth0|bob')}"}
-    alice_headers = {"Authorization": f"Bearer {make_token(sub='auth0|alice')}"}
+    bob_headers = {"Authorization": f"Bearer {make_token(sub='user|bob')}"}
+    alice_headers = {"Authorization": f"Bearer {make_token(sub='user|alice')}"}
 
     with TestClient(test_app) as client:
         owner = client.get(f"/notes/{note_id}", headers=alice_headers)

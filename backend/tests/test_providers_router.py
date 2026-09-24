@@ -54,12 +54,12 @@ def client(test_database_url, jwks_cache, fake):
 
 @pytest.fixture
 def alice(make_token):
-    return {"Authorization": f"Bearer {make_token(sub='auth0|alice')}"}
+    return {"Authorization": f"Bearer {make_token(sub='user|alice')}"}
 
 
 @pytest.fixture
 def bob(make_token):
-    return {"Authorization": f"Bearer {make_token(sub='auth0|bob')}"}
+    return {"Authorization": f"Bearer {make_token(sub='user|bob')}"}
 
 
 def error_code(response) -> str:

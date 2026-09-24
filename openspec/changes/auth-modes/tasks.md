@@ -57,9 +57,11 @@
 
 ## 10. Deployment and cleanup
 
-- [ ] 10.1 Remove `@auth0/nextjs-auth0`, `lib/auth0.ts`, and the Auth0 names in the backend, and add `openid-client`, `jose`, and `firebase`. Check that a search of `backend/` and `frontend/` for `auth0` finds only the `auth0-legacy` issuer and docs naming Auth0 as an `oidc` provider
-- [ ] 10.2 Add `docker-compose.pocket-id.yml` with the version from task 1.1 and `docker-compose.demo.yml` with `tmpfs` data and one instance. Check that `docker compose config` accepts both overlays
+- [x] 10.1 Remove `@auth0/nextjs-auth0`, `lib/auth0.ts`, and the Auth0 names in the backend, and add `openid-client`, `jose`, and `firebase`. Check that a search of `backend/` and `frontend/` for `auth0` finds only the `auth0-legacy` issuer and docs naming Auth0 as an `oidc` provider
+  - The search also finds the old column name `auth0_sub` in the two Alembic migrations (`902d87703656` creates it, `a97e96671d5c` renames it) and in the migration tests that insert rows at those revisions. They are the history behind the `auth0-legacy` rows, which the user accepted as allowed on 2026-09-24.
+- [x] 10.2 Add `docker-compose.pocket-id.yml` with the version from task 1.1 and `docker-compose.demo.yml` with `tmpfs` data and one instance. Check that `docker compose config` accepts both overlays
 - [ ] 10.3 Write the login setup docs: Pocket ID, another OIDC provider, Firebase, the allow-list, HTTPS for passkeys on a LAN with a Caddy example, and demo mode with its guards. Check by following the Pocket ID section on a clean checkout
+  - Walkthrough not run: needs Docker and a passkey. The docs are in `docs/login.md`, linked from the README.
 
 ## 11. Full system check
 

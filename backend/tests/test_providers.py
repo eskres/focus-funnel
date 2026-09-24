@@ -250,7 +250,7 @@ def test_error_messages_name_the_provider(provider):
 
 async def test_no_saved_key_means_missing(session, provider, settings_env):
     settings = Settings()
-    user = await add_user(session, "auth0|nokey")
+    user = await add_user(session, "user|nokey")
     await assert_raises_code(
         load_api_key(session, user, provider, settings), ErrorCode.PROVIDER_KEY_MISSING
     )
@@ -259,8 +259,8 @@ async def test_no_saved_key_means_missing(session, provider, settings_env):
 async def test_key_copied_from_another_user_means_missing(session, settings_env):
     settings = Settings()
     provider = make_provider()
-    alice = await add_user(session, "auth0|alice")
-    bob = await add_user(session, "auth0|bob")
+    alice = await add_user(session, "user|alice")
+    bob = await add_user(session, "user|bob")
     # Bob's row holds a ciphertext that was encrypted for Alice.
     await save_key(session, settings, bob, provider, "nb-alice-secret", encrypt_for=alice)
 
@@ -272,7 +272,7 @@ async def test_key_copied_from_another_user_means_missing(session, settings_env)
 async def test_keyless_provider_with_no_row_gets_a_placeholder(session, settings_env):
     settings = Settings()
     keyless = make_provider(key_required=False)
-    user = await add_user(session, "auth0|nokeyneeded")
+    user = await add_user(session, "user|nokeyneeded")
 
     api_key = await load_api_key(session, user, keyless, settings)
     assert api_key == PLACEHOLDER_KEY
@@ -281,8 +281,8 @@ async def test_keyless_provider_with_no_row_gets_a_placeholder(session, settings
 async def test_client_for_uses_the_providers_base_url_and_that_users_key(session, settings_env):
     settings = Settings()
     provider = make_provider()
-    alice = await add_user(session, "auth0|alice")
-    bob = await add_user(session, "auth0|bob")
+    alice = await add_user(session, "user|alice")
+    bob = await add_user(session, "user|bob")
     await save_key(session, settings, alice, provider, "nb-alice-1111")
     await save_key(session, settings, bob, provider, "nb-bob-2222")
 
@@ -298,11 +298,11 @@ async def test_client_for_uses_the_providers_base_url_and_that_users_key(session
 async def test_another_users_key_is_never_used(session, settings_env):
     settings = Settings()
     provider = make_provider()
-    alice = await add_user(session, "auth0|alice")
-    await add_user(session, "auth0|bob")
+    alice = await add_user(session, "user|alice")
+    await add_user(session, "user|bob")
     await save_key(session, settings, alice, provider, "nb-alice-only")
 
-    bob2 = await add_user(session, "auth0|bob2")
+    bob2 = await add_user(session, "user|bob2")
     fake = FakeProvider(status(200, MODELS_OK))
     with pytest.raises(ApiError) as error:
         await client_for(session, bob2, provider, settings, http_client=fake.http_client())

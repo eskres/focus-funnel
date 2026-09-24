@@ -133,7 +133,7 @@ def signing_key() -> rsa.RSAPrivateKey:
 
 @pytest.fixture
 def jwks_document(signing_key) -> dict:
-    """The JWKS the fake Auth0 tenant serves. Tests may change its "keys" list."""
+    """The JWKS the fake login provider serves. Tests may change its "keys" list."""
     return {"keys": [jwk_for(signing_key, TEST_KID)]}
 
 
@@ -154,7 +154,7 @@ def make_token(signing_key):
         payload = {
             "iss": TEST_ISSUER,
             "aud": REQUIRED_ENV["OIDC_CLIENT_ID"],
-            "sub": f"auth0|{uuid.uuid4().hex}",
+            "sub": f"user|{uuid.uuid4().hex}",
             "iat": now,
             "exp": now + 3600,
             **claims,

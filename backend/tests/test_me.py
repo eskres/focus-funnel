@@ -20,7 +20,7 @@ def client(test_database_url, jwks_cache):
 
 
 def test_me_returns_user_id_with_valid_token(client, test_database_url, make_token):
-    token = make_token(sub="auth0|me-user")
+    token = make_token(sub="user|me-user")
 
     first = client.get("/api/me", headers={"Authorization": f"Bearer {token}"})
     second = client.get("/api/me", headers={"Authorization": f"Bearer {token}"})
@@ -30,7 +30,7 @@ def test_me_returns_user_id_with_valid_token(client, test_database_url, make_tok
     assert set(body) == {"id", "created_at"}
     uuid.UUID(body["id"])
     assert second.json()["id"] == body["id"]
-    assert count_users(test_database_url, "auth0|me-user") == 1
+    assert count_users(test_database_url, "user|me-user") == 1
 
 
 def test_me_without_token_is_401(client):

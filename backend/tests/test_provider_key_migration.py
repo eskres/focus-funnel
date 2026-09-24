@@ -79,7 +79,7 @@ def test_nebius_row_survives_upgrade_as_nebius_provider(tmp_path):
     with sqlite3.connect(db_file) as conn:
         conn.execute(
             "INSERT INTO users (id, auth0_sub, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
-            (user_id.bytes, "auth0|legacy-user"),
+            (user_id.bytes, "user|legacy-user"),
         )
         conn.execute(
             "INSERT INTO nebius_api_keys "
@@ -112,7 +112,7 @@ def test_downgrade_drops_keys_for_other_providers(tmp_path):
     with sqlite3.connect(db_file) as conn:
         conn.execute(
             "INSERT INTO users (id, auth0_sub, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
-            (user_id.bytes, "auth0|multi-provider-user"),
+            (user_id.bytes, "user|multi-provider-user"),
         )
         conn.execute(
             "INSERT INTO provider_keys "

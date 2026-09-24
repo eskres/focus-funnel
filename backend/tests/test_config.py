@@ -59,8 +59,8 @@ def test_missing_mode_names_the_setting_and_its_values(settings_env):
 
 
 def test_unknown_mode_names_the_refused_value(settings_env):
-    settings_env.setenv("AUTH_MODE", "auth0")
-    with pytest.raises(ValidationError, match="AUTH_MODE 'auth0'"):
+    settings_env.setenv("AUTH_MODE", "magic-link")
+    with pytest.raises(ValidationError, match="AUTH_MODE 'magic-link'"):
         Settings()
 
 

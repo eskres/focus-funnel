@@ -29,38 +29,26 @@ Not built yet: saving and searching thoughts, `/compact`, the context meter, and
 | Backend | FastAPI (async), SQLAlchemy, Alembic |
 | Database | Postgres (SQLite in tests) |
 | Vector store | ChromaDB (not used yet) |
-| Login | Auth0 |
+| Login | Any OpenID Connect provider (such as Pocket ID), Firebase, or an anonymous demo mode |
 | Models | Any OpenAI-compatible API, through the `openai` SDK |
 
-The browser talks only to the Next.js server. The Next.js server forwards `/api/...` calls to FastAPI with the user's access token. The backend has no public port.
+The browser talks only to the Next.js server. The Next.js server runs the login, keeps the session in an encrypted cookie, and forwards `/api/...` calls to FastAPI with the user's ID token. The backend has no public port.
 
 ## Run it with Docker
 
-You need Docker and an Auth0 tenant.
+You need Docker. Login is set up with `AUTH_MODE` in `.env`: an OpenID Connect provider, a Firebase project, or an anonymous demo. [docs/login.md](docs/login.md) explains each one. The quickest start is Pocket ID, which runs next to the app:
 
-1. Set up Auth0:
-   1. Create a **Regular Web Application**.
-   2. Set its Allowed Callback URL to `http://localhost:3000/auth/callback`.
-   3. Set its Allowed Logout URL to `http://localhost:3000`.
-   4. Create an **API**. Its identifier becomes `AUTH0_AUDIENCE`.
-2. Copy `.env.example` to `.env`.
-3. Fill in the Auth0 values in `.env`.
-4. Generate the two secrets and put them in `.env`:
+1. Copy `.env.example` to `.env`.
+2. Follow [Pocket ID in docs/login.md](docs/login.md#pocket-id). It generates the secrets, starts everything with `docker-compose.pocket-id.yml`, and registers the app with Pocket ID.
+3. Open http://localhost:3000 and log in with your passkey.
+4. In **Settings**, save an API key for a provider.
+5. In **Settings**, add a chat model and mark it as the default. The Test button checks that the model answers and can call a tool.
 
-   ```sh
-   openssl rand -hex 32      # AUTH0_SECRET
-   openssl rand -base64 32   # KEY_ENCRYPTION_KEY
-   ```
+Without the Pocket ID overlay, start everything with:
 
-5. Start everything:
-
-   ```sh
-   docker compose up --build
-   ```
-
-6. Open http://localhost:3000 and log in.
-7. In **Settings**, save an API key for a provider.
-8. In **Settings**, add a chat model and mark it as the default. The Test button checks that the model answers and can call a tool.
+```sh
+docker compose up --build
+```
 
 The backend applies database migrations each time it starts. Postgres and Chroma keep their data in `.data/`.
 

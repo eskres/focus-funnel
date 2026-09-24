@@ -33,24 +33,24 @@ def whoami(client, token):
 
 
 def test_first_request_creates_one_user(client, test_database_url, make_token):
-    response = whoami(client, make_token(sub="auth0|new-user"))
+    response = whoami(client, make_token(sub="user|new-user"))
 
     assert response.status_code == 200
-    assert response.json()["subject"] == "auth0|new-user"
-    assert count_users(test_database_url, "auth0|new-user") == 1
+    assert response.json()["subject"] == "user|new-user"
+    assert count_users(test_database_url, "user|new-user") == 1
 
 
 def test_repeat_requests_reuse_the_user(client, test_database_url, make_token):
-    first = whoami(client, make_token(sub="auth0|returning"))
-    second = whoami(client, make_token(sub="auth0|returning"))
+    first = whoami(client, make_token(sub="user|returning"))
+    second = whoami(client, make_token(sub="user|returning"))
 
     assert first.json()["id"] == second.json()["id"]
-    assert count_users(test_database_url, "auth0|returning") == 1
+    assert count_users(test_database_url, "user|returning") == 1
 
 
 def test_different_subjects_get_different_users(client, test_database_url, make_token):
-    alice = whoami(client, make_token(sub="auth0|alice")).json()
-    bob = whoami(client, make_token(sub="auth0|bob")).json()
+    alice = whoami(client, make_token(sub="user|alice")).json()
+    bob = whoami(client, make_token(sub="user|bob")).json()
 
     assert alice["id"] != bob["id"]
     assert count_users(test_database_url) == 2
@@ -70,7 +70,7 @@ def test_concurrent_first_requests_leave_one_user(test_database_url):
 
         async def first_request():
             async with sessions() as session:
-                return await get_or_create_user(session, TEST_ISSUER, "auth0|racer")
+                return await get_or_create_user(session, TEST_ISSUER, "user|racer")
 
         users = await asyncio.gather(*(first_request() for _ in range(5)))
         await engine.dispose()
@@ -79,7 +79,7 @@ def test_concurrent_first_requests_leave_one_user(test_database_url):
     users = asyncio.run(run_concurrently())
 
     assert len({user.id for user in users}) == 1
-    assert count_users(test_database_url, "auth0|racer") == 1
+    assert count_users(test_database_url, "user|racer") == 1
 
 
 def test_same_subject_from_two_issuers_is_two_users_who_cannot_see_each_other(

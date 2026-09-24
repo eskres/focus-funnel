@@ -59,7 +59,7 @@ def test_existing_row_survives_as_auth0_legacy_and_the_downgrade(tmp_path):
     with sqlite3.connect(db_file) as conn:
         conn.execute(
             "INSERT INTO users (id, auth0_sub, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
-            (legacy_id, "auth0|developer"),
+            (legacy_id, "user|developer"),
         )
         conn.execute(
             "INSERT INTO provider_keys (id, user_id, provider_id, created_at, updated_at) "
@@ -71,11 +71,11 @@ def test_existing_row_survives_as_auth0_legacy_and_the_downgrade(tmp_path):
     assert res.returncode == 0, res.stderr
     with sqlite3.connect(db_file) as conn:
         rows = conn.execute("SELECT id, issuer, subject, expires_at FROM users").fetchall()
-        assert rows == [(legacy_id, "auth0-legacy", "auth0|developer", None)]
+        assert rows == [(legacy_id, "auth0-legacy", "user|developer", None)]
         assert conn.execute("SELECT count(*) FROM provider_keys").fetchone() == (1,)
 
         # A user from a real login, with data, and the same subject elsewhere.
-        new_id = insert_user(conn, "http://localhost:1411", "auth0|developer")
+        new_id = insert_user(conn, "http://localhost:1411", "user|developer")
         conversation_id = uuid.uuid4().bytes
         conn.execute(
             "INSERT INTO conversations (id, user_id, title, last_activity_at, created_at, updated_at) "
@@ -92,7 +92,7 @@ def test_existing_row_survives_as_auth0_legacy_and_the_downgrade(tmp_path):
     assert res.returncode == 0, res.stderr
     with sqlite3.connect(db_file) as conn:
         assert conn.execute("SELECT id, auth0_sub FROM users").fetchall() == [
-            (legacy_id, "auth0|developer")
+            (legacy_id, "user|developer")
         ]
         assert conn.execute("SELECT user_id FROM provider_keys").fetchall() == [(legacy_id,)]
         assert conn.execute("SELECT count(*) FROM conversations").fetchone() == (0,)

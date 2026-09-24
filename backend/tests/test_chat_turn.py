@@ -599,7 +599,7 @@ async def test_two_conversations_on_two_models_run_at_the_same_time(
     from tests.chat_helpers import PROVIDERS_FIXTURE
 
     settings_env.setenv("PROVIDERS_CONFIG_PATH", str(PROVIDERS_FIXTURE))
-    headers = {"Authorization": f"Bearer {make_token(sub='auth0|alice')}"}
+    headers = {"Authorization": f"Bearer {make_token(sub='user|alice')}"}
     fake = FakeLLM()
     app.dependency_overrides[get_jwks_cache] = lambda: jwks_cache
     app.dependency_overrides[get_provider_http_client] = fake.http_client

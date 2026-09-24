@@ -44,7 +44,7 @@ describe("readAuthConfig", () => {
   });
 
   it("names the refused value of an unknown mode", () => {
-    expect(failure({ ...demoEnv, AUTH_MODE: "auth0" })).toContain("AUTH_MODE 'auth0'");
+    expect(failure({ ...demoEnv, AUTH_MODE: "magic-link" })).toContain("AUTH_MODE 'magic-link'");
   });
 
   it.each([
