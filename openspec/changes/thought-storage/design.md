@@ -134,6 +134,11 @@ The tool takes `query` (described as the key words and names to look for, not a 
 
 `scripts/probe_prompt.py search` checks against a real model that searches use key words, a tag, and a start date when the user names them.
 
+**Probe results (task 6.3, 2026-09-24),** `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` on Nebius, temperature 0.3, two runs:
+
+- `search`: pass, 86 of 88 checks (98%). Every recall question searched, always with key words, never the question. Every named start date was passed and worked out right from today's date (this month 2026-09-01, this week 2026-09-22, this year 2026-01-01). A named tag was passed in 6 of 8 cases; the two misses (`travel`, `family`, in run 2) still searched by the right words. One plain question got an unasked `since` and one an unasked tag, which narrow but do not break the search.
+- `tools`: pass, 40 and 41 of 43 (93%, 95%), against 42 and 41 for the tuned prompt in `conversation-agent`. Recall questions called the search tool 12 of 12 times, and no greeting or unfinished message called a tool. All five misses were a to-do or idea not proposed, or a discussion proposed early: the `propose_thought` choice, which this change did not touch.
+
 ### 8. Search tuning in `chat.yaml`
 
 ```yaml
