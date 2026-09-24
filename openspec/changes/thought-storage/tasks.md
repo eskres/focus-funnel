@@ -18,8 +18,8 @@
 
 ## 4. Embeddings
 
-- [ ] 4.1 Add `resolve_embedding_model()` and `embed_texts()` from design decisions 4 and 11. Check with pytest and `FakeProvider` that the user's own key is used, that demo mode uses the held key, that each `provider_*` error maps as for chat, that a missing model gives `model_unavailable`, that 130 texts go in 3 calls, that `dimensions` is sent only when set, that unequal vector lengths are refused, that one usage event per call records prompt tokens, no completion tokens, and no text, and that the resolver returns the instance setting for two different users
-- [ ] 4.2 Add the chunker from design decision 3. Check with pytest that no raw text or raw text equal to the summary gives only the head, that a 20,000-character text gives chunks of about 800 characters with about 100 of overlap split at paragraph or sentence boundaries, and that each chunk's character range points at its text
+- [x] 4.1 Add `resolve_embedding_model()` and `embed_texts()` from design decisions 4 and 11. Check with pytest and `FakeProvider` that the user's own key is used, that demo mode uses the held key, that each `provider_*` error maps as for chat, that a missing model gives `model_unavailable`, that 130 texts go in 3 calls, that `dimensions` is sent only when set, that unequal vector lengths are refused, that one usage event per call records prompt tokens, no completion tokens, and no text, and that the resolver returns the instance setting for two different users
+- [x] 4.2 Add the chunker from design decision 3. Check with pytest that no raw text or raw text equal to the summary gives only the head, that a 20,000-character text gives chunks of about 800 characters with about 100 of overlap split at paragraph or sentence boundaries, and that each chunk's character range points at its text
 
 ## 5. Thought store
 

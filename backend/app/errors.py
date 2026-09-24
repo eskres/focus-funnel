@@ -35,6 +35,7 @@ class ErrorCode:
     DEMO_SESSION_EXPIRED = "demo_session_expired"
     DEMO_FULL = "demo_full"
     RATE_LIMITED = "rate_limited"
+    EMBEDDING_MISMATCH = "embedding_mismatch"
 
 
 class ApiError(Exception):
@@ -70,6 +71,15 @@ def model_unknown(provider_label: str, model: str) -> ApiError:
 
 def model_unsupported(model: str, what: str) -> ApiError:
     return ApiError(400, ErrorCode.MODEL_UNSUPPORTED, f"The model '{model}' does not support {what}.")
+
+
+def embedding_mismatch(detail: str) -> ApiError:
+    return ApiError(
+        409,
+        ErrorCode.EMBEDDING_MISMATCH,
+        f"The search index was built with another embedding model ({detail}). "
+        "Ask the operator to rebuild it.",
+    )
 
 
 def model_unavailable(model: str) -> ApiError:

@@ -16,7 +16,7 @@ from app.chat.model_call import ModelCall
 from app.models import UsageEvent, UserSettings
 from app.provider_models import ModelPrices
 
-UsageKind = Literal["chat", "compact", "proposal", "test"]
+UsageKind = Literal["chat", "compact", "proposal", "test", "embed"]
 
 
 def estimate_cost(
