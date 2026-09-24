@@ -12,7 +12,9 @@ NOT_AVAILABLE_SEARCH = (
 )
 PROPOSAL_SHOWN = (
     "The proposal is now shown to the user as a card they can edit and confirm. "
-    "Nothing is saved until they confirm. Do not repeat it; reply in one short sentence."
+    "Nothing is saved until they confirm. Do not call propose_thought again in this "
+    "turn. Now reply to the user's latest message. If it held only what you "
+    "proposed, reply in one short sentence."
 )
 
 

@@ -22,10 +22,12 @@ from app.errors import ApiError, ErrorCode, output_limit_reached
 from app.models import Conversation, Message
 
 COMPACT_PROMPT = """\
-Summarise the conversation below for the assistant to carry on from. Keep \
-every decision, fact, name, number, and open question. Leave out small talk. \
-Write short plain paragraphs or a list, in the user's language. Write only \
-the summary."""
+Summarise the conversation below for the assistant to carry on from. Start \
+with one line on what the conversation is about. Then keep every decision \
+with its details (dates, places, amounts, numbers), every person, place, \
+product, or book mentioned by name, and every open question the user has not \
+settled. Leave out small talk. Write a short list, in the language the \
+conversation's messages are written in. Write only the summary."""
 
 
 @dataclass

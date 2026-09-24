@@ -16,7 +16,7 @@ from app.chat.config import ChatConfig
 from app.chat.context import compact_suggestion
 from app.chat.conversations import next_position
 from app.chat.model_call import ModelCall
-from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, TOOLS, tool_arguments
+from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, TOOLS, drop_held_note, tool_arguments
 from app.chat.sse import Event
 from app.chat.usage import record_usage, usage_warning
 from app.chat.tools import (
@@ -249,6 +249,7 @@ class Turn:
                 summary = f"Searched your thoughts for “{query.strip()}”"
             elif name == PROPOSE_TOOL:
                 proposal = parse_proposal(arguments)
+                drop_held_note(self.context, self.conversation.held_proposal)
                 self.conversation.held_proposal = {**proposal.as_dict(), "position": position}
                 yield ("proposal", proposal.as_dict())
                 result = PROPOSAL_SHOWN

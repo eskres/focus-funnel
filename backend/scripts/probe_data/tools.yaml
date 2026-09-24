@@ -1,0 +1,129 @@
+# Labelled messages for the tool choice probe (task 12.1).
+# expect: search (search_thoughts), propose (propose_thought), or none.
+# history: earlier turns, as {user: text} or {assistant: text}.
+
+cases:
+  # recall: questions about what the user filed before
+  - {id: recall-1, category: recall, expect: search, message: "What did I decide about the car insurance last month?"}
+  - {id: recall-2, category: recall, expect: search, message: "Did I note anything about Sara's birthday present?"}
+  - {id: recall-3, category: recall, expect: search, message: "what were my ideas for the garden again"}
+  - {id: recall-4, category: recall, expect: search, message: "Remind me what I said about switching banks"}
+  - {id: recall-5, category: recall, expect: search, message: "Have I written down the name of that podcast Tom recommended?"}
+  - {id: recall-6, category: recall, expect: search, message: "What to-dos do I have left for the move?"}
+
+  # to-do: a task clearly worth keeping
+  - {id: todo-1, category: to-do, expect: propose, message: "Need to renew my passport before March"}
+  - {id: todo-2, category: to-do, expect: propose, message: "buy milk and batteries"}
+  - {id: todo-3, category: to-do, expect: propose, message: "Call the plumber about the kitchen sink on Monday"}
+  - {id: todo-4, category: to-do, expect: propose, message: "remember to send Jonas the invoice by Friday"}
+  - {id: todo-5, category: to-do, expect: propose, message: "I have to book a flight to Bergen for the conference in May"}
+  - {id: todo-6, category: to-do, expect: propose, message: "Pick up the dry cleaning tomorrow after work"}
+
+  # idea: an idea clearly worth keeping
+  - {id: idea-1, category: idea, expect: propose, message: "Idea: an app that reminds you to water plants based on the weather forecast"}
+  - {id: idea-2, category: idea, expect: propose, message: "What if the newsletter had a short reader-question section every week"}
+  - {id: idea-3, category: idea, expect: propose, message: "I could turn the spare room into a small studio for recording the podcast"}
+  - {id: idea-4, category: idea, expect: propose, message: "Blog post idea: what I learned from a year of running before work"}
+  - {id: idea-5, category: idea, expect: propose, message: "We should start a monthly board game night with the neighbours"}
+  - {id: idea-6, category: idea, expect: propose, message: "Thought for the course: price it per cohort instead of per seat"}
+
+  # greeting: small talk, never a tool
+  - {id: greeting-1, category: greeting, expect: none, message: "hi"}
+  - {id: greeting-2, category: greeting, expect: none, message: "Good morning!"}
+  - {id: greeting-3, category: greeting, expect: none, message: "hey, how's it going"}
+  - {id: greeting-4, category: greeting, expect: none, message: "thanks!"}
+  - {id: greeting-5, category: greeting, expect: none, message: "ok cool"}
+
+  # unfinished: a message cut off before its point, never a tool
+  - {id: unfinished-1, category: unfinished, expect: none, message: "So I was thinking about"}
+  - {id: unfinished-2, category: unfinished, expect: none, message: "The thing with the"}
+  - {id: unfinished-3, category: unfinished, expect: none, message: "remind me to"}
+  - {id: unfinished-4, category: unfinished, expect: none, message: "I need to"}
+  - {id: unfinished-5, category: unfinished, expect: none, message: "Idea:"}
+
+  # discussion: the user wants to think something through; nothing to file yet
+  - {id: discussion-1, category: discussion, expect: none, message: "I'm not sure whether to take the new job offer, can you help me think it through?"}
+  - {id: discussion-2, category: discussion, expect: none, message: "Why do I always put off answering emails?"}
+  - {id: discussion-3, category: discussion, expect: none, message: "What's a good way to structure a weekly review?"}
+  - {id: discussion-4, category: discussion, expect: none, message: "I'm torn between learning Rust and Go this year"}
+  - {id: discussion-5, category: discussion, expect: none, message: "How do I say no to extra projects at work without looking lazy?"}
+  - {id: discussion-6, category: discussion, expect: none, message: "I feel overwhelmed by everything this week"}
+
+  # multi-turn: a discussion that reaches a decision (propose), or is still open (none)
+  - id: multi-1
+    category: multi-turn
+    expect: propose
+    history:
+      - {user: "I'm torn between learning Rust and Go this year"}
+      - {assistant: "What do you want to build with it?"}
+      - {user: "Mostly small CLI tools and maybe a web backend at work"}
+      - {assistant: "Both fit. Go is quicker to get productive in; Rust takes longer but gives more control. Does your team use either?"}
+      - {user: "The team already runs two Go services"}
+      - {assistant: "Then Go gets you useful at work sooner. Rust could stay a side project."}
+    message: "Yes, that settles it. Go first this year, Rust maybe next year."
+  - id: multi-2
+    category: multi-turn
+    expect: propose
+    history:
+      - {user: "Should we go to Lisbon or Porto for the October trip?"}
+      - {assistant: "What matters most to you both on this trip?"}
+      - {user: "Good food, not too crowded, and we only have four days"}
+      - {assistant: "Porto is smaller and calmer, and four days covers it well. Lisbon has more to see but is busier."}
+      - {user: "Anna prefers calm and I care about the food, Porto has both"}
+    message: "OK decided: Porto, four days, second week of October."
+  - id: multi-3
+    category: multi-turn
+    expect: propose
+    history:
+      - {user: "I keep checking my phone the moment I wake up"}
+      - {assistant: "What does that do to your mornings?"}
+      - {user: "I lose 30 minutes and start the day stressed"}
+      - {assistant: "One option is charging the phone outside the bedroom and using a plain alarm clock."}
+      - {user: "I have an old alarm clock somewhere"}
+    message: "Right, so the plan: phone charges in the kitchen from tonight, old alarm clock on the nightstand."
+  - id: multi-4
+    category: multi-turn
+    expect: none
+    history:
+      - {user: "I want to cut down on takeaway food"}
+      - {assistant: "What usually makes you order in?"}
+    message: "Mostly I'm tired after work and there's nothing ready"
+  - id: multi-5
+    category: multi-turn
+    expect: none
+    history:
+      - {user: "Thinking about whether to repaint the living room"}
+      - {assistant: "What bothers you about it now?"}
+      - {user: "It feels dark in the evenings"}
+      - {assistant: "Is that the wall colour, or the lighting?"}
+    message: "Hmm, could be both honestly, I'm not sure"
+
+  # tangent: a side step in the middle of an open discussion
+  - id: tangent-1
+    category: tangent
+    expect: propose
+    history:
+      - {user: "I'm trying to work out how to split chores fairly with my flatmate"}
+      - {assistant: "What's the split now?"}
+    message: "Oh wait, before I forget: I need to pay the electricity bill by Thursday"
+  - id: tangent-2
+    category: tangent
+    expect: none
+    history:
+      - {user: "I'm trying to decide whether to switch to a standing desk"}
+      - {assistant: "What made you think about it?"}
+    message: "Random question, but what's the weather usually like in Oslo in April?"
+  - id: tangent-3
+    category: tangent
+    expect: none
+    history:
+      - {user: "How should I prepare for my performance review next week?"}
+      - {assistant: "What would you like to get out of it?"}
+    message: "haha sorry my cat just walked across the keyboard"
+  - id: tangent-4
+    category: tangent
+    expect: propose
+    history:
+      - {user: "Help me plan my study schedule for the exam"}
+      - {assistant: "How many weeks do you have, and which subjects?"}
+    message: "Side note, idea for later: a shared flashcard deck for the whole study group"

@@ -34,15 +34,15 @@ def system_notes(request: dict) -> list[str]:
 # --- 7.5 the held-proposal note ---
 
 
-def test_the_note_follows_the_prompt_when_a_proposal_is_held():
+def test_the_note_follows_the_latest_message_when_a_proposal_is_held():
     user = Message(position=0, role="user", content="hi", compacted=False)
     context = build_context([user], HELD)
     assert context[0] == {"role": "system", "content": SYSTEM_PROMPT}
-    assert context[1] == {"role": "system", "content": held_proposal_note(HELD)}
-    assert context[2] == {"role": "user", "content": "hi"}
-    note = context[1]["content"]
+    assert context[1] == {"role": "user", "content": "hi"}
+    assert context[2] == {"role": "system", "content": held_proposal_note(HELD)}
+    note = context[2]["content"]
     assert "Oat milk" in note and "Buy oat milk tomorrow." in note and "shopping" in note
-    assert "Do not propose it again" in note and "unrelated" in note
+    assert "Do not propose it again" in note and "something else" in note
     assert "delet" not in note.lower()
 
 
@@ -79,6 +79,10 @@ def test_a_new_topic_replaces_the_held_proposal(client, alice, fake_llm, test_da
 
     assert '"title": "Groceries"' in response.text
     assert stored(client, alice, conversation_id)["held_proposal"]["title"] == "Groceries"
+    # The note has done its job: the next round answers without it.
+    first, second = fake_llm.chat_requests
+    assert held_proposal_note(HELD) in system_notes(first)
+    assert system_notes(second) == [SYSTEM_PROMPT]
 
 
 # --- 7.6 the forced proposal call ---
