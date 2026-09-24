@@ -34,9 +34,9 @@
 
 ## 6. Frontend session and proxy
 
-- [ ] 6.1 Add `lib/session.ts` with the sealed, chunked `ff_session` cookie under `SESSION_SECRET`. Check with Vitest that a sealed cookie round-trips, that a tampered one is refused, that a large token is chunked and restored, and that the cookie is HttpOnly, Secure, and SameSite=Lax
-- [ ] 6.2 Replace `auth0.getAccessToken()` in the API proxy with `getBackendCredential()`, renewing tokens that expire within 60 seconds. Check with Vitest that a valid session forwards the ID token, that an expiring one is renewed first, that a failed renewal clears the cookie and gives 401 `unauthenticated` without calling the backend, and that the existing proxy tests pass
-- [ ] 6.3 Rewrite `proxy.ts` without the Auth0 middleware: public paths, login redirects per mode, and demo session start. Check with Vitest that a logged-out user on `/app` goes to `/auth/login` with `returnTo` in `oidc` mode and to `/login` in `firebase` mode, and that demo mode starts a session instead
+- [x] 6.1 Add `lib/session.ts` with the sealed, chunked `ff_session` cookie under `SESSION_SECRET`. Check with Vitest that a sealed cookie round-trips, that a tampered one is refused, that a large token is chunked and restored, and that the cookie is HttpOnly, Secure, and SameSite=Lax
+- [x] 6.2 Replace `auth0.getAccessToken()` in the API proxy with `getBackendCredential()`, renewing tokens that expire within 60 seconds. Check with Vitest that a valid session forwards the ID token, that an expiring one is renewed first, that a failed renewal clears the cookie and gives 401 `unauthenticated` without calling the backend, and that the existing proxy tests pass
+- [x] 6.3 Rewrite `proxy.ts` without the Auth0 middleware: public paths, login redirects per mode, and demo session start. Check with Vitest that a logged-out user on `/app` goes to `/auth/login` with `returnTo` in `oidc` mode and to `/login` in `firebase` mode, and that demo mode starts a session instead
 
 ## 7. OIDC login
 

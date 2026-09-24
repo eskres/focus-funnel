@@ -2,6 +2,17 @@
 // server's environment at run time, never from a build-time public variable, so
 // one build serves every mode. The backend runs the same checks.
 
+import { refreshFirebaseSession } from "@/lib/firebase-server";
+import { refreshOidcSession } from "@/lib/oidc";
+import {
+  DEMO_SESSION_COOKIE,
+  clearSessionCookies,
+  readCookies,
+  readSession,
+  sessionCookies,
+  type Session,
+} from "@/lib/session";
+
 export const AUTH_MODES = ["oidc", "firebase", "demo"] as const;
 export type AuthMode = (typeof AUTH_MODES)[number];
 
@@ -181,4 +192,85 @@ export function readAuthConfig(env: Env = process.env): AuthConfig {
 /** The auth settings of this server process, read from its environment. */
 export function getAuthConfig(): AuthConfig {
   return readAuthConfig(process.env);
+}
+
+// --- The credential the API proxy sends to the backend ---------------------------
+
+// Renew a token that expires within this many seconds.
+export const RENEW_BEFORE_SECONDS = 60;
+// Parallel calls with the same refresh token share one renewal, so a provider
+// that rotates refresh tokens does not see the old one twice.
+const RENEWAL_REUSE_MS = 30_000;
+const renewals = new Map<string, Promise<Session>>();
+
+export type BackendCredential =
+  | { credential: string; setCookies: string[] }
+  | { response: Response };
+
+function errorResponse(status: number, code: string, message: string, setCookies: string[] = []) {
+  const headers = new Headers();
+  for (const cookie of setCookies) headers.append("set-cookie", cookie);
+  return Response.json({ error: { code, message } }, { status, headers });
+}
+
+export const unauthenticatedResponse = (setCookies: string[] = []) =>
+  errorResponse(401, "unauthenticated", "Log in to continue.", setCookies);
+
+function renew(config: AuthConfig, session: Session): Promise<Session> {
+  const refreshToken = session.refreshToken!;
+  const existing = renewals.get(refreshToken);
+  if (existing) return existing;
+  const renewal =
+    config.mode === "oidc"
+      ? refreshOidcSession(config.oidc!, refreshToken)
+      : refreshFirebaseSession(config.firebase!, refreshToken);
+  renewals.set(refreshToken, renewal);
+  const forget = () => setTimeout(() => renewals.delete(refreshToken), RENEWAL_REUSE_MS).unref?.();
+  renewal.then(forget, () => renewals.delete(refreshToken));
+  return renewal;
+}
+
+/**
+ * The credential for a backend call: the ID token in oidc and firebase modes,
+ * renewed first when it expires within a minute, or the demo session value.
+ * Tokens stay on this server; the browser only holds sealed cookies.
+ */
+export async function getBackendCredential(
+  request: Request,
+  config: AuthConfig = getAuthConfig(),
+): Promise<BackendCredential> {
+  if (config.mode === "demo") {
+    const value = readCookies(request).get(DEMO_SESSION_COOKIE);
+    return value ? { credential: value, setCookies: [] } : { response: unauthenticatedResponse() };
+  }
+
+  const session = await readSession(request, config.sessionSecret);
+  if (!session || session.mode !== config.mode) {
+    return { response: unauthenticatedResponse() };
+  }
+  if (session.expiresAt - Date.now() / 1000 > RENEW_BEFORE_SECONDS) {
+    return { credential: session.idToken, setCookies: [] };
+  }
+  if (!session.refreshToken) {
+    // Without a refresh token the session ends with the ID token.
+    return { response: unauthenticatedResponse(clearSessionCookies(request)) };
+  }
+  try {
+    const renewed = await renew(config, session);
+    return {
+      credential: renewed.idToken,
+      setCookies: await sessionCookies(request, renewed, config.sessionSecret),
+    };
+  } catch (error) {
+    console.warn("Could not renew the login token; the user must log in again", {
+      mode: config.mode,
+      reason: error instanceof Error ? error.name : "unknown",
+    });
+    return { response: unauthenticatedResponse(clearSessionCookies(request)) };
+  }
+}
+
+/** Forgets renewals in flight (tests start each case fresh). */
+export function resetRenewals() {
+  renewals.clear();
 }
