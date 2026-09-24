@@ -55,8 +55,9 @@ function formatDate(iso: string | undefined): string {
 }
 
 function redirectToLogin() {
-  // /auth/login is an Auth0 SDK route served by proxy.ts, not a Next.js page,
-  // so it needs a full browser navigation rather than a client-side route change.
+  // /auth/login is a route handler, not a page, so it needs a full browser
+  // navigation rather than a client-side route change. It sends the user to
+  // the login of the server's auth mode.
   window.location.assign(new URL("/auth/login?returnTo=/settings", window.location.origin));
 }
 

@@ -40,8 +40,8 @@
 
 ## 7. OIDC login
 
-- [ ] 7.1 Add `/auth/login`, `/auth/callback`, and `/auth/logout` with `openid-client`, PKCE, state, and nonce. Check with Vitest against a mocked provider that a good callback starts a session and returns to `returnTo`, that a wrong state or nonce or a provider error shows the "login did not complete" page, and that logout clears the cookie and redirects to `end_session_endpoint` when present
-- [ ] 7.2 Add the "not allowed" page from the callback's allow-list check. Check with Vitest that an unlisted address sees it and gets no session
+- [x] 7.1 Add `/auth/login`, `/auth/callback`, and `/auth/logout` with `openid-client`, PKCE, state, and nonce. Check with Vitest against a mocked provider that a good callback starts a session and returns to `returnTo`, that a wrong state or nonce or a provider error shows the "login did not complete" page, and that logout clears the cookie and redirects to `end_session_endpoint` when present
+- [x] 7.2 Add the "not allowed" page from the callback's allow-list check. Check with Vitest that an unlisted address sees it and gets no session
 
 ## 8. Firebase login
 
