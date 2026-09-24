@@ -49,6 +49,9 @@ class ProviderPreset:
     # the provider serves its model list without a key, so listing models
     # cannot tell a wrong key from a right one. None means "list models".
     key_check_url: str | None = None
+    # Where the user sees their balance and spend, when the provider has such
+    # a page. The app cannot read the balance through an API key.
+    console_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -186,6 +189,14 @@ def _parse_preset(preset_id: str, raw: object) -> ProviderPreset:
             f"Provider '{preset_id}' 'key_check_url' must be an http or https URL"
         )
 
+    console_url = raw.get("console_url")
+    if console_url is not None and (
+        not isinstance(console_url, str) or urlparse(console_url).scheme not in ("http", "https")
+    ):
+        raise ProviderConfigError(
+            f"Provider '{preset_id}' 'console_url' must be an http or https URL"
+        )
+
     return ProviderPreset(
         id=preset_id,
         label=label,
@@ -195,6 +206,7 @@ def _parse_preset(preset_id: str, raw: object) -> ProviderPreset:
         key_required=key_required,
         capabilities=capabilities,
         key_check_url=key_check_url,
+        console_url=console_url,
     )
 
 

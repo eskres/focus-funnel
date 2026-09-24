@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.chat.config import ChatConfig
 from app.chat.loadout import temperature_for
 from app.chat.model_call import open_model_call
+from app.chat.usage import completion_usage, record_usage
 from app.config import Settings
 from app.errors import ApiError, ErrorCode, model_unsupported
 from app.models import User
@@ -58,6 +59,7 @@ async def run_model_test(
     )
     try:
         answer = await call.complete([{"role": "user", "content": TEST_PROMPT}])
+        await record_usage(session, call, "test", *completion_usage(answer))
         choice = answer.choices[0] if answer.choices else None
         if choice is None or not (choice.message.content or "").strip():
             raise empty_answer(model, effort)
@@ -65,6 +67,7 @@ async def run_model_test(
         probe = await call.complete(
             [{"role": "user", "content": PROBE_PROMPT}], tools=[PROBE_TOOL]
         )
+        await record_usage(session, call, "test", *completion_usage(probe))
         called = probe.choices and probe.choices[0].message.tool_calls
         if not called:
             raise model_unsupported(model, "tool calling: it ignored the probe tool")

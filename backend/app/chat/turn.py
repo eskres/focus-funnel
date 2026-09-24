@@ -17,6 +17,7 @@ from app.chat.conversations import next_position
 from app.chat.model_call import ModelCall
 from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, TOOLS, tool_arguments
 from app.chat.sse import Event
+from app.chat.usage import record_usage, usage_warning
 from app.chat.tools import (
     PROPOSAL_SHOWN,
     ToolArgumentError,
@@ -25,6 +26,7 @@ from app.chat.tools import (
 )
 from app.errors import ApiError, output_limit_reached, tool_loop_limit
 from app.models import Conversation, Message, User
+from app.provider_config import StreamUsage
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +57,18 @@ class RoundState:
         ]
 
 
-async def read_round(chunks: AsyncIterator[Any], state: RoundState) -> AsyncIterator[Event]:
+async def read_round(
+    chunks: AsyncIterator[Any], state: RoundState, stream_usage: StreamUsage = "final_chunk"
+) -> AsyncIterator[Event]:
     """Forward text as it arrives and collect tool-call pieces.
 
     The reasoning field is ignored. A chunk may carry no choices (the final
-    usage chunk), so each field is read only when present.
+    usage chunk), so each field is read only when present. Usage is read as
+    the provider reports it: on a final chunk, or on every chunk, where the
+    last report counts. A provider that reports none is not read.
     """
     async for chunk in chunks:
-        usage = getattr(chunk, "usage", None)
+        usage = getattr(chunk, "usage", None) if stream_usage != "none" else None
         if usage is not None:
             state.prompt_tokens = usage.prompt_tokens
             state.completion_tokens = usage.completion_tokens
@@ -138,12 +144,15 @@ class Turn:
 
             state = RoundState()
             try:
-                async for event in read_round(chunks, state):
+                async for event in read_round(
+                    chunks, state, self.call.provider.capabilities.stream_usage
+                ):
                     yield event
             except Exception as exc:
                 await self._store_failed(state, exc)
                 raise
-            self._note_usage(state)
+            async for event in self._note_usage(state):
+                yield event
 
             calls = state.tool_calls()
             if not calls:
@@ -173,9 +182,23 @@ class Turn:
             await self.session.commit()
         raise tool_loop_limit()
 
-    def _note_usage(self, state: RoundState) -> None:
+    async def _note_usage(self, state: RoundState) -> AsyncIterator[Event]:
+        """Record the round's usage, and send the usage warning when it is due."""
         if state.prompt_tokens is not None:
             self.conversation.last_prompt_tokens = state.prompt_tokens
+        recorded = await record_usage(
+            self.session,
+            self.call,
+            "chat",
+            state.prompt_tokens,
+            state.completion_tokens,
+            self.conversation.id,
+        )
+        if recorded is None:
+            return
+        notice = await usage_warning(self.session, self.user.id)
+        if notice is not None:
+            yield ("notice", notice)
 
     async def _store_failed(self, state: RoundState, exc: Exception) -> None:
         try:

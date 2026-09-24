@@ -71,11 +71,11 @@
 
 ## 9. Usage tracking
 
-- [ ] 9.1 Add the helper that records a `usage_events` row after every model call (chat rounds, `/compact`, forced proposals, tests). Check with pytest that each kind records its tokens and model and that no record holds message text
-- [ ] 9.2 Calculate the estimated cost from the per-token prices at the time of the call. Check with pytest for a priced model, an unpriced model recording an unknown cost with tokens, and a call with no reported tokens recording nothing
-- [ ] 9.3 Add `GET /api/usage` returning daily totals, the split by model, and the month to date. Check with pytest for ordering, the period parameter, an empty result, and that another user's records never appear
-- [ ] 9.4 Add the warning threshold to the model settings API and emit a `usage_warning` notice once per month when it is reached. Check with pytest for a dollar threshold, a token threshold, no repeat in the same month, a repeat in the next month, and no notice when none is set
-- [ ] 9.5 Read streamed usage according to each provider's `stream_usage` capability from `model-providers`. Check with pytest against `FakeProvider` that a final chunk is recorded, that incremental reports record the last value, and that a provider with no usage records the cost as unknown
+- [x] 9.1 Add the helper that records a `usage_events` row after every model call (chat rounds, `/compact`, forced proposals, tests). Check with pytest that each kind records its tokens and model and that no record holds message text
+- [x] 9.2 Calculate the estimated cost from the per-token prices at the time of the call. Check with pytest for a priced model, an unpriced model recording an unknown cost with tokens, and a call with no reported tokens recording nothing
+- [x] 9.3 Add `GET /api/usage` returning daily totals, the split by model, and the month to date. Check with pytest for ordering, the period parameter, an empty result, and that another user's records never appear
+- [x] 9.4 Add the warning threshold to the model settings API and emit a `usage_warning` notice once per month when it is reached. Check with pytest for a dollar threshold, a token threshold, no repeat in the same month, a repeat in the next month, and no notice when none is set
+- [x] 9.5 Read streamed usage according to each provider's `stream_usage` capability from `model-providers`. Check with pytest against `FakeProvider` that a final chunk is recorded, that incremental reports record the last value, and that a provider with no usage records the cost as unknown
 
 ## 10. Frontend: conversations and chat
 

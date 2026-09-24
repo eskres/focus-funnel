@@ -3,6 +3,7 @@ providers:
     label: Nebius Token Factory
     base_url: https://api.tokenfactory.nebius.com/v1/
     key_url: https://tokenfactory.nebius.com/project/api-keys
+    console_url: https://tokenfactory.nebius.com/
     notice: Nebius does not use your prompts or outputs to train models.
     key_required: true
     capabilities:

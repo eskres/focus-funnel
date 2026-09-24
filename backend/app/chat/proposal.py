@@ -6,6 +6,7 @@ model is called.
 """
 
 import logging
+import uuid
 from typing import Any
 
 import httpx2
@@ -17,6 +18,7 @@ from app.chat.loadout import get_default_model, temperature_for
 from app.chat.model_call import ModelCall, open_model_call
 from app.chat.prompt import PROPOSE_TOOL, TOOLS, build_context, forced_tool, tool_arguments
 from app.chat.tools import ToolArgumentError, parse_proposal
+from app.chat.usage import completion_usage, record_usage
 from app.config import Settings
 from app.errors import model_not_set
 from app.models import Conversation, User
@@ -25,11 +27,16 @@ from app.providers import provider_for_user
 logger = logging.getLogger(__name__)
 
 
-async def forced_proposal(call: ModelCall, context: list[dict[str, Any]]) -> dict[str, Any] | None:
+async def forced_proposal(
+    session: AsyncSession,
+    call: ModelCall,
+    context: list[dict[str, Any]],
+    conversation_id: uuid.UUID | None = None,
+) -> dict[str, Any] | None:
     """Ask the model for a proposal. Returns its title, summary, and tags, or
     None when the model's arguments do not make a proposal."""
     completion = await call.complete(context, tools=TOOLS, tool_choice=forced_tool(PROPOSE_TOOL))
-    # Milestone 3 records this call's usage here, with kind "proposal".
+    await record_usage(session, call, "proposal", *completion_usage(completion), conversation_id)
     choices = completion.choices or []
     tool_calls = (choices[0].message.tool_calls if choices else None) or []
     for tool_call in tool_calls:
@@ -79,7 +86,7 @@ async def offer_proposal(
         http_client=http_client,
     )
     try:
-        proposal = await forced_proposal(call, build_context(messages))
+        proposal = await forced_proposal(session, call, build_context(messages), conversation.id)
     finally:
         await call.aclose()
     if proposal is None:

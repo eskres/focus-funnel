@@ -4,6 +4,7 @@ A call never falls back to another model. A provider error is mapped to a
 spec error that names the model; an unmapped one is raised as it is.
 """
 
+import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -15,9 +16,11 @@ from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.chat.model_info import cached_model
 from app.errors import ApiError, model_unsupported
 from app.models import User
 from app.provider_config import ProviderPreset
+from app.provider_models import ModelItem
 from app.providers import client_for, map_provider_error
 
 # A reasoning model may think for a while before its first token.
@@ -43,6 +46,17 @@ class ModelCall:
     max_tokens: int
     reasoning_effort: str | None
     client: AsyncOpenAI
+    user_id: uuid.UUID | None = None
+
+    @property
+    def reports_usage(self) -> bool:
+        return self.provider.capabilities.stream_usage != "none"
+
+    async def info(self) -> ModelItem | None:
+        """The model's listed context length and prices, from the per-user cache."""
+        if self.user_id is None:
+            return None
+        return await cached_model(self.user_id, self.provider, self.model, self.client)
 
     def request(self, messages: Messages, **extra: Any) -> dict[str, Any]:
         request: dict[str, Any] = {
@@ -88,11 +102,12 @@ class ModelCall:
         Iterating the result raises the ones that arrive after it.
         """
         with_tools = "tools" in extra
+        # A provider that reports no usage in a stream is not asked for it.
+        if self.reports_usage:
+            extra = {"stream_options": {"include_usage": True}, **extra}
         with self.mapping_errors(with_tools=with_tools):
             response = await self.client.chat.completions.create(
-                **self.request(
-                    messages, stream=True, stream_options={"include_usage": True}, **extra
-                )
+                **self.request(messages, stream=True, **extra)
             )
 
         async def chunks() -> AsyncIterator[Any]:
@@ -135,4 +150,5 @@ async def open_model_call(
         max_tokens=max_tokens,
         reasoning_effort=reasoning_effort,
         client=client,
+        user_id=user.id,
     )
