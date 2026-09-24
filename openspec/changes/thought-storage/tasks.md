@@ -40,7 +40,7 @@
 
 ## 7. Rebuild job
 
-- [ ] 7.1 Add `python -m app.reembed` from design decision 12. Check with pytest on Postgres, calling its main function, each `embedding-management` rebuild scenario: one user rebuilt with a new model covers every thought and the old index is retired with its entries deleted, search during the build uses the old index, a thought stored and one deleted during the build are right in the new one, a user without a key keeps the old index and the job exits non-zero after doing the others, demo users are skipped, and a leftover `building` index is refused without `--restart` and replaced with it
+- [x] 7.1 Add `python -m app.reembed` from design decision 12. Check with pytest on Postgres, calling its main function, each `embedding-management` rebuild scenario: one user rebuilt with a new model covers every thought and the old index is retired with its entries deleted, search during the build uses the old index, a thought stored and one deleted during the build are right in the new one, a user without a key keeps the old index and the job exits non-zero after doing the others, demo users are skipped, and a leftover `building` index is refused without `--restart` and replaced with it
 - [ ] 7.2 Write `docs/search.md`: the pgvector requirement, choosing the embedding provider, model, and dimensions, what users need (their own key for that provider, and search by words without it), the tuning in `chat.yaml` and how to rerun the evaluation, and when and how to run the rebuild, including after a model is retired. Link it from the README. Check by following it in task 9.3
 
 ## 8. Deleting a user's data
