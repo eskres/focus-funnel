@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     # Demo mode forces it off.
     allow_custom_provider: bool = True
 
+    # The embedding model that builds new search indexes, called with each
+    # user's own key for this provider. An existing index keeps the model it
+    # was built with until the operator rebuilds it (python -m app.reembed).
+    embedding_provider: str = "nebius"
+    # Provisional until the embedding probe (thought-storage task 1.1).
+    embedding_model: str = "Qwen/Qwen3-Embedding-8B"
+    # Sent as `dimensions` to models that can shorten their vectors.
+    embedding_dimensions: int | None = Field(default=None, gt=0)
+
     auth_mode: str | None = None
     oidc_issuer: str | None = None
     oidc_client_id: str | None = None
@@ -72,6 +81,24 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             value = value.strip()
             return value or None
+        return value
+
+    @field_validator("embedding_provider", "embedding_model")
+    @classmethod
+    def embedding_setting_required(cls, value: str, info) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError(f"{info.field_name.upper()} must not be empty")
+        return value
+
+    @field_validator("embedding_provider")
+    @classmethod
+    def embedding_provider_not_custom(cls, value: str) -> str:
+        if value.lower() == "custom":
+            raise ValueError(
+                "EMBEDDING_PROVIDER cannot be custom: its address differs per user. "
+                "Choose a preset from providers.yaml"
+            )
         return value
 
     @model_validator(mode="after")

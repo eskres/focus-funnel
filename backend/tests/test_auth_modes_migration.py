@@ -3,6 +3,7 @@ import uuid
 
 from tests.test_provider_key_migration import run_alembic
 
+# Later revisions exist, so these tests stop at auth-modes to test it alone.
 # The revision before auth-modes, where users still have auth0_sub.
 BEFORE = "7c2e4f9a1d35"
 REVISION = "a97e96671d5c"
@@ -12,18 +13,11 @@ def columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
-def test_single_head_is_this_revision():
-    res = run_alembic("sqlite+aiosqlite:///:memory:", "heads")
-    assert res.returncode == 0, res.stderr
-    heads = [line for line in res.stdout.splitlines() if line.strip()]
-    assert heads == [f"{REVISION} (head)"]
-
-
 def test_upgrade_and_downgrade_on_an_empty_database(tmp_path):
     db_file = tmp_path / "empty.sqlite3"
     db_url = f"sqlite+aiosqlite:///{db_file}"
 
-    res = run_alembic(db_url, "upgrade", "head")
+    res = run_alembic(db_url, "upgrade", REVISION)
     assert res.returncode == 0, res.stderr
     with sqlite3.connect(db_file) as conn:
         assert columns(conn, "users") == {
@@ -37,7 +31,7 @@ def test_upgrade_and_downgrade_on_an_empty_database(tmp_path):
         schema = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'users'").fetchone()[0]
         assert "uq_users_auth0_sub UNIQUE (auth0_sub)" in schema
 
-    res = run_alembic(db_url, "upgrade", "head")
+    res = run_alembic(db_url, "upgrade", REVISION)
     assert res.returncode == 0, res.stderr
 
 
@@ -67,7 +61,7 @@ def test_existing_row_survives_as_auth0_legacy_and_the_downgrade(tmp_path):
             (uuid.uuid4().bytes, legacy_id),
         )
 
-    res = run_alembic(db_url, "upgrade", "head")
+    res = run_alembic(db_url, "upgrade", REVISION)
     assert res.returncode == 0, res.stderr
     with sqlite3.connect(db_file) as conn:
         rows = conn.execute("SELECT id, issuer, subject, expires_at FROM users").fetchall()

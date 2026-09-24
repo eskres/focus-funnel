@@ -35,3 +35,29 @@ efforts:
       efforts: [none]   # probed: empty answers on 10 of 10 calls
     - match: openai/gpt-oss-*
       efforts: [none, minimal]   # refused by the provider
+
+# Thought search (openspec thought-storage, design decisions 5, 7, and 8).
+# The similarity and keyword thresholds are provisional until the evaluation
+# in task 6.4 sets them: rerun backend/scripts/search_eval.py after changing
+# the embedding model.
+search:
+  # Most results returned, and candidates taken from each ranking before
+  # they are merged.
+  limit: 8
+  candidates: 50
+  # Reciprocal rank fusion constant: a larger value flattens the ranking.
+  rrf_k: 60
+  # A thought passes if its cosine similarity reaches this, or it matches by
+  # words (every query word, or a rank of at least min_keyword_rank).
+  # Similarity scales differ per model, so rules can override the default;
+  # the first matching rule wins (shell-style wildcards on the model id).
+  min_similarity:
+    default: 0.35
+    models: []
+  min_keyword_rank: 0.1
+  # Missing embeddings filled in per request, within the call it makes anyway.
+  backfill_batch: 16
+  # The search tool's result for the model: about 4 characters a token.
+  budget_chars: 2400
+  summary_chars: 400
+  excerpt_chars: 240
