@@ -20,9 +20,10 @@ async def delete_user_data(session: AsyncSession, user: User) -> None:
 async def delete_user_content(session: AsyncSession, user: User) -> None:
     """Delete the user's thoughts, search indexes, and conversations, in one transaction.
 
-    Search entries cascade from thoughts and indexes, and messages from
-    conversations. Usage records stay, with their conversation link cleared.
-    The account, provider keys, and model settings stay too.
+    Search entries cascade from thoughts and indexes, and messages and
+    proposals from conversations. Usage records stay, with their conversation
+    link cleared. The account, provider keys, model settings, and added
+    categories stay too: categories are settings.
     """
     await session.execute(delete(Thought).where(Thought.user_id == user.id))
     await session.execute(delete(SearchIndex).where(SearchIndex.user_id == user.id))

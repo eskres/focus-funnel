@@ -17,7 +17,9 @@ from app.routers import (
     health,
     me,
     providers,
+    settings_categories,
     settings_models,
+    thoughts,
     usage,
 )
 from app.thoughts import check_vector_extension
@@ -52,6 +54,8 @@ app.include_router(me.router)
 app.include_router(demo.router)
 app.include_router(providers.router)
 app.include_router(settings_models.router)
+app.include_router(settings_categories.router)
 app.include_router(conversations.router)
 app.include_router(chat.router)
+app.include_router(thoughts.router)
 app.include_router(usage.router)

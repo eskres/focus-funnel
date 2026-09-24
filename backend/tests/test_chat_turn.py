@@ -10,7 +10,7 @@ from sqlalchemy import select, update
 
 import app.chat.turn as turn_module
 from app.chat.prompt import system_prompt, build_context
-from app.chat.tools import SearchToolResult
+from app.chat.tools import NO_MATCH, SearchToolResult
 from app.errors import ErrorCode
 from app.models import Conversation, Message
 from tests.chat_helpers import (
@@ -55,6 +55,12 @@ def stored(client, headers, conversation_id) -> dict:
 
 
 PROPOSAL = {"title": "Oat milk", "summary": "Buy oat milk tomorrow.", "tags": ["shopping"]}
+# The flat call above, as the stored part it becomes.
+PART = {**PROPOSAL, "category": None, "thought_id": None}
+
+
+def proposed_parts(response) -> list[list[dict]]:
+    return [event["parts"] for event in events_of(response, "proposal")]
 
 
 # --- 6.2 the context ---
@@ -213,7 +219,7 @@ def test_a_tool_result_reaches_the_next_call(client, alice, fake_llm):
     assert second[-2]["tool_calls"][0]["id"] == "call_abc"
     assert second[-1]["role"] == "tool"
     assert second[-1]["tool_call_id"] == "call_abc"
-    assert second[-1]["content"] == "No filed thoughts match."
+    assert second[-1]["content"] == NO_MATCH
     assert names(response) == ["conversation", "tool", "tool", "delta", "done"]
 
 
@@ -248,7 +254,7 @@ def test_malformed_arguments_go_back_as_a_tool_error_for_a_retry(client, alice, 
 
     retry = fake_llm.chat_requests[1]["messages"][-1]
     assert retry["role"] == "tool" and retry["content"].startswith("Error:")
-    assert events_of(response, "proposal") == [PROPOSAL]
+    assert proposed_parts(response) == [[PART]]
     assert names(response)[-1] == "done"
 
 
@@ -392,7 +398,7 @@ def test_push_forces_the_proposal_tool(client, alice, fake_llm):
     assert first["messages"][-1] == {"role": "user", "content": "buy oat milk"}
     assert "tool_choice" not in second
     # A forced call ends with finish_reason stop, and its tool call still runs.
-    assert events_of(response, "proposal") == [PROPOSAL]
+    assert proposed_parts(response) == [[PART]]
 
 
 def test_pull_forces_the_search_tool(client, alice, fake_llm):
@@ -735,10 +741,14 @@ def test_a_valid_proposal_is_emitted_and_held_and_nothing_is_saved(
     response = chat(client, alice, "I need to buy oat milk tomorrow")
 
     assert names(response) == ["conversation", "tool", "proposal", "tool", "delta", "done"]
-    assert events_of(response, "proposal") == [PROPOSAL]
+    [event] = events_of(response, "proposal")
+    assert event["parts"] == [PART]
+    assert event["position"] == 2
     body = stored(client, alice, conversation_id_of(response))
-    assert body["held_proposal"] == {**PROPOSAL, "position": 1}
+    assert body["held_proposal_id"] == event["id"]
     assert [m["role"] for m in body["messages"]] == ["user", "assistant", "tool", "assistant"]
+    assert body["messages"][2]["details"] == {"proposal_id": event["id"]}
+    assert body["proposals"] == [event]
 
 
 @pytest.mark.parametrize(
@@ -747,6 +757,10 @@ def test_a_valid_proposal_is_emitted_and_held_and_nothing_is_saved(
         {"title": "", "summary": "x", "tags": []},
         {"title": "x", "tags": []},
         {"title": "x", "summary": "y", "tags": "shopping"},
+        {"thoughts": []},
+        {"thoughts": [{"title": f"t{n}", "summary": "s", "tags": []} for n in range(9)]},
+        {"thoughts": [{"title": "a", "summary": "s", "tags": []}, {"summary": "s", "tags": []}]},
+        {"summary": "no title", "tags": []},
     ],
 )
 def test_invalid_proposal_arguments_are_refused(client, alice, fake_llm, arguments):
@@ -759,7 +773,64 @@ def test_invalid_proposal_arguments_are_refused(client, alice, fake_llm, argumen
 
     assert events_of(response, "proposal") == []
     assert fake_llm.chat_requests[1]["messages"][-1]["content"].startswith("Error:")
-    assert stored(client, alice, conversation_id_of(response))["held_proposal"] is None
+    body = stored(client, alice, conversation_id_of(response))
+    assert body["held_proposal_id"] is None
+    assert body["proposals"] == []
+
+
+def test_a_list_of_three_gives_three_parts(client, alice, fake_llm):
+    ready_user(client, alice)
+    thoughts = [
+        {"title": "Oat milk", "summary": "Buy oat milk.", "tags": ["groceries"], "category": "task"},
+        {"title": "Dentist", "summary": "Book the dentist.", "tags": ["health"], "category": "Task"},
+        {"title": "Map podcast", "summary": "A podcast about maps.", "tags": [], "category": "idea"},
+    ]
+    fake_llm.queue(
+        tool_call_chunks("propose_thought", json.dumps({"thoughts": thoughts})), text_chunks("Three.")
+    )
+
+    response = chat(client, alice, "/push buy oat milk, book the dentist, and idea: a podcast about maps")
+
+    [parts] = proposed_parts(response)
+    assert [(p["title"], p["category"], p["thought_id"]) for p in parts] == [
+        ("Oat milk", "task", None),
+        ("Dentist", "task", None),
+        ("Map podcast", "idea", None),
+    ]
+
+
+def test_an_unknown_category_becomes_none(client, alice, fake_llm):
+    ready_user(client, alice)
+    thought = {"title": "Eggs", "summary": "Buy eggs.", "tags": [], "category": "shopping"}
+    fake_llm.queue(
+        tool_call_chunks("propose_thought", json.dumps({"thoughts": [thought]})), text_chunks("Ok.")
+    )
+
+    response = chat(client, alice, "/push buy eggs")
+
+    assert proposed_parts(response)[0][0]["category"] is None
+
+
+def propose_schema(request: dict) -> dict:
+    [tool] = [t for t in request["tools"] if t["function"]["name"] == "propose_thought"]
+    return tool["function"]["parameters"]["properties"]["thoughts"]["items"]["properties"]
+
+
+def test_the_tool_lists_the_users_own_categories_only(client, alice, bob, fake_llm):
+    ready_user(client, alice)
+    ready_user(client, bob)
+    client.post("/api/settings/categories", headers=alice, json={"name": "Recipe"})
+    fake_llm.queue(text_chunks("Hi."), text_chunks("Hi."))
+
+    chat(client, alice, "hello")
+    chat(client, bob, "hello")
+
+    alice_request, bob_request = fake_llm.chat_requests
+    fixed = ["task", "idea", "decision", "note", "reference"]
+    assert propose_schema(alice_request)["category"]["enum"] == [*fixed, "recipe"]
+    assert propose_schema(bob_request)["category"]["enum"] == fixed
+    # No thoughts, so no known tags: the plain description.
+    assert propose_schema(alice_request)["tags"]["description"] == "A few short tags."
 
 
 # --- the search tool (thought-storage 6.2 has the tests with stored thoughts) ---
@@ -771,7 +842,7 @@ def test_the_search_result_reaches_the_model(client, alice, fake_llm):
 
     chat(client, alice, "what did I say about rent?")
 
-    assert fake_llm.chat_requests[1]["messages"][-1]["content"] == "No filed thoughts match."
+    assert fake_llm.chat_requests[1]["messages"][-1]["content"] == NO_MATCH
     assert fake_llm.embed_requests == []
 
 

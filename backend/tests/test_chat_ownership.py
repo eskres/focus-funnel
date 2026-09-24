@@ -2,6 +2,8 @@
 or changed by another user. Reading another user's usage is covered in
 test_usage.py."""
 
+import uuid
+
 from sqlalchemy import select
 
 from app.errors import ErrorCode
@@ -61,9 +63,9 @@ def test_another_user_cannot_change_or_delete_a_conversation(client, alice, bob,
         chat(client, bob, "/compact", conversation_id),
         client.delete(f"/api/conversations/{conversation_id}", headers=bob),
         client.post(
-            f"/api/conversations/{conversation_id}/proposal/confirm",
+            f"/api/conversations/{conversation_id}/proposals/{uuid.uuid4()}/confirm",
             headers=bob,
-            json={"title": "t", "summary": "s", "tags": []},
+            json={"parts": [0], "title": "t", "summary": "s", "tags": []},
         ),
         chat(client, bob, "add to it", conversation_id),
     ]
@@ -74,7 +76,8 @@ def test_another_user_cannot_change_or_delete_a_conversation(client, alice, bob,
     assert body["title"] == "a secret plan"
     assert body["archived"] is False
     assert body["model"] == NANO
-    assert body["held_proposal"] is None
+    assert body["held_proposal_id"] is None
+    assert body["proposals"] == []
     assert [m["content"] for m in body["messages"]] == ["a secret plan", "Hi Alice."]
     assert not any(m["compacted"] for m in body["messages"])
     assert len(fake_llm.chat_requests) == model_calls

@@ -36,6 +36,12 @@ efforts:
     - match: openai/gpt-oss-*
       efforts: [none, minimal]   # refused by the provider
 
+# Filing thoughts (openspec push-and-pull, design decision 6).
+filing:
+  # The user's tags named in the proposal tool, most used first, so the model
+  # reuses them. About 100 tokens at 40.
+  known_tags: 40
+
 # Thought search (openspec thought-storage, design decisions 5, 7, and 8).
 # min_similarity is provisional until the evaluation in task 6.4 sets it:
 # rerun backend/scripts/search_eval.py after changing the embedding model.

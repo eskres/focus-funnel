@@ -33,6 +33,7 @@ def test_a_valid_file_loads():
     assert config.compact_keep_recent == 6
     assert config.model_hint
     assert config.documented_efforts == ("none", "minimal", "low", "medium", "high")
+    assert config.filing.known_tags == 40
 
 
 def test_the_shipped_file_loads():
@@ -50,6 +51,7 @@ def test_the_shipped_file_loads():
         "model_hint",
         "efforts",
         "search",
+        "filing",
     ],
 )
 def test_a_missing_value_fails_naming_it(tmp_path, key):
@@ -74,6 +76,8 @@ def test_a_missing_value_fails_naming_it(tmp_path, key):
             {"efforts": {"documented": ["low"], "unsupported": [{"match": "m", "efforts": ["max"]}]}},
             "efforts.unsupported",
         ),
+        ({"filing": {"known_tags": 0}}, "filing.known_tags"),
+        ({"filing": 40}, "filing"),
     ],
 )
 def test_an_out_of_range_value_fails_naming_it(tmp_path, change, name):

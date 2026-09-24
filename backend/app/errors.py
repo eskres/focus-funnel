@@ -36,6 +36,8 @@ class ErrorCode:
     DEMO_FULL = "demo_full"
     RATE_LIMITED = "rate_limited"
     EMBEDDING_MISMATCH = "embedding_mismatch"
+    CATEGORY_EXISTS = "category_exists"
+    PROPOSAL_PART_SAVED = "proposal_part_saved"
 
 
 class ApiError(Exception):

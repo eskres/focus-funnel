@@ -13,12 +13,14 @@ from app.models import (
     ChatModel,
     Conversation,
     Message,
+    Proposal,
     ProviderKey,
     SearchIndex,
     Thought,
     ThoughtEmbedding,
     UsageEvent,
     User,
+    UserCategory,
     UserSettings,
 )
 from app.user_data import delete_user_data
@@ -30,6 +32,8 @@ USER_OWNED = {
     Message: lambda user_id: Message.conversation_id.in_(
         select(Conversation.id).where(Conversation.user_id == user_id)
     ),
+    Proposal: lambda user_id: Proposal.user_id == user_id,
+    UserCategory: lambda user_id: UserCategory.user_id == user_id,
     ProviderKey: lambda user_id: ProviderKey.user_id == user_id,
     ChatModel: lambda user_id: ChatModel.user_id == user_id,
     UserSettings: lambda user_id: UserSettings.user_id == user_id,
@@ -60,6 +64,16 @@ async def add_everything(session, user: User) -> None:
     session.add_all(
         [
             Message(conversation_id=conversation.id, position=0, role="user", content="hi", status="complete"),
+            Proposal(
+                conversation_id=conversation.id,
+                user_id=user.id,
+                position=1,
+                from_position=0,
+                to_position=0,
+                raw_text="hi",
+                parts=[{"title": "t", "summary": "s", "tags": [], "category": None, "thought_id": None}],
+            ),
+            UserCategory(user_id=user.id, name="recipe"),
             ProviderKey(user_id=user.id, provider_id="nebius"),
             ChatModel(user_id=user.id, provider_id="nebius", model="m", is_default=True, position=0),
             UserSettings(user_id=user.id),

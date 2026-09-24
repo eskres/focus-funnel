@@ -8,6 +8,7 @@ from typing import Any
 from app.chat.commands import parse_message
 from app.errors import ApiError
 from app.models import Message
+from app.thoughts.categories import FIXED_CATEGORIES
 
 SEARCH_TOOL = "search_thoughts"
 PROPOSE_TOOL = "propose_thought"
@@ -24,10 +25,16 @@ names to look for, not a question. When the user names a time, such as this \
 month, also pass the start date; when they name a kind of thought, such as \
 work, also pass it as a tag.
 - propose_thought: propose a thought to file, with a short title, a summary, \
-and tags. Use it when the user states something clearly worth keeping, such \
-as a to-do or an idea, and when a discussion reaches a conclusion or a \
-decision. The summary keeps the key findings. The user reviews and edits the \
-proposal before anything is saved.
+tags, and a category. Use it when the user states something clearly worth \
+keeping, such as a to-do or an idea, and when a discussion reaches a \
+conclusion or a decision. The summary keeps the key findings, including your \
+points the user agreed with. When a message holds several separate things to \
+keep, propose each as its own entry in one call; otherwise propose one. The \
+user reviews and edits the proposal before anything is saved.
+
+Answer questions about filed thoughts only from what search_thoughts \
+returns. When it finds nothing, say so plainly, and never answer as if the \
+user had filed something.
 
 A to-do or an idea the user states is proposed right away. When the user \
 asks for help thinking something through, talk with them first and propose \
@@ -39,74 +46,113 @@ that look unfinished. When you cannot tell what the user wants, ask one short \
 question. Never suggest deleting a conversation."""
 
 
-TOOLS: list[dict[str, Any]] = [
-    {
-        "type": "function",
-        "function": {
-            "name": SEARCH_TOOL,
-            "description": (
-                "Search the thoughts the user filed before, by meaning and by words. "
-                "Returns the best matches, or says that none matched."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": (
-                            "The key words and names to look for, not a question. "
-                            "For example: 'dentist appointment' or 'ACME-4471 invoice'."
-                        ),
-                    },
-                    "tags": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Only thoughts with at least one of these tags.",
-                    },
-                    "since": {
-                        "type": "string",
-                        "description": "Only thoughts filed on or after this date, YYYY-MM-DD.",
-                    },
+SEARCH_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": SEARCH_TOOL,
+        "description": (
+            "Search the thoughts the user filed before, by meaning and by words. "
+            "Returns the best matches, or says that none matched."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "The key words and names to look for, not a question. "
+                        "For example: 'dentist appointment' or 'ACME-4471 invoice'."
+                    ),
                 },
-                "required": ["query"],
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Only thoughts with at least one of these tags.",
+                },
+                "since": {
+                    "type": "string",
+                    "description": "Only thoughts filed on or after this date, YYYY-MM-DD.",
+                },
             },
+            "required": ["query"],
         },
     },
-    {
+}
+
+MAX_PARTS = 8
+TAGS_DESCRIPTION = "A few short tags."
+
+
+def propose_tool_schema(categories: list[str], known_tags: list[str]) -> dict[str, Any]:
+    """The propose_thought tool for one user: their categories, and the tags they use."""
+    tags_description = TAGS_DESCRIPTION
+    if known_tags:
+        tags_description += (
+            " Reuse one of the user's tags where it fits: " + ", ".join(known_tags) + "."
+        )
+    part = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "A short title."},
+            "summary": {
+                "type": "string",
+                "description": (
+                    "A short summary of the key findings or the item, with the points "
+                    "the user agreed with."
+                ),
+            },
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": tags_description,
+            },
+            "category": {
+                "type": "string",
+                "enum": categories,
+                "description": "The kind of thought.",
+            },
+        },
+        "required": ["title", "summary", "tags", "category"],
+    }
+    return {
         "type": "function",
         "function": {
             "name": PROPOSE_TOOL,
             "description": (
-                "Propose a thought for the user to file. Nothing is saved until "
-                "the user confirms it."
+                "Propose thoughts for the user to file. Usually one. Give several only "
+                "when the text holds separate things to keep. Nothing is saved until the "
+                "user confirms."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "title": {"type": "string", "description": "A short title."},
-                    "summary": {
-                        "type": "string",
-                        "description": "A short summary of the key findings or the item.",
-                    },
-                    "tags": {
+                    "thoughts": {
                         "type": "array",
-                        "items": {"type": "string"},
-                        "description": "A few short tags.",
-                    },
+                        "items": part,
+                        "minItems": 1,
+                        "maxItems": MAX_PARTS,
+                        "description": "One entry per separate thing to keep.",
+                    }
                 },
-                "required": ["title", "summary", "tags"],
+                "required": ["thoughts"],
             },
         },
-    },
-]
+    }
+
+
+def tools_for(categories: list[str], known_tags: list[str]) -> list[dict[str, Any]]:
+    """The two tools, with the proposal tool built for one user."""
+    return [SEARCH_TOOL_SCHEMA, propose_tool_schema(categories, known_tags)]
+
+
+# The tools for a user with no added categories and no tags, for the model test.
+TOOLS: list[dict[str, Any]] = tools_for(list(FIXED_CATEGORIES), [])
 
 
 HELD_PROPOSAL_NOTE = """\
 A proposal from this conversation was shown to the user and is held until \
 they confirm it:
-Title: {title}
-Summary: {summary}
-Tags: {tags}
+{parts}
 
 Do not propose it again while the user keeps talking about it. Before you \
 answer, decide whether the user's latest message is still about this \
@@ -116,20 +162,30 @@ held proposal, updated with anything discussed since. Then answer the new \
 message."""
 
 
-def held_proposal_note(held_proposal: dict[str, Any]) -> str:
-    return HELD_PROPOSAL_NOTE.format(
-        title=held_proposal.get("title", ""),
-        summary=held_proposal.get("summary", ""),
-        tags=", ".join(held_proposal.get("tags") or []) or "none",
-    )
+def unsaved_parts(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [part for part in parts if not part.get("thought_id")]
 
 
-def drop_held_note(context: list[dict[str, Any]], held_proposal: dict[str, Any] | None) -> None:
+def held_proposal_note(parts: list[dict[str, Any]]) -> str:
+    """The note for a held proposal: its parts the user has not saved."""
+    blocks = [
+        "Title: {title}\nSummary: {summary}\nTags: {tags}\nCategory: {category}".format(
+            title=part.get("title", ""),
+            summary=part.get("summary", ""),
+            tags=", ".join(part.get("tags") or []) or "none",
+            category=part.get("category") or "none",
+        )
+        for part in unsaved_parts(parts)
+    ]
+    return HELD_PROPOSAL_NOTE.format(parts="\n\n".join(blocks))
+
+
+def drop_held_note(context: list[dict[str, Any]], held_parts: list[dict[str, Any]] | None) -> None:
     """Remove the held-proposal note once the turn has proposed, so the model
     does not follow the note again in the next round."""
-    if held_proposal is None:
+    if not held_parts:
         return
-    note = {"role": "system", "content": held_proposal_note(held_proposal)}
+    note = {"role": "system", "content": held_proposal_note(held_parts)}
     if note in context:
         context.remove(note)
 
@@ -171,11 +227,12 @@ def system_prompt(today: date | None = None) -> str:
 
 def build_context(
     messages: list[Message],
-    held_proposal: dict[str, Any] | None = None,
+    held_parts: list[dict[str, Any]] | None = None,
     today: date | None = None,
 ) -> list[dict[str, Any]]:
     """The system prompt, the latest summary if any, every message not
-    compacted, then the held-proposal note if a proposal is held. The note
+    compacted, then the held-proposal note if a proposal with unsaved parts
+    is held. The note
     comes last because the model follows it far more often there."""
     context: list[dict[str, Any]] = [{"role": "system", "content": system_prompt(today)}]
     summaries = [m for m in messages if m.role == "summary" and not m.compacted]
@@ -192,8 +249,8 @@ def build_context(
         converted = _as_model_message(message)
         if converted is not None:
             context.append(converted)
-    if held_proposal is not None:
-        context.append({"role": "system", "content": held_proposal_note(held_proposal)})
+    if held_parts and unsaved_parts(held_parts):
+        context.append({"role": "system", "content": held_proposal_note(held_parts)})
     return context
 
 
