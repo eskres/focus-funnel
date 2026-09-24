@@ -68,6 +68,15 @@ The operator sets `EMBEDDING_PROVIDER` (a preset id, default `nebius`), `EMBEDDI
 
 `embed_texts(session, user, provider_id, model, texts, *, kind, conversation_id=None)` builds the client with `client_for()`, so it uses only that user's key, and demo mode gets the held key as for chat. It calls `embeddings.create` with a 10-second timeout, maps errors with `map_provider_error(..., model_id=model)`, checks that every vector has the same length, and records one usage event of kind `embed` with the reported prompt tokens and no completion tokens. The cost uses the model list's prompt price when the provider lists one, else unknown. Texts go in batches of at most 64.
 
+**Probe (task 1.1, 2026-09-24).** Only a Nebius key was available; NVIDIA and OpenRouter are not probed yet. Nebius serves one embedding model:
+
+| Model | Works | Native size | `dimensions` honored | `usage.prompt_tokens` | In the model list with a price |
+|---|---|---|---|---|---|
+| `Qwen/Qwen3-Embedding-8B` | yes | 4096 | yes (1024 and 512 give those lengths) | yes (19 for two short texts) | yes, $0.01 per million prompt tokens, modality `text->embedding` |
+| `BAAI/bge-en-icl`, `BAAI/bge-multilingual-gemma2`, `intfloat/e5-mistral-7b-instruct`, `Qwen/Qwen3-Embedding-4B`, `Qwen/Qwen3-Embedding-0.6B` | no (404, "does not exist") | | | | not listed |
+
+The shortened vector is the native vector's first N values, normalized again (cosine 1.0 against the renormalized prefix), so Qwen3-Embedding is a true Matryoshka model and shorter vectors lose only what the evaluation measures. With one candidate model, the evaluation compares its sizes (decision 9). Provisional default: `EMBEDDING_PROVIDER=nebius`, `EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B`.
+
 ### 5. Exact hybrid search in one query
 
 `search(session, user, query, *, tags=None, since=None, until=None, newest_first=False)`:
