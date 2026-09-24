@@ -118,6 +118,12 @@ def test_tag_filter(test_database_url, fake, alice_id):
     assert titles(result) and all("work" in hit.thought.tags for hit in result.hits)
 
 
+def test_tag_filter_takes_a_tag_as_the_result_shows_it(test_database_url, fake, alice_id):
+    seed(test_database_url, alice_id, fake)
+    result = search(test_database_url, alice_id, fake, "plans", tags=["#Plans"])
+    assert titles(result) == ["Q4 plans"]
+
+
 def test_tag_nobody_uses_makes_no_provider_call(test_database_url, fake, alice_id):
     seed(test_database_url, alice_id, fake)
     fake.embed_requests.clear()

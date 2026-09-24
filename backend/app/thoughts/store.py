@@ -53,14 +53,17 @@ def thought_not_found() -> ApiError:
 
 
 def clean_tags(tags: list[str] | None) -> list[str]:
-    """Trimmed, lowercased, without empty or repeated tags, in their first order."""
+    """Trimmed, lowercased, without a leading `#`, empty, or repeated tags, in their first order.
+
+    The search result shows tags as `#tag`, and the chat model passes them back that way.
+    """
     if tags is None:
         return []
     if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
         raise invalid("tags", "must be a list of strings")
     cleaned: list[str] = []
     for tag in tags:
-        tag = " ".join(tag.split()).lower()
+        tag = " ".join(tag.split()).lower().lstrip("#").strip()
         if tag and tag not in cleaned:
             cleaned.append(tag)
     if len(cleaned) > MAX_TAGS:

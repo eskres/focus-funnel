@@ -147,7 +147,7 @@ def test_invalid_fields_are_refused_naming_the_field(test_database_url, fake, al
 
 
 def test_tags_are_cleaned(test_database_url, fake, alice_id):
-    outcome = store(test_database_url, alice_id, fake, tags=[" Milk", "milk", "", "Two  Words"])
+    outcome = store(test_database_url, alice_id, fake, tags=[" Milk", "milk", "", "Two  Words", "#Milk", "#"])
     assert outcome.thought.tags == ["milk", "two words"]
 
 
