@@ -70,16 +70,17 @@ uv sync
 uv run pytest
 ```
 
-The tests use SQLite by default. To run them against Postgres, set `TEST_DATABASE_URL`, for example to the compose Postgres from `docker-compose.dev.yml`:
+The tests use SQLite by default. To run them against Postgres, set `TEST_DATABASE_URL`, for example to a test database in the compose Postgres from `docker-compose.dev.yml`. Use a database of its own, never the app's: the tests drop every table they create. Create it once:
 
 ```sh
-TEST_DATABASE_URL=postgresql+asyncpg://focus_funnel:focus_funnel@localhost:55432/focus_funnel uv run pytest
+docker compose exec postgres createdb -U focus_funnel focus_funnel_test
+TEST_DATABASE_URL=postgresql+asyncpg://focus_funnel:focus_funnel@localhost:55432/focus_funnel_test uv run pytest
 ```
 
 Thought storage and search need Postgres with pgvector, so their tests are marked `postgres` and left out of the runs above. Run them on their own, against a Postgres that has the `vector` extension, such as the compose one:
 
 ```sh
-TEST_DATABASE_URL=postgresql+asyncpg://focus_funnel:focus_funnel@localhost:55432/focus_funnel uv run pytest -m postgres
+TEST_DATABASE_URL=postgresql+asyncpg://focus_funnel:focus_funnel@localhost:55432/focus_funnel_test uv run pytest -m postgres
 ```
 
 Without `TEST_DATABASE_URL` they fail instead of being skipped.
