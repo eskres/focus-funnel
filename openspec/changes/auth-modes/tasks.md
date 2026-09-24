@@ -26,11 +26,11 @@
 
 ## 5. Backend demo mode
 
-- [ ] 5.1 Add `POST /api/demo/sessions`, `DELETE /api/demo/session`, `POST /api/demo/notice`, and the mode, expiry, and notice fields on `GET /api/me`, present only in demo mode. Check with pytest that a session value has 32 random bytes, that only its hash is stored, that `DEMO_MAX_SESSIONS` gives `503 demo_full`, that ending a session deletes the user, and that the routes return 404 in other modes
-- [ ] 5.2 Add `DemoAuthenticator`. Check with pytest that a live value finds its user, that an expired one gives `401 demo_session_expired` before cleanup has run, and that a demo value is refused in `oidc` mode
-- [ ] 5.3 Add the cleanup task in the lifespan. Check with pytest that expired demo users and their data are deleted, that live and real users are untouched, and that the task keeps running after an error
-- [ ] 5.4 Read provider keys from `X-Provider-Keys` in demo mode behind `client_for()` and the provider list, and never write `provider_keys` there. Check with pytest that a key save in demo mode checks the key and writes no row, that the provider list reports held keys with last 4 characters and expiry, that the header is ignored in other modes, and that no log entry holds a full key
-- [ ] 5.5 Check isolation between visitors. Check with pytest that visitor A gets 404 for visitor B's conversation, settings, and usage
+- [x] 5.1 Add `POST /api/demo/sessions`, `DELETE /api/demo/session`, `POST /api/demo/notice`, and the mode, expiry, and notice fields on `GET /api/me`, present only in demo mode. Check with pytest that a session value has 32 random bytes, that only its hash is stored, that `DEMO_MAX_SESSIONS` gives `503 demo_full`, that ending a session deletes the user, and that the routes return 404 in other modes
+- [x] 5.2 Add `DemoAuthenticator`. Check with pytest that a live value finds its user, that an expired one gives `401 demo_session_expired` before cleanup has run, and that a demo value is refused in `oidc` mode
+- [x] 5.3 Add the cleanup task in the lifespan. Check with pytest that expired demo users and their data are deleted, that live and real users are untouched, and that the task keeps running after an error
+- [x] 5.4 Read provider keys from `X-Provider-Keys` in demo mode behind `client_for()` and the provider list, and never write `provider_keys` there. Check with pytest that a key save in demo mode checks the key and writes no row, that the provider list reports held keys with last 4 characters and expiry, that the header is ignored in other modes, and that no log entry holds a full key
+- [x] 5.5 Check isolation between visitors. Check with pytest that visitor A gets 404 for visitor B's conversation, settings, and usage
 
 ## 6. Frontend session and proxy
 

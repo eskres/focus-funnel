@@ -23,7 +23,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 import jwt
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.db import get_session
+from app.demo_keys import use_request_keys
 from app.errors import ApiError, ErrorCode, not_allowed
 from app.models import User
 
@@ -307,6 +308,11 @@ def get_authenticator(
         return OidcAuthenticator(settings, jwks)
     if settings.auth_mode == "firebase" and jwks is not None:
         return FirebaseAuthenticator(settings, jwks)
+    if settings.auth_mode == "demo":
+        # Imported here: app.demo builds on this module.
+        from app.demo import DemoAuthenticator
+
+        return DemoAuthenticator(settings)
     raise RuntimeError(f"No authenticator for AUTH_MODE {settings.auth_mode!r}")
 
 
@@ -346,9 +352,12 @@ async def get_or_create_user(session: AsyncSession, issuer: str, subject: str) -
 
 
 async def get_current_user(
+    request: Request,
     token: str = Depends(bearer_token),
     authenticator: Authenticator = Depends(get_authenticator),
     session: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> User:
-    return await authenticator.current_user(token, session, settings)
+    user = await authenticator.current_user(token, session, settings)
+    use_request_keys(request, settings)
+    return user
