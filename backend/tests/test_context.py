@@ -2,7 +2,7 @@
 
 from sqlalchemy import select
 
-from app.chat.prompt import system_prompt
+from app.chat.prompt import build_context, system_prompt
 from app.models import UsageEvent
 from tests.chat_helpers import (
     BIG,
