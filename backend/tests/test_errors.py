@@ -96,3 +96,35 @@ def test_stream_only_errors_have_their_codes():
     assert errors.output_limit_reached(False).code == ErrorCode.OUTPUT_LIMIT_REACHED
     assert "thinking" in errors.output_limit_reached(True).message
     assert errors.tool_loop_limit().code == ErrorCode.TOOL_LOOP_LIMIT
+
+
+def test_auth_mode_error_constructors_return_their_documented_status():
+    from app.errors import demo_full, demo_session_expired, not_allowed, rate_limited
+
+    cases = [
+        (not_allowed(), 403, ErrorCode.NOT_ALLOWED),
+        (demo_session_expired(), 401, ErrorCode.DEMO_SESSION_EXPIRED),
+        (demo_full(), 503, ErrorCode.DEMO_FULL),
+        (rate_limited(30), 429, ErrorCode.RATE_LIMITED),
+    ]
+    for error, status, code in cases:
+        assert (error.status_code, error.code) == (status, code)
+        assert error.message
+    assert (ErrorCode.NOT_ALLOWED, ErrorCode.DEMO_SESSION_EXPIRED) == ("not_allowed", "demo_session_expired")
+    assert (ErrorCode.DEMO_FULL, ErrorCode.RATE_LIMITED) == ("demo_full", "rate_limited")
+
+
+def test_rate_limited_carries_retry_after_in_the_response():
+    from app.errors import rate_limited
+
+    test_app = FastAPI()
+    register_error_handlers(test_app)
+
+    @test_app.get("/limited")
+    async def limited():
+        raise rate_limited(42)
+
+    response = TestClient(test_app).get("/limited")
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "42"
+    assert response.json()["error"]["code"] == "rate_limited"

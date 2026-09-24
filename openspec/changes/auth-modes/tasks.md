@@ -18,11 +18,11 @@
 
 ## 4. Backend authentication
 
-- [ ] 4.1 Add the `authenticate` step and `Identity`, pick the authenticator from the mode at startup, and move `get_current_user` onto it. Check with pytest that routers and ownership tests pass unchanged
-- [ ] 4.2 Add `OidcAuthenticator`: discovery (through `OIDC_INTERNAL_URL` when set), `JwksCache`, and ID token checks. Check with pytest and a local signing key for a valid token, missing, expired, wrong issuer, wrong audience, bad signature, `HS256`, and `none` tokens, and a JWKS outage giving `503 service_unavailable`
-- [ ] 4.3 Add `FirebaseAuthenticator` against Google's key set. Check with pytest and a local signing key for a valid token, a token from another project, and an expired token
-- [ ] 4.4 Add the allow-list with addresses and `@domain` entries. Check with pytest that a listed address and a listed domain get in, that an unlisted or unverified address or a missing `email` claim gives `403 not_allowed` with no user row created, and that no list lets anyone in
-- [ ] 4.5 Add the error codes `not_allowed`, `demo_session_expired`, `demo_full`, and `rate_limited`. Check with pytest that each constructor returns its documented status
+- [x] 4.1 Add the `authenticate` step and `Identity`, pick the authenticator from the mode at startup, and move `get_current_user` onto it. Check with pytest that routers and ownership tests pass unchanged
+- [x] 4.2 Add `OidcAuthenticator`: discovery (through `OIDC_INTERNAL_URL` when set), `JwksCache`, and ID token checks. Check with pytest and a local signing key for a valid token, missing, expired, wrong issuer, wrong audience, bad signature, `HS256`, and `none` tokens, and a JWKS outage giving `503 service_unavailable`
+- [x] 4.3 Add `FirebaseAuthenticator` against Google's key set. Check with pytest and a local signing key for a valid token, a token from another project, and an expired token
+- [x] 4.4 Add the allow-list with addresses and `@domain` entries. Check with pytest that a listed address and a listed domain get in, that an unlisted or unverified address or a missing `email` claim gives `403 not_allowed` with no user row created, and that no list lets anyone in
+- [x] 4.5 Add the error codes `not_allowed`, `demo_session_expired`, `demo_full`, and `rate_limited`. Check with pytest that each constructor returns its documented status
 
 ## 5. Backend demo mode
 
