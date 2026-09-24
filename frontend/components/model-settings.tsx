@@ -23,6 +23,7 @@ import {
   testModel,
   type ModelSettings,
   type ProviderModel,
+  type UsageWarning,
 } from "@/lib/models";
 import { redirectToLogin } from "@/lib/redirect-to-login";
 
@@ -57,6 +58,8 @@ export function ModelSettingsSection() {
   const [slots, setSlots] = useState<Slot[]>([]);
   const [defaultKey, setDefaultKey] = useState<number | null>(null);
   const [temperature, setTemperature] = useState("");
+  const [warningUnit, setWarningUnit] = useState<"" | UsageWarning["unit"]>("");
+  const [warningAmount, setWarningAmount] = useState("");
   const [lists, setLists] = useState<Record<string, ModelList>>({});
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -76,6 +79,8 @@ export function ModelSettingsSection() {
     const defaultIndex = loaded.models.findIndex((entry) => entry.is_default);
     setDefaultKey(defaultIndex === -1 ? null : firstKey + defaultIndex);
     setTemperature(loaded.temperature === null ? "" : String(loaded.temperature));
+    setWarningUnit(loaded.warning?.unit ?? "");
+    setWarningAmount(loaded.warning ? String(loaded.warning.amount) : "");
     setNextKey(firstKey + loaded.models.length);
   }
 
@@ -198,6 +203,15 @@ export function ModelSettingsSection() {
       setSaveError("Temperature must be a number.");
       return;
     }
+    let warning: UsageWarning | null = null;
+    if (warningUnit) {
+      const amount = Number(warningAmount);
+      if (warningAmount.trim() === "" || Number.isNaN(amount) || amount <= 0) {
+        setSaveError("The usage warning needs an amount above zero.");
+        return;
+      }
+      warning = { unit: warningUnit, amount };
+    }
     setBusy(true);
     try {
       const result = await saveModelSettings(
@@ -208,6 +222,7 @@ export function ModelSettingsSection() {
           is_default: slot.key === defaultKey,
         })),
         value,
+        warning,
       );
       applySettings(result, nextKey);
       setSaved(true);
@@ -302,6 +317,46 @@ export function ModelSettingsSection() {
               : `Between ${settings.temperature_min} and ${settings.temperature_max}.`}
           </span>
         </label>
+
+        <fieldset className="flex flex-col gap-1 text-sm">
+          <legend>Monthly usage warning</legend>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              aria-label="Warning unit"
+              className="rounded-md border bg-background px-2 py-1 text-sm"
+              value={warningUnit}
+              disabled={busy}
+              onChange={(event) => {
+                setWarningUnit(event.target.value as "" | UsageWarning["unit"]);
+                setSaved(false);
+              }}
+            >
+              <option value="">No warning</option>
+              <option value="usd">Estimated dollars</option>
+              <option value="tokens">Tokens</option>
+            </select>
+            {warningUnit && (
+              <Input
+                type="number"
+                aria-label="Warning amount"
+                className="w-36"
+                min={0}
+                step={warningUnit === "usd" ? "0.01" : "1000"}
+                placeholder={warningUnit === "usd" ? "5.00" : "1000000"}
+                value={warningAmount}
+                onChange={(event) => {
+                  setWarningAmount(event.target.value);
+                  setSaved(false);
+                }}
+                disabled={busy}
+              />
+            )}
+          </div>
+          <span className="text-xs text-muted-foreground">
+            The chat shows a notice once a month when your usage reaches this. It never stops the
+            chat.
+          </span>
+        </fieldset>
 
         {saveError && (
           <Alert variant="destructive">

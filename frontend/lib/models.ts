@@ -45,13 +45,15 @@ export function getModelSettings(): Promise<ModelSettings> {
   return apiFetch<ModelSettings>(MODEL_SETTINGS_ENDPOINT);
 }
 
+/** Saves exactly what is given: a missing warning threshold is cleared. */
 export function saveModelSettings(
   models: LoadoutEntryInput[],
   temperature: number | null,
+  warning: UsageWarning | null = null,
 ): Promise<ModelSettings> {
   return apiFetch<ModelSettings>(MODEL_SETTINGS_ENDPOINT, {
     method: "PUT",
-    body: JSON.stringify({ models, temperature }),
+    body: JSON.stringify({ models, temperature, warning }),
   });
 }
 

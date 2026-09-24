@@ -328,3 +328,36 @@ describe("the /compact dialog", () => {
     expect(screen.queryByText(/delete/i)).not.toBeInTheDocument();
   });
 });
+
+describe("the usage warning notice", () => {
+  it.each([
+    [{ unit: "usd", amount: 5 }, "$5.00"],
+    [{ unit: "tokens", amount: 2_000_000 }, "2,000,000 tokens"],
+  ])("names the threshold %j and keeps the chat going", async (threshold, named) => {
+    fakeApi({
+      "GET /api/settings/models": json(200, settings),
+      "GET /api/conversations/c1": json(200, conversation()),
+      "POST /api/chat": () =>
+        streamOf(
+          delta("Ok."),
+          noticeEvent({ kind: "usage_warning", ...threshold, month_cost_usd: 5.1, month_tokens: 1 }),
+          done,
+        ),
+    });
+    render(<Chat conversationId="c1" />);
+    await screen.findByText("message 9");
+
+    send("more");
+
+    expect(
+      await screen.findByText(
+        `Your usage this month has reached your warning threshold of ${named}. You can keep chatting.`,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "See usage" })).toHaveAttribute("href", "/settings#usage");
+    expect(screen.getByLabelText("Message")).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText(/warning threshold/)).not.toBeInTheDocument();
+  });
+});
