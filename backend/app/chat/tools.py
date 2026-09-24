@@ -105,6 +105,11 @@ def words_only_note(error: ApiError, settings: Settings) -> str:
             f"Searched by words only: add your {label} API key in settings to also "
             "search by meaning. Tell the user."
         )
+    if error.code in (ErrorCode.MODEL_UNAVAILABLE, ErrorCode.EMBEDDING_MISMATCH):
+        return (
+            "Searched by words only: the search index was built with an embedding model "
+            "that no longer works here, and the operator needs to rebuild it. Tell the user."
+        )
     return f"Searched by words only: {error.message} Tell the user."
 
 

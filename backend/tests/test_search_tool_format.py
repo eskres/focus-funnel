@@ -13,6 +13,7 @@ from app.chat.tools import (
     parse_search,
 )
 from app.config import get_settings
+from app.errors import embedding_mismatch, model_unavailable
 from app.models import Thought
 from app.providers import key_missing, rate_limited
 from app.provider_config import get_providers_config
@@ -109,6 +110,16 @@ def test_words_only_for_other_reasons(env):
     text = format_search_result(result, config, settings).text
     assert text.startswith(NO_MATCH + "\nSearched by words only: ")
     assert "rate limiting" in text
+
+
+@pytest.mark.parametrize(
+    "error", [model_unavailable("vendor/embed-old"), embedding_mismatch("vendor/embed-old, 4 dimensions")]
+)
+def test_words_only_asks_for_a_rebuild_when_the_model_is_gone(env, error):
+    config, settings = env
+    text = format_search_result(SearchResult(words_only=error), config, settings).text
+    assert text.endswith("the operator needs to rebuild it. Tell the user.")
+    assert "model settings" not in text
 
 
 def test_parse_search_arguments():

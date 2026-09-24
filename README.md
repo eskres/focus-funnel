@@ -18,8 +18,9 @@ You bring your own model provider. Each user saves their own API key for Nebius,
 
 - **Conversations:** each conversation is stored. The sidebar lists them newest first, and you can rename, archive, restore, or delete each one.
 - **Models:** in Settings you choose up to five models. One of them is the default. Each model has a reasoning effort, and you set one temperature for all of them. The message box has a dropdown to switch model inside a conversation.
+- **Search:** the search tool finds your filed thoughts by meaning and by words at once, in Postgres with pgvector. [docs/search.md](docs/search.md) covers the embedding model, tuning, and rebuilding search indexes.
 
-Not built yet: saving and searching thoughts, `/compact`, the context meter, and usage tracking. For now, the search tool and the Confirm button answer that the feature is not available yet.
+Not built yet: saving a thought from the chat. For now, the Confirm button answers that saving is not available yet.
 
 ## Stack
 
