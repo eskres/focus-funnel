@@ -5,9 +5,9 @@
 
 ## 2. Settings and startup checks
 
-- [ ] 2.1 Replace the Auth0 fields in the backend `Settings` with `auth_mode` and the per-mode settings from design decision 11, with the demo guards from decision 9. Check with pytest that a missing or unknown mode fails naming the setting, that each mode fails without its required settings, that demo mode fails with an `OIDC_*` or `FIREBASE_*` value or an explicit `ALLOW_CUSTOM_PROVIDER=true`, and that demo mode otherwise turns the custom provider off
-- [ ] 2.2 Add `lib/auth-mode.ts` with the same checks for the frontend server, read at run time. Check with Vitest that each invalid configuration throws naming the setting and that no `NEXT_PUBLIC_` variable carries the mode
-- [ ] 2.3 Update `.env.example` for the three modes and remove every `AUTH0_*` entry. Check by reading it against design decision 11
+- [x] 2.1 Replace the Auth0 fields in the backend `Settings` with `auth_mode` and the per-mode settings from design decision 11, with the demo guards from decision 9. Check with pytest that a missing or unknown mode fails naming the setting, that each mode fails without its required settings, that demo mode fails with an `OIDC_*` or `FIREBASE_*` value or an explicit `ALLOW_CUSTOM_PROVIDER=true`, and that demo mode otherwise turns the custom provider off
+- [x] 2.2 Add `lib/auth-mode.ts` with the same checks for the frontend server, read at run time. Check with Vitest that each invalid configuration throws naming the setting and that no `NEXT_PUBLIC_` variable carries the mode
+- [x] 2.3 Update `.env.example` for the three modes and remove every `AUTH0_*` entry. Check by reading it against design decision 11
 
 ## 3. Data
 

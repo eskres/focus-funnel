@@ -81,7 +81,7 @@ class JwksCache:
         try:
             data = await self._fetch()
             key_set = jwt.PyJWKSet.from_dict(data)
-        except (httpx.HTTPError, ValueError, jwt.PyJWKSetError):
+        except (httpx.HTTPError, ValueError, KeyError, jwt.PyJWKSetError):
             logger.warning("Could not fetch Auth0 JWKS", exc_info=True)
             self._last_fetch_ok = False
             return
@@ -89,12 +89,14 @@ class JwksCache:
         self._last_fetch_ok = True
 
 
-def http_jwks_fetcher(domain: str) -> JwksFetcher:
-    url = f"https://{domain}/.well-known/jwks.json"
+def http_jwks_fetcher(issuer: str) -> JwksFetcher:
+    discovery_url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
 
     async def fetch() -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=JWKS_TIMEOUT_SECONDS) as client:
-            response = await client.get(url)
+            discovery = await client.get(discovery_url)
+            discovery.raise_for_status()
+            response = await client.get(discovery.json()["jwks_uri"])
             response.raise_for_status()
             return response.json()
 
@@ -102,12 +104,12 @@ def http_jwks_fetcher(domain: str) -> JwksFetcher:
 
 
 @lru_cache
-def _jwks_cache_for(domain: str) -> JwksCache:
-    return JwksCache(http_jwks_fetcher(domain))
+def _jwks_cache_for(issuer: str) -> JwksCache:
+    return JwksCache(http_jwks_fetcher(issuer))
 
 
 def get_jwks_cache(settings: Settings = Depends(get_settings)) -> JwksCache:
-    return _jwks_cache_for(settings.auth0_domain)
+    return _jwks_cache_for(settings.oidc_issuer or "")
 
 
 async def verify_access_token(
@@ -128,8 +130,8 @@ async def verify_access_token(
             token,
             signing_key.key,
             algorithms=[ALGORITHM],
-            audience=settings.auth0_audience,
-            issuer=f"https://{settings.auth0_domain}/",
+            audience=settings.oidc_client_id,
+            issuer=settings.oidc_issuer,
             options={"require": ["exp", "iss", "aud", "sub"]},
         )
     except jwt.InvalidTokenError:

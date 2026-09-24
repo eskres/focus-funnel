@@ -23,10 +23,11 @@ pytest_plugins = ["tests.chat_helpers"]
 
 REQUIRED_ENV = {
     "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
-    "AUTH0_DOMAIN": "test-tenant.example.com",
-    "AUTH0_AUDIENCE": "https://api.focus-funnel.test",
+    "AUTH_MODE": "oidc",
+    "OIDC_ISSUER": "https://login.focus-funnel.test",
+    "OIDC_CLIENT_ID": "focus-funnel-test-client",
 }
-TEST_ISSUER = f"https://{REQUIRED_ENV['AUTH0_DOMAIN']}/"
+TEST_ISSUER = REQUIRED_ENV["OIDC_ISSUER"]
 TEST_KID = "test-key-1"
 
 
@@ -152,7 +153,7 @@ def make_token(signing_key):
         now = int(time.time())
         payload = {
             "iss": TEST_ISSUER,
-            "aud": REQUIRED_ENV["AUTH0_AUDIENCE"],
+            "aud": REQUIRED_ENV["OIDC_CLIENT_ID"],
             "sub": f"auth0|{uuid.uuid4().hex}",
             "iat": now,
             "exp": now + 3600,
