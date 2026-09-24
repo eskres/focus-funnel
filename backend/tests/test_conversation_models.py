@@ -27,8 +27,8 @@ async def session():
     await engine.dispose()
 
 
-async def make_user(session, sub: str = "auth0|alice") -> User:
-    user = User(auth0_sub=sub)
+async def make_user(session, sub: str = "user|alice") -> User:
+    user = User(issuer="test-issuer", subject=sub)
     session.add(user)
     await session.commit()
     return user
@@ -140,8 +140,8 @@ async def test_a_duplicate_model_per_user_is_rejected(session):
 
 
 async def test_two_users_may_have_the_same_model(session):
-    alice = await make_user(session, "auth0|alice")
-    bob = await make_user(session, "auth0|bob")
+    alice = await make_user(session, "user|alice")
+    bob = await make_user(session, "user|bob")
     session.add_all([chat_model(alice), chat_model(bob)])
     await session.commit()
     assert await count(session, ChatModel) == 2

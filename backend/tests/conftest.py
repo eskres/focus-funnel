@@ -23,10 +23,11 @@ pytest_plugins = ["tests.chat_helpers"]
 
 REQUIRED_ENV = {
     "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
-    "AUTH0_DOMAIN": "test-tenant.example.com",
-    "AUTH0_AUDIENCE": "https://api.focus-funnel.test",
+    "AUTH_MODE": "oidc",
+    "OIDC_ISSUER": "https://login.focus-funnel.test",
+    "OIDC_CLIENT_ID": "focus-funnel-test-client",
 }
-TEST_ISSUER = f"https://{REQUIRED_ENV['AUTH0_DOMAIN']}/"
+TEST_ISSUER = REQUIRED_ENV["OIDC_ISSUER"]
 TEST_KID = "test-key-1"
 
 
@@ -76,12 +77,12 @@ def test_database_url(tmp_path, settings_env) -> str:
     return url
 
 
-def count_users(url: str, auth0_sub: str | None = None) -> int:
+def count_users(url: str, subject: str | None = None) -> int:
     async def count():
         engine = create_engine(url, poolclass=NullPool)
         query = select(func.count()).select_from(User)
-        if auth0_sub is not None:
-            query = query.where(User.auth0_sub == auth0_sub)
+        if subject is not None:
+            query = query.where(User.subject == subject)
         async with engine.connect() as connection:
             result = (await connection.execute(query)).scalar_one()
         await engine.dispose()
@@ -132,7 +133,7 @@ def signing_key() -> rsa.RSAPrivateKey:
 
 @pytest.fixture
 def jwks_document(signing_key) -> dict:
-    """The JWKS the fake Auth0 tenant serves. Tests may change its "keys" list."""
+    """The JWKS the fake login provider serves. Tests may change its "keys" list."""
     return {"keys": [jwk_for(signing_key, TEST_KID)]}
 
 
@@ -152,8 +153,8 @@ def make_token(signing_key):
         now = int(time.time())
         payload = {
             "iss": TEST_ISSUER,
-            "aud": REQUIRED_ENV["AUTH0_AUDIENCE"],
-            "sub": f"auth0|{uuid.uuid4().hex}",
+            "aud": REQUIRED_ENV["OIDC_CLIENT_ID"],
+            "sub": f"user|{uuid.uuid4().hex}",
             "iat": now,
             "exp": now + 3600,
             **claims,

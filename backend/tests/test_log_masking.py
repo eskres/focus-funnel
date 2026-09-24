@@ -105,7 +105,7 @@ def client(test_database_url, jwks_cache, settings_env):
 def test_key_never_appears_in_logs_during_save(client, make_token, caplog, respond):
     fake = FakeProvider(respond)
     app.dependency_overrides[get_provider_http_client] = lambda: fake.http_client()
-    headers = {"Authorization": f"Bearer {make_token(sub='auth0|logs')}"}
+    headers = {"Authorization": f"Bearer {make_token(sub='user|logs')}"}
 
     with caplog.at_level(logging.DEBUG):
         client.put("/api/providers/nebius/key", headers=headers, json={"key": SECRET})
@@ -120,7 +120,7 @@ def test_key_never_appears_in_logs_during_save(client, make_token, caplog, respo
 
 
 def test_key_never_appears_in_logs_on_validation_failure(client, make_token, caplog):
-    headers = {"Authorization": f"Bearer {make_token(sub='auth0|logs')}"}
+    headers = {"Authorization": f"Bearer {make_token(sub='user|logs')}"}
     with caplog.at_level(logging.DEBUG):
         client.put(
             "/api/providers/nebius/key", headers=headers, json={"key": 12345, "extra": SECRET}

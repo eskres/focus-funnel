@@ -38,14 +38,14 @@ def key_row(
 
 
 async def make_user(session, sub: str) -> User:
-    user = User(auth0_sub=sub)
+    user = User(issuer="test-issuer", subject=sub)
     session.add(user)
     await session.commit()
     return user
 
 
 async def test_key_row_stores_fields_and_timestamps(session):
-    user = await make_user(session, "auth0|alice")
+    user = await make_user(session, "user|alice")
     session.add(key_row(user.id))
     await session.commit()
 
@@ -59,7 +59,7 @@ async def test_key_row_stores_fields_and_timestamps(session):
 
 
 async def test_second_key_for_same_provider_is_rejected(session):
-    user = await make_user(session, "auth0|alice")
+    user = await make_user(session, "user|alice")
     session.add(key_row(user.id))
     await session.commit()
 
@@ -69,7 +69,7 @@ async def test_second_key_for_same_provider_is_rejected(session):
 
 
 async def test_same_user_two_different_providers_is_fine(session):
-    user = await make_user(session, "auth0|alice")
+    user = await make_user(session, "user|alice")
     session.add(key_row(user.id, provider_id="nebius"))
     session.add(key_row(user.id, provider_id="nvidia", api_key="nvapi-other-key-9999"))
     await session.commit()
@@ -85,7 +85,7 @@ async def test_key_requires_existing_user(session):
 
 
 async def test_keyless_local_provider_has_no_key_fields(session):
-    user = await make_user(session, "auth0|alice")
+    user = await make_user(session, "user|alice")
     row = ProviderKey(
         user_id=user.id,
         provider_id="custom",
@@ -101,8 +101,8 @@ async def test_keyless_local_provider_has_no_key_fields(session):
 
 
 async def test_record_copied_to_another_user_fails_to_decrypt(session):
-    alice = await make_user(session, "auth0|alice")
-    bob = await make_user(session, "auth0|bob")
+    alice = await make_user(session, "user|alice")
+    bob = await make_user(session, "user|bob")
     secret = encrypt_secret(MASTER_KEY, alice.id, "nebius", "nb-alices-key-0000")
 
     with pytest.raises(DecryptionError):
@@ -110,7 +110,7 @@ async def test_record_copied_to_another_user_fails_to_decrypt(session):
 
 
 async def test_record_copied_to_another_provider_of_same_user_fails_to_decrypt(session):
-    alice = await make_user(session, "auth0|alice")
+    alice = await make_user(session, "user|alice")
     secret = encrypt_secret(MASTER_KEY, alice.id, "nebius", "nb-alices-key-0000")
 
     with pytest.raises(DecryptionError):

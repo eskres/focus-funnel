@@ -1,0 +1,34 @@
+# Pocket ID as the login provider (AUTH_MODE=oidc):
+#   docker compose -f docker-compose.yml -f docker-compose.pocket-id.yml up
+# See docs/login.md for the setup steps.
+services:
+  pocket-id:
+    image: ghcr.io/pocket-id/pocket-id:v2.16.0
+    environment:
+      # The address browsers use. Passkeys work only on localhost or HTTPS.
+      APP_URL: ${POCKET_ID_APP_URL:-http://localhost:1411}
+      # 32 random bytes, base64: openssl rand -base64 32
+      ENCRYPTION_KEY: ${POCKET_ID_ENCRYPTION_KEY:?Set POCKET_ID_ENCRYPTION_KEY in .env (openssl rand -base64 32)}
+      # Set to true when Pocket ID runs behind an HTTPS reverse proxy.
+      TRUST_PROXY: ${POCKET_ID_TRUST_PROXY:-false}
+    ports:
+      - "1411:1411"
+    volumes:
+      - ./.data/pocket-id:/app/data
+
+  # The containers cannot reach the public issuer URL (localhost:1411 is the
+  # container itself), so server-to-server calls go to the compose address.
+  # Tokens are still checked against OIDC_ISSUER.
+  backend:
+    environment:
+      OIDC_INTERNAL_URL: http://pocket-id:1411
+    depends_on:
+      pocket-id:
+        condition: service_started
+
+  frontend:
+    environment:
+      OIDC_INTERNAL_URL: http://pocket-id:1411
+    depends_on:
+      pocket-id:
+        condition: service_started

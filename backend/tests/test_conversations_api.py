@@ -182,7 +182,7 @@ def test_the_title_starts_with_the_first_message():
 
 
 def test_a_new_conversation_takes_the_default_model_and_effort():
-    user = User(id=uuid.uuid4(), auth0_sub="auth0|x")
+    user = User(id=uuid.uuid4(), issuer="test-issuer", subject="user|x")
     default = ChatModel(provider_id="nebius", model=NANO, reasoning_effort="low")
 
     conversation = new_conversation(user, "hello", default)
@@ -195,7 +195,7 @@ def test_a_new_conversation_takes_the_default_model_and_effort():
 
 
 def test_a_new_conversation_without_a_default_has_no_model():
-    user = User(id=uuid.uuid4(), auth0_sub="auth0|x")
+    user = User(id=uuid.uuid4(), issuer="test-issuer", subject="user|x")
     conversation = new_conversation(user, "hello", None)
     assert conversation.model is None and conversation.provider_id is None
 

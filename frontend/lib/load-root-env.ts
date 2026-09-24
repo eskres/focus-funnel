@@ -6,8 +6,8 @@ import path from "node:path";
  *
  * `next dev` only reads env files from the Next.js project folder, but this
  * repo keeps its single `.env` at the root (docker-compose passes it to the
- * containers). Without this, a local `npm run dev` has no AUTH0_* settings and
- * the Auth0 SDK fails every request with "Domain resolver threw an error."
+ * containers). Without this, a local `npm run dev` has no AUTH_MODE or other
+ * login settings and refuses to start.
  *
  * Variables that are already set win, so compose's `env_file` values, shell
  * exports, and `frontend/.env*` files are never overridden. `@next/env`'s

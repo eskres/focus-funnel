@@ -31,6 +31,10 @@ class ErrorCode:
     # Only ever sent as an `error` event inside a chat stream.
     OUTPUT_LIMIT_REACHED = "output_limit_reached"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
+    NOT_ALLOWED = "not_allowed"
+    DEMO_SESSION_EXPIRED = "demo_session_expired"
+    DEMO_FULL = "demo_full"
+    RATE_LIMITED = "rate_limited"
 
 
 class ApiError(Exception):
@@ -109,6 +113,37 @@ def tool_loop_limit() -> ApiError:
         200,
         ErrorCode.TOOL_LOOP_LIMIT,
         "The model kept using tools without finishing its answer. Try again.",
+    )
+
+
+def not_allowed() -> ApiError:
+    return ApiError(
+        403,
+        ErrorCode.NOT_ALLOWED,
+        "This instance does not accept your account. Ask its operator to add your "
+        "verified email address.",
+    )
+
+
+def demo_session_expired() -> ApiError:
+    return ApiError(
+        401,
+        ErrorCode.DEMO_SESSION_EXPIRED,
+        "Your demo session has ended and its data was deleted. Start a new one.",
+    )
+
+
+def demo_full() -> ApiError:
+    return ApiError(503, ErrorCode.DEMO_FULL, "The demo is full. Try again later.")
+
+
+def rate_limited(retry_after_seconds: int) -> ApiError:
+    seconds = max(1, retry_after_seconds)
+    return ApiError(
+        429,
+        ErrorCode.RATE_LIMITED,
+        f"Too many requests. Try again in {seconds} seconds.",
+        headers={"Retry-After": str(seconds)},
     )
 
 

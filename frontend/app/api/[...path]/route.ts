@@ -1,13 +1,15 @@
-import { AccessTokenError } from "@auth0/nextjs-auth0/errors";
-
-import { auth0 } from "@/lib/auth0";
+import { getAuthConfig, getBackendCredential, type BackendCredential } from "@/lib/auth-mode";
+import { PROVIDER_KEYS_HEADER } from "@/lib/demo-keys";
+import { prepareDemoCall } from "@/lib/demo-proxy";
 
 // Forwards every /api/... call to the private FastAPI backend with the user's
-// Auth0 access token. The token is read on the server and never sent to the
-// browser. Response bodies are streamed through without buffering.
+// credential for the auth mode: the ID token, renewed when it is about to
+// expire, or the demo session value. The credential is read from a sealed
+// cookie on the server and never sent to the browser. Response bodies are
+// streamed through without buffering.
 
-// Request headers passed on to the backend. Cookies (the Auth0 session) and
-// any client-sent Authorization header are deliberately not forwarded.
+// Request headers passed on to the backend. Cookies (the session) and any
+// client-sent Authorization header are deliberately not forwarded.
 const FORWARDED_REQUEST_HEADERS = ["accept", "accept-language", "content-type"];
 
 // Response headers passed back to the browser. Everything else (Set-Cookie,
@@ -33,22 +35,18 @@ function errorDetails(error: unknown) {
     : { message: String(error) };
 }
 
-type TokenResult = { token: string } | { response: Response };
+/** Adds Set-Cookie headers, such as a renewed session, to a response. */
+function withCookies(response: Response, setCookies: string[]): Response {
+  for (const cookie of setCookies) response.headers.append("set-cookie", cookie);
+  return response;
+}
 
-async function getAccessToken(): Promise<TokenResult> {
-  const unauthenticated = {
-    response: errorResponse(401, "unauthenticated", "Log in to continue."),
-  };
+async function getCredential(request: Request): Promise<BackendCredential> {
   try {
-    const session = await auth0.getSession();
-    if (!session) return unauthenticated;
-    const { token } = await auth0.getAccessToken();
-    return { token };
+    return await getBackendCredential(request);
   } catch (error) {
-    // Missing or expired session, or a refresh token that no longer works.
-    if (error instanceof AccessTokenError) return unauthenticated;
-    // Setup mistakes or Auth0 outages are server errors, not a logged-out user.
-    console.error("API proxy: could not get an access token", errorDetails(error));
+    // Setup mistakes are server errors, not a logged-out user.
+    console.error("API proxy: could not get a credential", errorDetails(error));
     return {
       response: errorResponse(500, "internal_error", "Something went wrong. Try again."),
     };
@@ -115,14 +113,20 @@ async function forward(request: Request, context: ProxyContext): Promise<Respons
     return errorResponse(404, "not_found", "Not found.");
   }
 
-  const auth = await getAccessToken();
+  const auth = await getCredential(request);
   if ("response" in auth) return auth.response;
 
-  const headers = new Headers({ Authorization: `Bearer ${auth.token}` });
+  // Demo mode: held provider keys, and the end of a demo session.
+  const config = getAuthConfig();
+  const demoCall = config.mode === "demo" ? await prepareDemoCall(request, path, config) : null;
+  if (demoCall?.response) return demoCall.response;
+
+  const headers = new Headers({ Authorization: `Bearer ${auth.credential}` });
   for (const name of FORWARDED_REQUEST_HEADERS) {
     const value = request.headers.get(name);
     if (value !== null) headers.set(name, value);
   }
+  if (demoCall?.providerKeys) headers.set(PROVIDER_KEYS_HEADER, demoCall.providerKeys);
 
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
   const init: RequestInit & { duplex?: "half" } = {
@@ -132,7 +136,9 @@ async function forward(request: Request, context: ProxyContext): Promise<Respons
     cache: "no-store",
     signal: request.signal,
   };
-  if (hasBody) {
+  if (demoCall?.body !== undefined) {
+    init.body = demoCall.body;
+  } else if (hasBody) {
     init.body = request.body;
     // Required by Node's fetch to send a streamed request body.
     init.duplex = "half";
@@ -147,10 +153,9 @@ async function forward(request: Request, context: ProxyContext): Promise<Respons
       path: target.pathname,
       ...errorDetails(error),
     });
-    return errorResponse(
-      502,
-      "backend_unreachable",
-      "The server could not be reached. Try again.",
+    return withCookies(
+      errorResponse(502, "backend_unreachable", "The server could not be reached. Try again."),
+      auth.setCookies,
     );
   }
 
@@ -165,10 +170,9 @@ async function forward(request: Request, context: ProxyContext): Promise<Respons
       path: target.pathname,
       status: upstream.status,
     });
-    return errorResponse(
-      502,
-      "backend_unreachable",
-      "The server could not be reached. Try again.",
+    return withCookies(
+      errorResponse(502, "backend_unreachable", "The server could not be reached. Try again."),
+      auth.setCookies,
     );
   }
 
@@ -179,6 +183,14 @@ async function forward(request: Request, context: ProxyContext): Promise<Respons
   }
   responseHeaders.set("Cache-Control", "no-cache");
   responseHeaders.set("X-Accel-Buffering", "no");
+  // A renewed session.
+  for (const cookie of auth.setCookies) responseHeaders.append("set-cookie", cookie);
+
+  if (demoCall) {
+    // Nothing from a demo instance may be kept by a cache.
+    responseHeaders.set("Cache-Control", "no-store");
+    return demoCall.finish(upstream, responseHeaders);
+  }
 
   return new Response(upstream.body, {
     status: upstream.status,

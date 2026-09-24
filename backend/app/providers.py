@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
 from app.crypto import DecryptionError, EncryptedSecret, decrypt_secret
+from app.demo_keys import held_keys
 from app.errors import ApiError, ErrorCode, model_unavailable
 from app.log_masking import register_secret
 from app.models import ProviderKey, User
@@ -177,10 +178,20 @@ async def load_api_key(
 ) -> str:
     """Decrypt the user's saved key for this provider.
 
-    Raises provider_key_missing unless a usable key is found, except for a
-    provider that needs no key, which gets a placeholder instead.
+    In demo mode the key comes only from those sent with this request, never
+    from the database. Raises provider_key_missing unless a usable key is
+    found, except for a provider that needs no key, which gets a placeholder
+    instead.
     """
     settings = settings or get_settings()
+    if settings.auth_mode == "demo":
+        held = held_keys().get(provider.id)
+        if held is not None:
+            return held.key
+        if not provider.key_required:
+            return PLACEHOLDER_KEY
+        raise key_missing(provider)
+
     row = (
         await session.execute(
             select(ProviderKey).where(
