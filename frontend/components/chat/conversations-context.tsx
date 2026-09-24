@@ -11,6 +11,9 @@ type ConversationsState = {
   lists: ConversationList | null;
   loadError: string | null;
   refresh: () => Promise<void>;
+  /** Changes each time the user asks for a new conversation, to reset the chat. */
+  newChatKey: number;
+  startNewChat: () => void;
 };
 
 const ConversationsContext = createContext<ConversationsState | null>(null);
@@ -19,6 +22,8 @@ const ConversationsContext = createContext<ConversationsState | null>(null);
 export function ConversationsProvider({ children }: { children: ReactNode }) {
   const [lists, setLists] = useState<ConversationList | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [newChatKey, setNewChatKey] = useState(0);
+  const startNewChat = useCallback(() => setNewChatKey((key) => key + 1), []);
 
   const refresh = useCallback(
     () =>
@@ -43,7 +48,7 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   return (
-    <ConversationsContext.Provider value={{ lists, loadError, refresh }}>
+    <ConversationsContext.Provider value={{ lists, loadError, refresh, newChatKey, startNewChat }}>
       {children}
     </ConversationsContext.Provider>
   );
@@ -56,6 +61,8 @@ export function useConversations(): ConversationsState {
       lists: null,
       loadError: null,
       refresh: async () => undefined,
+      newChatKey: 0,
+      startNewChat: () => undefined,
     }
   );
 }
