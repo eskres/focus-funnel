@@ -44,7 +44,7 @@ These cookies are marked `Secure`. Browsers accept them on `http://localhost` an
 5. In Pocket ID, open **OIDC Clients** and add a client:
    - **Name:** Focus Funnel
    - **Callback URLs:** `http://localhost:3000/auth/callback`
-   - **Logout Callback URLs:** `http://localhost:3000/`
+   - **Logout Callback URLs:** `http://localhost:3000/`, exactly. Logging out, and deleting an account, then ends the Pocket ID session without asking. A pattern such as `http://localhost:3000/*` does not match it, since a `*` stands for one non-empty path segment; Pocket ID then shows its own sign-out confirmation, and a user who cancels it stays logged in at Pocket ID.
    - Leave **Public Client** off, so the client has a secret.
 6. Copy the client ID and the client secret into `.env`, and set the mode:
 

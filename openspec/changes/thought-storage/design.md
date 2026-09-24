@@ -229,10 +229,15 @@ A provider error for a user (missing, refused, or rate-limited key) deletes that
 
 ### 13. Deleting a user's data
 
-Everything is in Postgres and cascades from `users`, so `delete_user_data()` needs no change. The tests prove the cascade reaches the three new tables.
+Three deletions, separate because they answer different wishes: clearing out what was said and filed, clearing the spending record, and leaving. Each is one endpoint and one transaction, answers 204, and answers 404 in demo mode, where "End demo" deletes the session and everything in it.
 
-- `DELETE /api/me` calls it and answers 204. In demo mode it answers 404; "End demo" is the demo path.
-- Settings gets a "Delete my data" section with a dialog listing what will be deleted. Confirming calls the endpoint through the proxy and then goes to `/auth/logout`. It is hidden when `/api/me` reports demo mode.
+- `DELETE /api/me/content` (`delete_user_content()`): the user's thoughts, search indexes, and conversations. Search entries cascade from thoughts and indexes, messages from conversations. Usage records stay; their conversation link is `ON DELETE SET NULL`. The account, provider keys, model loadout, and chat settings stay, and the user stays logged in.
+- `DELETE /api/me/usage` (`delete_user_usage()`): the user's usage records only.
+- `DELETE /api/me` (`delete_user_data()`): the user row, and with it every user-owned table by `ON DELETE CASCADE`. The tests prove the cascade reaches the three new tables.
+
+Settings gets a "Your data" section with a button for each, and a dialog for each that says what goes, what stays, and that it cannot be undone. Content and usage history stay on the page and say they are done; deleting the usage history tells the usage section to load again. Deleting the account goes to `/auth/logout`. The section is hidden when `/api/me` reports demo mode.
+
+**No sign-out confirmation.** In oidc mode `/auth/logout` sends the provider's end-session request with the ID token as `id_token_hint` and `post_logout_redirect_uri` set to the app's home page. Pocket ID then signs out without asking, but only when that address matches a Logout Callback URL of the client; otherwise it falls back to its own "Do you want to sign out?" page. A user who cancels that page stays logged in at Pocket ID, and the next visit logs them straight back in to a new, empty account. The check on 2026-09-24 hit this: the client had `http://localhost:3000/*`, and in Pocket ID a `*` stands for one path segment that cannot be empty, so it does not match `http://localhost:3000/`. `docs/login.md` now says to enter the address exactly.
 
 ### 14. Tests on Postgres
 

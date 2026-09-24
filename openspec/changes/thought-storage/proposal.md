@@ -22,7 +22,7 @@ A search index breaks when its embedding model changes, and providers can remove
 - Add an admin-only command-line rebuild job. It builds a new index version from the thoughts table, switches the user to it in one transaction, and deletes the old one. It runs for one user or for all users, and search keeps working during the rebuild.
 - Add a probe that picks the default embedding model and the search tuning from a small set of test thoughts and queries, and keep that set as a regression test for search quality.
 - Record every embedding call in usage, like any other model call.
-- Add a "delete my data" endpoint and a button for it in settings. It deletes the user's thoughts and search indexes, their provider keys, their model loadout and chat settings, and their conversations, messages, and usage records.
+- Add three deletions to settings, each with its own endpoint and confirmation: delete content (thoughts, search indexes, conversations, and messages; the user stays logged in), delete usage history (usage records only), and delete account (everything above plus provider keys, model loadout, and chat settings, then log out without a sign-out confirmation).
 
 ## Capabilities
 
@@ -30,7 +30,7 @@ A search index breaks when its embedding model changes, and providers can remove
 - `thought-store`: Stores thoughts per user, with Postgres as the source of truth and the search index in the same transaction.
 - `thought-search`: Hybrid search by meaning and by words, with tag and date filters, a relevance cut-off, per-user isolation, the model-mismatch check, and compact results.
 - `embedding-management`: Embedding model selection, index versions, filling in missing embeddings, and the admin rebuild job.
-- `account-data-deletion`: Deleting all of a user's stored data on request.
+- `account-data-deletion`: Deleting a user's content, usage history, or whole account on request.
 
 ### Modified Capabilities
 - `conversation-agent`: The search tool returns matching thoughts instead of "not available yet", takes optional tags and a start date, and keeps its result small.
@@ -40,7 +40,7 @@ A search index breaks when its embedding model changes, and providers can remove
 
 - **Backend:** new `thoughts`, `search_indexes`, and `thought_embeddings` tables and one migration, the embedding resolver, the hybrid search, the real `search_thoughts` tool, the rebuild CLI (`python -m app.reembed`), and the data deletion endpoint. Thought storage and search need Postgres; SQLite stays for the tests of everything else.
 - **Infrastructure:** the compose Postgres image changes to one with pgvector, and the Chroma service, `CHROMA_URL`, and the `chroma_url` setting are removed.
-- **Frontend:** a "Delete my data" section in settings, with a confirmation step.
+- **Frontend:** a "Your data" section in settings with three delete buttons, each with a confirmation step.
 - **Configuration:** a system-wide embedding provider, model, and optional vector size, and search tuning in `chat.yaml`.
 - **External services:** an embeddings API from a provider in `model-providers`, called with each user's own key for that provider. A rebuild needs a valid stored key for each affected user.
 - **Data:** the deletion endpoint covers the `conversations`, `messages`, `usage_events`, `chat_models`, and `user_settings` tables from `conversation-agent` and the `provider_keys` table from `model-providers`. They cascade from the user.

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { USAGE_DELETED } from "@/lib/account";
 import { fakeApi, json } from "@/test/fake-api";
 
 import { niceTicks, tickDecimals } from "./usage-chart";
@@ -83,6 +84,18 @@ describe("UsageSection", () => {
     expect(await screen.findByText("Nothing has been used yet.")).toBeInTheDocument();
     expect(screen.queryAllByTestId("usage-bar")).toHaveLength(0);
     expect(screen.queryByRole("table", { name: "Spend by model" })).not.toBeInTheDocument();
+  });
+
+  it("loads again once the usage history is deleted", async () => {
+    fakeApi({ "GET /api/usage": [json(200, report(30, used)), json(200, report(30))] });
+    render(<UsageSection />);
+    expect(await screen.findAllByTestId("usage-bar")).toHaveLength(30);
+
+    act(() => {
+      window.dispatchEvent(new Event(USAGE_DELETED));
+    });
+
+    expect(await screen.findByText("Nothing has been used yet.")).toBeInTheDocument();
   });
 
   it("refetches when the period changes", async () => {

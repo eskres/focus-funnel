@@ -1,4 +1,4 @@
-"""Deleting all of a user's data (thought-storage task 8.1)."""
+"""Deleting a user's content, usage history, or account (thought-storage task 8.1)."""
 
 import uuid
 
@@ -62,6 +62,44 @@ def test_delete_removes_everything_of_the_user_only(client, alice, bob, fake_llm
         return (await session.execute(query)).scalar_one()
 
     assert run_db(test_database_url, user_exists) == 0
+
+
+CONTENT = {"thoughts", "search_indexes", "thought_embeddings", "conversations", "messages"}
+
+
+def test_delete_content_keeps_the_account_keys_settings_and_usage(
+    client, alice, bob, fake_llm, test_database_url
+):
+    alice_id = give_data(client, alice, fake_llm, test_database_url)
+    bob_id = give_data(client, bob, fake_llm, test_database_url)
+    before = everything(test_database_url, alice_id)
+    bob_before = everything(test_database_url, bob_id)
+    assert all(before[table] > 0 for table in CONTENT | {"usage_events", "provider_keys"})
+
+    assert client.delete("/api/me/content", headers=alice).status_code == 204
+
+    after = everything(test_database_url, alice_id)
+    assert {table for table, count in after.items() if count == 0} == CONTENT
+    assert {table: count for table, count in after.items() if table not in CONTENT} == {
+        table: count for table, count in before.items() if table not in CONTENT
+    }
+    assert everything(test_database_url, bob_id) == bob_before
+    assert user_id_for(client, alice) == alice_id
+    assert client.get("/api/usage?days=30", headers=alice).status_code == 200
+
+
+def test_delete_usage_removes_only_usage_records(client, alice, bob, fake_llm, test_database_url):
+    alice_id = give_data(client, alice, fake_llm, test_database_url)
+    bob_id = give_data(client, bob, fake_llm, test_database_url)
+    before = everything(test_database_url, alice_id)
+    bob_before = everything(test_database_url, bob_id)
+
+    assert client.delete("/api/me/usage", headers=alice).status_code == 204
+
+    after = everything(test_database_url, alice_id)
+    assert after == {**before, "usage_events": 0}
+    assert everything(test_database_url, bob_id) == bob_before
+    assert user_id_for(client, alice) == alice_id
 
 
 def test_the_next_request_starts_a_new_empty_user(client, alice, fake_llm, test_database_url):
@@ -150,8 +188,9 @@ def test_end_demo_removes_thoughts_and_entries_and_delete_me_is_404(demo_client,
 
     run_db(test_database_url, add_thought)
 
-    response = demo_client.delete("/api/me", headers=headers)
-    assert (response.status_code, response.json()["error"]["code"]) == (404, "not_found")
+    for path in ("/api/me", "/api/me/content", "/api/me/usage"):
+        response = demo_client.delete(path, headers=headers)
+        assert (response.status_code, response.json()["error"]["code"]) == (404, "not_found")
     assert thought_rows(test_database_url) == (1, 1, 1)
 
     assert demo_client.delete("/api/demo/session", headers=headers).status_code == 204
