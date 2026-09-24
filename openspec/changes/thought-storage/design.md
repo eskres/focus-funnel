@@ -44,7 +44,7 @@ An operator on a managed Postgres must have the extension available; `docs/searc
 One migration adds three tables. Each references `users.id` with `ON DELETE CASCADE`, like the tables before it.
 
 - `thoughts`: `id` (uuid), `user_id`, `title`, `summary`, `raw_text` (null), `category` (null), `tags` (`text[]`, normalized lowercase), `search_tsv` (`tsvector`), `created_at`, `updated_at`. Indexes: `(user_id, created_at)`, GIN on `tags`, GIN on `search_tsv`.
-- `search_indexes`: `id`, `user_id`, `version`, `embedding_provider`, `embedding_model`, `dimension` (int), `status` (`building`, `active`, `retired`), `created_at`, `retired_at` (null). Partial unique indexes allow one `active` and one `building` row per user.
+- `search_indexes`: `id`, `user_id`, `version`, `embedding_provider`, `embedding_model`, `dimension` (int), `requested_dimensions` (int, null: the `dimensions` asked of the model, so later calls ask the same even if the setting changes), `status` (`building`, `active`, `retired`), `created_at`, `retired_at` (null). Partial unique indexes allow one `active` and one `building` row per user.
 - `thought_embeddings`: `id`, `index_id` (cascade from `search_indexes`), `thought_id` (cascade from `thoughts`), `chunk` (int; 0 is the head, 1 and up are raw-text chunks), `start_char` and `end_char` (null for the head), `embedding` (`halfvec` with no fixed dimension, storage `MAIN`). Unique on `(index_id, thought_id, chunk)`, which also serves lookups by index and thought.
 
 `search_tsv` is written by the store operation in the same statement as the row, not as a generated column, so it can combine the tags array with weights: title and tags weight A, summary B, raw text C.
