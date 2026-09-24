@@ -13,8 +13,13 @@ from app.thoughts.embeddings import EmbeddingConfigError, resolve_embedding_mode
 def test_defaults_load(settings_env):
     settings = Settings()
     assert settings.embedding_provider == "nebius"
-    assert settings.embedding_model
-    assert settings.embedding_dimensions is None
+    assert settings.embedding_model == "Qwen/Qwen3-Embedding-8B"
+    assert settings.embedding_dimensions == 256
+
+
+def test_native_dimensions_send_none(settings_env):
+    settings_env.setenv("EMBEDDING_DIMENSIONS", "native")
+    assert Settings().embedding_dimensions is None
 
 
 def test_values_are_read(settings_env):

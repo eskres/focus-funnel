@@ -100,6 +100,12 @@ def test_min_similarity_is_picked_per_model():
     assert search.min_similarity_for("other/model") == 0.35
 
 
+def test_query_instruction_is_picked_per_model():
+    search = load_chat_config(FIXTURES / "valid.yaml").search
+    assert search.query_instruction_for("Vendor/Embed-large") == "Instruct: find notes\nQuery:"
+    assert search.query_instruction_for("other/model") == ""
+
+
 @pytest.mark.parametrize(
     "change, name",
     [
@@ -113,6 +119,9 @@ def test_min_similarity_is_picked_per_model():
         ({"min_similarity": {"default": 0.3, "models": [{"value": 0.5}]}}, "match"),
         ({"min_word_share": -1}, "search.min_word_share"),
         ({"min_word_share": 1.5}, "search.min_word_share"),
+        ({"query_instruction": "Query:"}, "search.query_instruction"),
+        ({"query_instruction": [{"text": "Query:"}]}, "match"),
+        ({"query_instruction": [{"match": "m", "text": " "}]}, "text"),
     ],
 )
 def test_an_invalid_search_value_fails_naming_it(tmp_path, change, name):

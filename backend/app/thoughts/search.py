@@ -237,6 +237,7 @@ async def search_thoughts(
         [(thought.id, thought_pieces(thought)) for thought in backfill],
         settings=settings,
         extra_texts=[query],
+        extra_instruction=config.query_instruction_for,
         conversation_id=conversation_id,
         http_client=http_client,
     )

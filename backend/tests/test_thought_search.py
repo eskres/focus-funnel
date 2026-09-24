@@ -1,10 +1,12 @@
 """Hybrid thought search (thought-storage task 6.1)."""
 
+from dataclasses import replace
 from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import update
 
+from app.chat.config import InstructionRule, get_chat_config
 from app.models import Thought
 from app.thoughts.search import search_thoughts
 from app.thoughts.store import store_thought
@@ -211,3 +213,19 @@ def test_search_fills_in_missing_embeddings(test_database_url, fake, alice_id):
     assert fake.embed_requests[0]["input"][0] == "groceries"
     assert titles(result) == ["Oat milk"] and result.hits[0].similarity is not None
 
+
+
+def test_query_instruction_goes_before_the_query_only(test_database_url, fake, alice_id):
+    fake.embed_replies.append(api_error(503))
+    store(test_database_url, alice_id, fake, "Oat milk", "Buy oat milk on the way home.")
+    fake.embed_requests.clear()
+    config = replace(
+        get_chat_config().search,
+        query_instructions=(InstructionRule(match="vendor/embed-*", text="Instruct: find\nQuery:"),),
+    )
+
+    search(test_database_url, alice_id, fake, "groceries", config=config)
+
+    texts = fake.embed_requests[0]["input"]
+    assert texts[0] == "Instruct: find\nQuery:groceries"
+    assert len(texts) > 1 and not any(text.startswith("Instruct") for text in texts[1:])

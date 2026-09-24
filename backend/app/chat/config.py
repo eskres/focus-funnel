@@ -37,6 +37,12 @@ class SimilarityRule:
 
 
 @dataclass(frozen=True)
+class InstructionRule:
+    match: str
+    text: str
+
+
+@dataclass(frozen=True)
 class SearchConfig:
     """Thought search tuning. See openspec thought-storage design decision 8."""
 
@@ -50,6 +56,7 @@ class SearchConfig:
     budget_chars: int
     summary_chars: int
     excerpt_chars: int
+    query_instructions: tuple[InstructionRule, ...] = ()
 
     def min_similarity_for(self, model: str) -> float:
         """The cut-off for a model: the first rule matching its id, else the default."""
@@ -57,6 +64,13 @@ class SearchConfig:
             if fnmatchcase(model.lower(), rule.match.lower()):
                 return rule.value
         return self.min_similarity
+
+    def query_instruction_for(self, model: str) -> str:
+        """The text put before a query for a model: the first rule matching its id, else none."""
+        for rule in self.query_instructions:
+            if fnmatchcase(model.lower(), rule.match.lower()):
+                return rule.text
+        return ""
 
 
 @dataclass(frozen=True)
@@ -138,10 +152,22 @@ def _parse_search(raw: object) -> SearchConfig:
             raise ChatConfigError(f"'{where}' needs a 'match' model id")
         rules.append(SimilarityRule(match=rule["match"], value=_similarity(rule.get("value"), f"{where}.value")))
     word_share = _similarity(raw.get("min_word_share"), "search.min_word_share")
+    instructions_raw = raw.get("query_instruction", [])
+    if not isinstance(instructions_raw, list):
+        raise ChatConfigError("'search.query_instruction' must be a list")
+    instructions = []
+    for index, rule in enumerate(instructions_raw):
+        where = f"search.query_instruction[{index}]"
+        if not isinstance(rule, dict) or not isinstance(rule.get("match"), str) or not rule["match"]:
+            raise ChatConfigError(f"'{where}' needs a 'match' model id")
+        if not isinstance(rule.get("text"), str) or not rule["text"].strip():
+            raise ChatConfigError(f"'{where}.text' must be a non-empty string")
+        instructions.append(InstructionRule(match=rule["match"], text=rule["text"]))
     return SearchConfig(
         min_similarity=default,
         similarity_rules=tuple(rules),
         min_word_share=word_share,
+        query_instructions=tuple(instructions),
         **ints,
     )
 

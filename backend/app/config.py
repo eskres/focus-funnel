@@ -36,10 +36,11 @@ class Settings(BaseSettings):
     # user's own key for this provider. An existing index keeps the model it
     # was built with until the operator rebuilds it (python -m app.reembed).
     embedding_provider: str = "nebius"
-    # Provisional until the embedding probe (thought-storage task 1.1).
+    # Chosen by the evaluation (openspec thought-storage design decision 9).
     embedding_model: str = "Qwen/Qwen3-Embedding-8B"
     # Sent as `dimensions` to models that can shorten their vectors.
-    embedding_dimensions: int | None = Field(default=None, gt=0)
+    # "native" sends none, for a model that cannot, or to keep full vectors.
+    embedding_dimensions: int | None = Field(default=256, gt=0)
 
     auth_mode: str | None = None
     oidc_issuer: str | None = None
@@ -81,6 +82,13 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             value = value.strip()
             return value or None
+        return value
+
+    @field_validator("embedding_dimensions", mode="before")
+    @classmethod
+    def native_dimensions(cls, value: object) -> object:
+        if isinstance(value, str) and value.strip().lower() == "native":
+            return None
         return value
 
     @field_validator("embedding_provider", "embedding_model")

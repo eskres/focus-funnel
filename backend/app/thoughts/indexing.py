@@ -9,6 +9,7 @@ when its index has no head (chunk 0) row for it.
 
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import httpx2
@@ -165,6 +166,7 @@ async def embed_for_index(
     *,
     settings: Settings,
     extra_texts: list[str] | None = None,
+    extra_instruction: Callable[[str], str] | None = None,
     create_status: str = ACTIVE,
     add_first: list[object] | None = None,
     conversation_id: uuid.UUID | None = None,
@@ -179,13 +181,19 @@ async def embed_for_index(
     thoughts stay without entries until a later call fills them in.
     `add_first` holds new rows the entries refer to, such as the thought
     being stored; they are added before the entries. The caller adds them
-    itself when the call fails, and commits.
+    itself when the call fails, and commits. `extra_instruction` gives, for
+    the model used, the text put before each extra text (a query), never
+    before a thought's pieces.
     """
     extra = list(extra_texts or [])
-    texts = extra + [piece.text for _, thought_pieces_ in items for piece in thought_pieces_]
-    if not texts:
+    piece_texts = [piece.text for _, thought_pieces_ in items for piece in thought_pieces_]
+    if not extra and not piece_texts:
         return EmbedOutcome(index=index)
     choice = choice_of(index) if index is not None else resolve_embedding_model(user, settings)
+    if extra_instruction is not None:
+        instruction = extra_instruction(choice.model)
+        extra = [instruction + text for text in extra]
+    texts = extra + piece_texts
     try:
         vectors = await embed_texts(
             session,

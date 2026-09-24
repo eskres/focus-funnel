@@ -64,7 +64,7 @@ A thought's score is its best entry's score. The chunk's character range gives t
 
 ### 4. Embedding through the provider seam, with the user's key
 
-The operator sets `EMBEDDING_PROVIDER` (a preset id, default `nebius`), `EMBEDDING_MODEL` (default from the probe in task 1.2), and optional `EMBEDDING_DIMENSIONS` (sent as `dimensions` to models that can shorten their vectors; set only if the probe shows the provider honors it and the evaluation shows no loss). Startup refuses an unknown provider, `custom`, or an empty model, naming the setting.
+The operator sets `EMBEDDING_PROVIDER` (a preset id, default `nebius`), `EMBEDDING_MODEL` (default `Qwen/Qwen3-Embedding-8B`, from the probe and the evaluation), and `EMBEDDING_DIMENSIONS` (sent as `dimensions` to models that can shorten their vectors; default 256, from the evaluation in decision 9; `native` sends none, for a model that cannot shorten its vectors). Startup refuses an unknown provider, `custom`, or an empty model, naming the setting.
 
 `embed_texts(session, user, provider_id, model, texts, *, kind, conversation_id=None)` builds the client with `client_for()`, so it uses only that user's key, and demo mode gets the held key as for chat. It calls `embeddings.create` with a 10-second timeout, maps errors with `map_provider_error(..., model_id=model)`, checks that every vector has the same length, and records one usage event of kind `embed` with the reported prompt tokens and no completion tokens. The cost uses the model list's prompt price when the provider lists one, else unknown. Texts go in batches of at most 64.
 
@@ -142,18 +142,23 @@ search:
   candidates: 50
   rrf_k: 60
   min_similarity:
-    default: <from the evaluation>
+    default: 0.35      # unmeasured, for a model with no rule
     models:            # similarity scales differ per model
-      - match: <model id pattern>
-        value: <from the evaluation>
+      - match: Qwen/Qwen3-Embedding-*
+        value: 0.48    # from the evaluation, at 256 dimensions (decision 9)
   min_word_share: 0.5      # from the words-only sweep (decision 5)
   backfill_batch: 16
   budget_chars: 2400
   summary_chars: 400
   excerpt_chars: 240
+  query_instruction:   # put before the query only, never before a thought
+    - match: Qwen/Qwen3-Embedding-*
+      text: "Instruct: Given a search query, retrieve the user's notes that match it\nQuery:"
 ```
 
 Loaded and checked at startup like the rest of `chat.yaml`.
+
+`query_instruction` was added by the evaluation. Qwen3-Embedding is trained to embed a query after a one-line task instruction and a document without one. Without it, an unrelated thought scored 0.45 to 0.55 against a query, about as high as a weak real match, so no threshold kept every expected thought while leaving the "nothing" queries empty. With it, at 1024 dimensions and the same recall, noise fell from 3.5 to 0.7 unexpected results per query and every "nothing" query came back empty. Search puts the matching rule's text before the query in the embeddings call; the thoughts, the backfill, and the rebuild never get it.
 
 ### 9. The evaluation set and probe
 
@@ -161,7 +166,26 @@ Loaded and checked at startup like the rest of `chat.yaml`.
 
 `backend/scripts/search_eval.py` embeds the set with a given provider, model, and dimension (using a key from the environment), stores it in a scratch database, runs meaning-only, words-only, and hybrid search, and reports recall at 5, mean reciprocal rank, the rate of empty results for the "nothing" queries, noise (unexpected results per query, each of which costs tokens), and the median tool-result size in characters. It also sweeps `min_similarity` for hybrid search and `min_word_share` for words only. The probe runs it for the candidate models and dimensions and records the choice and the tuning in this decision and in `chat.yaml`. `--stand-in` runs it with the tests' stand-in embedder, with no key.
 
-It also writes the chosen model's vectors to a compact fixture (`vectors.json`, float32 in base64), so a regression test runs the evaluation offline on Postgres and fails if hybrid recall at 5 or mean reciprocal rank drops more than 0.02 below the recorded baseline. Until task 6.4 runs, the fixture holds the stand-in embedder's vectors and says so.
+It also writes the chosen model's vectors to a compact fixture (`vectors.json`, float32 in base64), so a regression test runs the evaluation offline on Postgres and fails if hybrid recall at 5 or mean reciprocal rank drops more than 0.02 below the recorded baseline. The fixture now holds `Qwen/Qwen3-Embedding-8B` at 256 dimensions, with the query instruction, and its baseline: recall at 5 1.000, mean reciprocal rank 0.919.
+
+**Result (task 6.4, 2026-09-24).** Only Nebius was probed, and it serves one embedding model (decision 4), so the comparison is between vector sizes of `Qwen/Qwen3-Embedding-8B`. The sweep runs `min_similarity` from 0.20 to 0.70 in steps of 0.01. For each size, the table gives hybrid search at the highest `min_similarity` that keeps recall at 5 within 0.01 of its best:
+
+| Size | Query instruction | `min_similarity` | recall@5 | MRR | empty on "nothing" | noise |
+|---|---|---|---|---|---|---|
+| 4096 | no | 0.50 | 0.974 | 0.908 | 0.80 | 2.33 |
+| 1024 | no | 0.51 | 0.974 | 0.891 | 0.40 | 3.05 |
+| 512 | no | 0.55 | 0.949 | 0.897 | 0.60 | 1.97 |
+| 256 | no | 0.60 | 0.949 | 0.910 | 1.00 | 0.97 |
+| 4096 | yes | 0.42 | 1.000 | 0.944 | 1.00 | 0.59 |
+| 1024 | yes | 0.43 | 1.000 | 0.915 | 1.00 | 0.77 |
+| 512 | yes | 0.44 | 1.000 | 0.919 | 1.00 | 0.74 |
+| **256** | **yes** | **0.48** | **1.000** | **0.919** | **1.00** | **0.62** |
+
+Rows without the instruction used the 0.05-step sweep, except 1024. Meaning only reaches recall at 5 of 0.91 to 0.95 with the instruction; words only is 0.744 for every model (decision 5). The eight results a search returns without any threshold make a tool result of about 1,400 characters; at the chosen setting the median is 250.
+
+**Choice: 256 dimensions with the query instruction, `min_similarity` 0.48.** Every size reaches recall at 5 of 1.0 with the instruction. The mean reciprocal ranks at 1,024 dimensions and below differ by less than one query moving one place, and they changed by about 0.01 between two runs of the same size (1,024 scored 0.927 in the first run and 0.915 in the second), so they tie. The "nothing" queries tie at 1.0. 256 has the least noise in both runs, and the smallest vectors. Full vectors (4096) rank slightly better, 0.944, but that is one query ranked first instead of second, not a clear loss, and they miss the speed target by far (decision 10). Runner-up: 512 dimensions.
+
+The set has 60 thoughts; it cannot show whether 256 dimensions tell thoughts apart as well among thousands. If recall suffers for a large collection, raising `EMBEDDING_DIMENSIONS` to 512 and rebuilding is the first step, with `min_similarity` 0.44.
 
 ### 10. The speed benchmark
 

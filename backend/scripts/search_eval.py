@@ -139,6 +139,9 @@ async def embed_with_provider(
         raise SystemExit(f"Unknown provider '{provider_id}'.")
     client = AsyncOpenAI(base_url=provider.base_url, api_key=key, timeout=60.0, max_retries=3)
     entries, queries = texts_to_embed()
+    # As the app does: the model's query instruction from chat.yaml, before queries only.
+    instruction = load_chat_config().search.query_instruction_for(model)
+    queries = {key: instruction + text for key, text in queries.items()}
     keys, texts = list(entries) + list(queries), list(entries.values()) + list(queries.values())
     vectors: list[list[float]] = []
     extra = {"dimensions": dimensions} if dimensions else {}
@@ -367,6 +370,8 @@ def report(
         + ".",
         f"Thresholds from chat.yaml: min_similarity {config.min_similarity_for(vectors.model)}, "
         f"min_word_share {config.min_word_share}.",
+        "Query instruction from chat.yaml: "
+        + (f"`{config.query_instruction_for(vectors.model)!r}`." if config.query_instruction_for(vectors.model) else "none."),
         "",
         "| Mode | recall@5 | MRR | empty on 'nothing' | noise | median chars |",
         "|---|---|---|---|---|---|",
@@ -426,8 +431,8 @@ async def run(vectors: EvalVectors, database_url: str):
         user, index, names = await load_corpus(session, vectors)
         results = {mode: await score(session, user, index, names, vectors, config, mode) for mode in MODES}
         sweep = []
-        for step in range(0, 13):
-            threshold = round(0.15 + step * 0.05, 2)
+        for step in range(0, 51):
+            threshold = round(0.20 + step * 0.01, 2)
             sweep.append(
                 (threshold, await score(session, user, index, names, vectors, eval_config(base, threshold), "hybrid"))
             )

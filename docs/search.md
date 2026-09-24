@@ -22,13 +22,13 @@ One embedding model serves the whole instance. It is called with **each user's o
 ```sh
 # .env
 EMBEDDING_PROVIDER=nebius                 # a preset from backend/app/providers.yaml, not custom
-EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B   # provisional until the embedding probe picks the default
-EMBEDDING_DIMENSIONS=                     # optional, see below
+EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B   # the default, chosen by the evaluation below
+EMBEDDING_DIMENSIONS=256                  # the default; "native" keeps full vectors, see below
 ```
 
 The backend refuses to start with an unknown provider, with `custom` (its address differs per user), or with an empty model.
 
-`EMBEDDING_DIMENSIONS` asks models that can shorten their vectors for fewer dimensions. Keep vectors at 1,024 dimensions or fewer: the search compares every vector a user has, and at 2,048 or more it no longer meets its speed target (a 95th percentile under 50 ms for 5,000 thoughts). Check with the evaluation below that the shorter vectors lose no accuracy.
+These are the defaults, so an empty value gives the same. `EMBEDDING_DIMENSIONS` asks models that can shorten their vectors for fewer dimensions. Set it to `native` for a model that cannot shorten them: the model is then called without `dimensions`. Keep vectors at 1,024 dimensions or fewer: the search compares every vector a user has, and at 2,048 or more it no longer meets its speed target (a 95th percentile under 50 ms for 5,000 thoughts). Check with the evaluation below that the shorter vectors lose no accuracy.
 
 ### What users need
 
@@ -47,6 +47,7 @@ Embedding calls appear in the usage section of Settings, like chat calls.
 
 - `min_similarity`: how close in meaning a thought must be. It depends on the model, so rules can set it per model.
 - `min_word_share`: the share of the question's words a thought must hold to pass on words alone.
+- `query_instruction`: text put before the question, per model, for embedding models that expect a task instruction (Qwen3-Embedding does). The thoughts themselves are embedded without it.
 
 After changing the embedding model, rerun the evaluation to set `min_similarity` for it:
 
@@ -54,15 +55,15 @@ After changing the embedding model, rerun the evaluation to set `min_similarity`
 cd backend
 NEBIUS_API_KEY=... uv run python -m scripts.search_eval \
     --database-url postgresql+asyncpg://focus_funnel:focus_funnel@localhost:55432/focus_funnel \
-    --provider nebius --model Qwen/Qwen3-Embedding-8B --dimensions 1024 --report eval.md
+    --provider nebius --model Qwen/Qwen3-Embedding-8B --dimensions 256 --report eval.md
 ```
 
-It needs a Postgres with pgvector (the compose one with `docker-compose.dev.yml` exposes port 55432) and creates and drops its own scratch database there. The report compares search by meaning, by words, and both, and sweeps both cut-offs. Add `--write-fixture` to record the chosen model's vectors and scores for the regression test (`tests/test_search_quality.py`).
+It uses the model's `query_instruction` from `chat.yaml`, as the app does. It needs a Postgres with pgvector (the compose one with `docker-compose.dev.yml` exposes port 55432) and creates and drops its own scratch database there. The report compares search by meaning, by words, and both, and sweeps both cut-offs. Add `--write-fixture` to record the chosen model's vectors and scores for the regression test (`tests/test_search_quality.py`).
 
 To check speed with a given vector size:
 
 ```sh
-uv run python -m scripts.search_bench --database-url <same URL> --dimension 1024
+uv run python -m scripts.search_bench --database-url <same URL> --dimension 256
 ```
 
 ## Rebuilding search indexes
