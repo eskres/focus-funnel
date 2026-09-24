@@ -109,9 +109,9 @@
 
 ## 13. Realign the planned changes
 
-- [ ] 13.1 Update the project context in `openspec/config.yaml` to describe one model with two tools, stored conversations, and no router. Check by reading it against this change's proposal
-- [ ] 13.2 Update the proposals for `explore-gate`, `push-and-pull-gates`, and `thought-storage`: sessions become conversations, the tools replace the placeholder handlers, the proposal card replaces the push preview trigger, and account deletion covers conversations and usage. Check that each proposal names this change as a dependency and no longer mentions the router or gates
-- [ ] 13.3 After this change is archived, check with `openspec validate --specs` that no spec mentions the router or per-gate models
+- [x] 13.1 Update the project context in `openspec/config.yaml` to describe one model with two tools, stored conversations, and no router. Check by reading it against this change's proposal
+- [x] 13.2 Update the proposals for `explore-gate`, `push-and-pull-gates`, and `thought-storage`: sessions become conversations, the tools replace the placeholder handlers, the proposal card replaces the push preview trigger, and account deletion covers conversations and usage. Check that each proposal names this change as a dependency and no longer mentions the router or gates
+- [x] 13.3 Check the delta specs of this change and `model-providers` for any mention of the router or per-gate models. Done 2026-09-24: a search for `router`, `routing`, and `gate` found only "There is no separate routing step" and the OpenRouter provider name. `openspec validate --specs` runs as part of archiving
 
 ## 14. Full system check
 

@@ -1,38 +1,38 @@
-> **Planning status:** Proposal only. Write the specs, design, and tasks when this change is picked up. Depends on `gate-framework` and `thought-storage`.
+> **Planning status:** Proposal only. Write the specs, design, and tasks when this change is picked up. Depends on `conversation-agent` and `thought-storage`.
 
 ## Why
 
-Filing thoughts away (/push) and finding them again (/pull) are the core value of Focus Funnel. Everything before this change is groundwork. This change turns a brain dump into stored, searchable thoughts, and turns questions into answers built from those thoughts.
+Filing thoughts away (`/push`) and finding them again (`/pull`) are the core value of Focus Funnel. `conversation-agent` gives the chat model two tools for this, `propose_thought` and `search_thoughts`, and a proposal card the user edits and confirms. `thought-storage` makes the search tool real. Confirming a proposal still answers that saving is not available yet, and a search result is not yet shown to the user as sources. This change turns a confirmed proposal into a stored thought, and turns a question into an answer built from stored thoughts with links to them.
 
 ## What Changes
 
-- **/push:**
-  - The push gate model writes a title, summary, tags, and category for the user's text.
-  - The model sees the user's existing tags and reuses them where they fit.
-  - The user sees a preview and can edit any field before saving. Nothing saves without the user's confirmation.
-  - The raw text is always kept alongside the summary.
-- **/push split suggestion:**
-  - If the model decides the text holds several separate thoughts, it suggests a split and asks the user.
-  - The user can accept the split (each part gets its own preview), change the suggested parts, or save everything as one thought.
-- **/pull:**
-  - Search the user's thoughts by meaning.
-  - Stream an answer from the pull gate model that is built from the matching thoughts.
-  - Link to each source thought the answer uses.
-- **/pull filters and sorting:** Filter by one or more tags. Source thoughts start in relevance order, and a toggle re-sorts the same results newest first.
-- **When nothing matches:** /pull says so plainly and does not invent an answer.
-- **Thought detail view:** Shows the raw text, summary, title, tags, category, and dates. /pull answers link to this view.
+- **Filing (`/push` and proposals from a discussion):**
+  - Replace the `save_thought` seam behind the confirm endpoint with a real save through `thought-storage`. The card shows that the thought was saved and links to it.
+  - The raw text is always kept alongside the summary. The design decides what the raw text is for a proposal that ends a discussion rather than a single `/push` message.
+  - Add a category to the `propose_thought` tool and the card.
+  - Give the model the user's existing tags in the turn context, so it reuses them where they fit.
+  - Nothing saves without the user's confirmation, as in `conversation-agent`.
+- **Split suggestion:** If the text holds several separate thoughts, the model proposes each one, and the chat shows one card per part. The user can confirm each, edit the parts, or merge them into one thought.
+- **Recall (`/pull` and search from a discussion):**
+  - When `search_thoughts` returns thoughts, the chat shows them as sources under the answer and links to each one.
+  - Sources start in relevance order, and a toggle re-sorts the same results newest first.
+  - The user can filter by one or more tags, which the search tool passes to the search.
+- **When nothing matches:** the tool result says so, and the model says so plainly and does not invent an answer.
+- **Thought detail view:** Shows the raw text, summary, title, tags, category, and dates. Source links and the saved-proposal link open this view.
 
 ## Capabilities
 
 ### New Capabilities
-- `push-gate`: Writing the preview, editing and confirming it, and the split suggestion flow.
-- `pull-gate`: Retrieval, the written answer with source links, tag filters, newest-first sort, and the empty-result behavior.
+- `thought-filing`: Saving a confirmed proposal, tag reuse, category, and the split suggestion.
+- `thought-recall`: Sources under an answer, tag filters, newest-first sort, and the empty-result behavior.
 - `thought-detail-view`: Viewing a single stored thought.
 
 ### Modified Capabilities
-- `message-routing`: Replaces the push and pull placeholder handlers with real ones.
+- `conversation-agent`: Confirming a proposal saves it; the proposal tool gains a category; the search tool takes tag filters and returns source ids.
+- `chat-interface`: The proposal card shows the saved outcome and a link; answers show their sources.
 
 ## Impact
 
-- **Backend:** push and pull gate handlers, prompts, a structured preview response for push, an SSE answer stream for pull, and endpoints to confirm a push.
-- **Frontend:** push preview and edit UI, split suggestion UI, pull answer with source links, tag filter and newest-first toggle, thought detail page.
+- **Backend:** the real `save_thought` function, the category field in the proposal tool and `held_proposal`, existing tags in the turn context, source ids in the `tool` event, and a thought detail endpoint.
+- **Frontend:** saved state on the proposal card, one card per part for a split, a sources list with tag filter and newest-first toggle, and the thought detail page.
+- **Naming:** the folder name is historical. Both behaviors run through the one chat model and its tools.

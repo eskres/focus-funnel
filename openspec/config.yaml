@@ -15,16 +15,21 @@ context: |
   backend/app/providers.yaml, and provider-neutral errors
   (provider_key_missing/invalid/rejected, provider_unreachable,
   provider_rate_limited, provider_request_refused).
-  Gates (chat commands):
-  - /push: file a thought away. Stores raw text + model summary, title, tags,
-    category. User confirms before save; model may suggest a split.
-  - /pull: find filed thoughts by meaning and answer from them, linking sources.
-    Tag filter; relevance order with newest-first toggle.
-  - /explore: discuss and refine a thought before saving. Sessions persist;
-    searches past thoughts via tool call; "Save" hands off to the /push preview.
-  - No slash command: the router gate picks one.
-  Gates live in one extensible registry. Per-gate model/temperature/max_tokens:
-  user override, else gates.yaml default. Never fall back to another model.
+  Chat (conversation-agent change): one model per conversation, no router,
+  no gates. Each turn is one streamed call with the system prompt, the
+  conversation, and two tools: search_thoughts (what /pull does) and
+  propose_thought (what /push does). A tool call stores nothing; a proposal
+  is saved only when the user confirms the proposal card. A held proposal is
+  not repeated; it comes back on a topic change, archive, and /compact.
+  Commands: /push and /pull force their tool; /explore (the default mode)
+  discusses; /compact summarises older turns; /delete is browser-only.
+  Conversations and messages are stored per user (sidebar with resume,
+  archive, restore). Models: a loadout of up to 5 provider+model entries
+  with one default, reasoning effort per model, temperature in settings;
+  the conversation keeps its own model and effort. chat.yaml holds the
+  server's reply length cap, tool round limit, and effort table. Usage
+  (tokens, estimated cost) is recorded per model call. Never fall back to
+  another model.
   Rules:
   - Browser -> Next.js proxy -> private FastAPI. Token stays server-side.
   - Data is owner-scoped; another user's record returns 404.
