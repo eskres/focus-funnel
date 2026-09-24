@@ -45,7 +45,7 @@ const ACTIONS: Action[] = [
     description: "Your filed thoughts and their search index, and your conversations.",
     question: "Delete your content?",
     deleted:
-      "Your filed thoughts and their search index, and your conversations and their messages, are deleted for good. Your account, API keys, models, and usage history stay.",
+      "Your filed thoughts and their search index, and your conversations and their messages, are deleted for good. Your account, API keys, models, categories, and usage history stay.",
     confirm: "Delete content",
     run: deleteMyContent,
     after: () => {},
@@ -64,10 +64,10 @@ const ACTIONS: Action[] = [
   {
     id: "account",
     label: "Delete account",
-    description: "Everything above, plus your API keys, models, and settings, then log out.",
+    description: "Everything above, plus your API keys, models, categories, and settings, then log out.",
     question: "Delete your account?",
     deleted:
-      "Your filed thoughts and their search index, your conversations, your usage history, your API keys, and your models and settings are deleted for good, and you are logged out. Logging in again starts an empty account.",
+      "Your filed thoughts and their search index, your conversations, your usage history, your API keys, and your models, categories, and settings are deleted for good, and you are logged out. Logging in again starts an empty account.",
     confirm: "Delete account",
     run: deleteMyAccount,
     after: logOut,

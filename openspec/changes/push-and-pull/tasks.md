@@ -17,7 +17,7 @@
 ## 4. Saving
 
 - [x] 4.1 Split `store_thought()` into `add_thought()` and `store_thought()`, and replace `save_thought` and the old confirm route with `POST /api/conversations/{id}/proposals/{proposal_id}/confirm` from design decision 4. Check with pytest on Postgres for each "Confirming a proposal saves it" scenario: the edited title, tags, and category are stored with the proposal's raw text; two concurrent confirms of the same part store one thought and both answer its id; a merged confirm of all parts stores one thought and marks every part; a merge after one part is saved answers 409 `proposal_part_saved`; a 201-character title answers 422 naming the title and stores nothing; an unreachable embedding provider still saves; another user's conversation answers 404; the last saved part clears `held_proposal_id`; and a replaced proposal's card still saves
-- [ ] 4.2 Remove the "not available yet" paths and texts from the backend and frontend. Check that a search of `backend/app` and `frontend` outside tests finds no "not available yet", and that the full default and `postgres` pytest runs pass
+- [x] 4.2 Remove the "not available yet" paths and texts from the backend and frontend. Check that a search of `backend/app` and `frontend` outside tests finds no "not available yet", and that the full default and `postgres` pytest runs pass
 
 ## 5. Sources and detail
 
@@ -26,9 +26,9 @@
 
 ## 6. Chat screen
 
-- [ ] 6.1 Rework the proposal card for parts: one card per part in a group, a category `Select` with "None", confirm per part, a "Merge into one" button shown only while no part is saved and there are two or more parts, the saved state with an "Open" link to `?thought=<id>`, and the server's field error kept on the card. Check with vitest for each `thought-filing` split scenario and the `chat-interface` card scenarios, including that merge builds the first title and category, both summaries as paragraphs, and the tags without repeats, and makes no request
-- [ ] 6.2 Rebuild cards and sources from stored messages when a conversation opens. Check with vitest that a reopened conversation shows a saved card as saved with its link and an unsaved card as editable, and that each answer shows the sources it had
-- [ ] 6.3 Add the sources list under an answer from design decision 7: sources of every search in the answer, each once, a relevance / newest-first toggle, tag chips matching any picked tag, and no list when there are no sources. Check with vitest for each `thought-recall` scenario, and that sorting and filtering make no request
+- [x] 6.1 Rework the proposal card for parts: one card per part in a group, a category `Select` with "None", confirm per part, a "Merge into one" button shown only while no part is saved and there are two or more parts, the saved state with an "Open" link to `?thought=<id>`, and the server's field error kept on the card. Check with vitest for each `thought-filing` split scenario and the `chat-interface` card scenarios, including that merge builds the first title and category, both summaries as paragraphs, and the tags without repeats, and makes no request
+- [x] 6.2 Rebuild cards and sources from stored messages when a conversation opens. Check with vitest that a reopened conversation shows a saved card as saved with its link and an unsaved card as editable, and that each answer shows the sources it had
+- [x] 6.3 Add the sources list under an answer from design decision 7: sources of every search in the answer, each once, a relevance / newest-first toggle, tag chips matching any picked tag, and no list when there are no sources. Check with vitest for each `thought-recall` scenario, and that sorting and filtering make no request
 - [ ] 6.4 Add the shadcn `Sheet` and the thought detail sheet driven by `?thought=<id>` from design decision 8. Check with vitest that it shows every field, hides the raw text when empty or equal to the summary, shows "This thought no longer exists." on a 404, and offers no edit or delete; and in the running app that Back closes it, that a copied address opens the same thought, and that closing keeps the scroll position and the composer's text
 
 ## 7. Prompt probes

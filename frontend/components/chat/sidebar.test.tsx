@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fakeApi, json, summary } from "@/test/fake-api";
+import { fakeApi, json, summary, wireProposal } from "@/test/fake-api";
 
 import { ConversationsProvider } from "./conversations-context";
 import { Sidebar } from "./sidebar";
@@ -106,7 +106,7 @@ describe("Sidebar", () => {
         json(200, { conversations: [rent, milk], archived: [] }),
         json(200, { conversations: [milk], archived: [{ ...rent, archived: true }] }),
       ],
-      "POST /api/conversations/c1/proposal": json(200, { held_proposal: null }),
+      "POST /api/conversations/c1/proposal": json(200, { proposal: null }),
       "PATCH /api/conversations/c1": json(200, { ...rent, archived: true, messages: [] }),
     });
     renderSidebar();
@@ -122,13 +122,13 @@ describe("Sidebar", () => {
   });
 
   it("shows the held proposal before archiving, then archives", async () => {
-    const held = { title: "Rent plan", summary: "Pay rent on the 1st.", tags: ["money"], position: 3 };
+    const held = wireProposal("p1", [{ title: "Rent plan", summary: "Pay rent on the 1st.", tags: ["money"] }], 3);
     const { calls } = fakeApi({
       "GET /api/conversations": [
         json(200, { conversations: [rent, milk], archived: [] }),
         json(200, { conversations: [milk], archived: [{ ...rent, archived: true }] }),
       ],
-      "POST /api/conversations/c1/proposal": json(200, { held_proposal: held }),
+      "POST /api/conversations/c1/proposal": json(200, { proposal: held }),
       "PATCH /api/conversations/c1": json(200, { ...rent, archived: true, messages: [] }),
     });
     renderSidebar();
@@ -148,10 +148,10 @@ describe("Sidebar", () => {
   });
 
   it("does not archive when the proposal is cancelled", async () => {
-    const held = { title: "Rent plan", summary: "Pay rent on the 1st.", tags: [], position: 3 };
+    const held = wireProposal("p1", [{ title: "Rent plan", summary: "Pay rent on the 1st.", tags: [] }], 3);
     const { calls } = fakeApi({
       "GET /api/conversations": json(200, { conversations: [rent], archived: [] }),
-      "POST /api/conversations/c1/proposal": json(200, { held_proposal: held }),
+      "POST /api/conversations/c1/proposal": json(200, { proposal: held }),
     });
     renderSidebar();
 
@@ -235,7 +235,8 @@ describe("Sidebar with the chat", () => {
       "GET /api/conversations/c3": json(200, {
         ...bikes,
         last_prompt_tokens: null,
-        held_proposal: null,
+        held_proposal_id: null,
+    proposals: [],
         messages: [storedMessage(0, "user", "bikes?"), storedMessage(1, "assistant", "Yes.")],
       }),
       "POST /api/chat": () => streamOf(delta("Back again."), done),

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { CategoriesProvider } from "@/components/chat/categories-context";
 import { ConversationsProvider } from "@/components/chat/conversations-context";
 import { Sidebar } from "@/components/chat/sidebar";
 import { DemoBar } from "@/components/demo/demo-bar";
@@ -29,10 +30,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           </nav>
         </header>
         <ConversationsProvider>
-          <div className="flex min-h-0 flex-1">
-            <Sidebar />
-            <main className="flex min-h-0 flex-1 flex-col">{children}</main>
-          </div>
+          <CategoriesProvider>
+            <div className="flex min-h-0 flex-1">
+              <Sidebar />
+              <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+            </div>
+          </CategoriesProvider>
         </ConversationsProvider>
       </div>
     </DemoProvider>

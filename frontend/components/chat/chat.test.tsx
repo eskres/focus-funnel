@@ -46,7 +46,8 @@ function conversation(extra: Record<string, unknown> = {}) {
     last_activity_at: "2026-09-23T10:00:00Z",
     created_at: "2026-09-23T10:00:00Z",
     last_prompt_tokens: null,
-    held_proposal: null,
+    held_proposal_id: null,
+    proposals: [],
     messages: [storedMessage(0, "user", "about rent"), storedMessage(1, "assistant", "Tell me more.")],
     ...extra,
   };

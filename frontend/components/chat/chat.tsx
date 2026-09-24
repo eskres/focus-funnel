@@ -19,6 +19,8 @@ import {
   type ToolIndication,
 } from "@/components/chat/message-list";
 import { ModelPicker, type ModelOption } from "@/components/chat/model-picker";
+import { withSources } from "@/components/chat/sources-list";
+import { ThoughtSheet } from "@/components/chat/thought-sheet";
 import {
   ProposalDialog,
   heldProposalFor,
@@ -31,6 +33,8 @@ import {
   acceptCompaction,
   deleteConversation,
   getConversation,
+  storedProposals,
+  storedSources,
   type ContextMeter as StoredMeter,
   type ConversationDetail,
   type StoredMessage,
@@ -44,15 +48,37 @@ import {
   type UsageWarning,
 } from "@/lib/models";
 import { redirectToLogin } from "@/lib/redirect-to-login";
-import type { CompactModel } from "@/lib/sse";
+import type { CompactModel, Proposal } from "@/lib/sse";
 
-/** Rebuilds the chat items from stored messages: one answer per user message. */
-function fromStored(stored: StoredMessage[], nextId: () => number): ChatMessage[] {
+/**
+ * Rebuilds the chat items from stored messages: one answer per user message,
+ * with the proposal cards and sources it showed.
+ */
+function fromStored(
+  stored: StoredMessage[],
+  proposals: Proposal[],
+  nextId: () => number,
+): ChatMessage[] {
   const items: ChatMessage[] = [];
+  const byId = new Map(proposals.map((proposal) => [proposal.id, proposal]));
+  // The answer each stored position belongs to, for proposals no tool message names.
+  const answerAt: { position: number; answer: AnswerMessage }[] = [];
   let answer: AnswerMessage | null = null;
   let prompt = "";
   for (const message of stored) {
     const compacted = message.compacted;
+    if (message.role === "tool") {
+      if (!answer) continue;
+      const sources = message.details?.sources !== undefined ? storedSources(message) : null;
+      if (sources) answer.sources = withSources(answer.sources ?? [], sources);
+      const proposal = byId.get(message.details?.proposal_id ?? "");
+      if (proposal) {
+        answer.proposals = [...(answer.proposals ?? []), proposal];
+        byId.delete(proposal.id);
+      }
+      answerAt.push({ position: message.position, answer });
+      continue;
+    }
     if (message.role === "user") {
       prompt = message.content ?? "";
       items.push({ id: nextId(), role: "user", text: prompt, compacted });
@@ -81,6 +107,7 @@ function fromStored(stored: StoredMessage[], nextId: () => number): ChatMessage[
       answer.tools.push({ name: call.function.name, state: "done" });
     }
     answer.text += message.content ?? "";
+    answerAt.push({ position: message.position, answer });
     if (message.status !== "complete" || message.error_code) {
       answer.status = message.status === "cut" && !message.error_code ? "cut" : "failed";
       answer.error = createApiError(
@@ -89,6 +116,12 @@ function fromStored(stored: StoredMessage[], nextId: () => number): ChatMessage[
         200,
       );
     }
+  }
+  // A proposal offered before archive or /compact has no tool message: it
+  // goes with the answer it followed.
+  for (const proposal of byId.values()) {
+    const owner = answerAt.findLast((entry) => entry.position <= proposal.position)?.answer;
+    if (owner) owner.proposals = [...(owner.proposals ?? []), proposal];
   }
   return items;
 }
@@ -202,7 +235,9 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
       .then((conversation) => {
         if (cancelled) return;
         setTitle(conversation.title);
-        setMessages(fromStored(conversation.messages, () => nextId.current++));
+        setMessages(
+          fromStored(conversation.messages, storedProposals(conversation), () => nextId.current++),
+        );
         setMeter(toMeter(conversation.context));
         const stored = storedChoice(conversation);
         setOwn(stored);
@@ -310,7 +345,8 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
       ...a,
       text: "",
       tools: [],
-      proposal: undefined,
+      proposals: undefined,
+      sources: undefined,
       error: undefined,
       status: "streaming",
     }));
@@ -374,7 +410,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
   async function acceptDraft(summary: string, throughPosition: number) {
     if (!conversationId) return;
     const detail = await acceptCompaction(conversationId, summary, throughPosition);
-    setMessages(fromStored(detail.messages, () => nextId.current++));
+    setMessages(fromStored(detail.messages, storedProposals(detail), () => nextId.current++));
     setMeter(toMeter(detail.context));
     setCompactSuggested(false);
     setCompactState(null);
@@ -426,12 +462,21 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
             setTitle(event.title);
             void refresh();
             break;
-          case "tool":
-            updateAnswer(answerId, (a) => ({ ...a, tools: withTool(a.tools, event) }));
+          case "tool": {
+            const found = event.sources;
+            updateAnswer(answerId, (a) => ({
+              ...a,
+              tools: withTool(a.tools, event),
+              ...(found ? { sources: withSources(a.sources ?? [], found) } : {}),
+            }));
             break;
+          }
           case "proposal": {
-            const { title, summary, tags } = event;
-            updateAnswer(answerId, (a) => ({ ...a, proposal: { title, summary, tags } }));
+            const { id, position, parts } = event;
+            updateAnswer(answerId, (a) => ({
+              ...a,
+              proposals: [...(a.proposals ?? []), { id, position, parts }],
+            }));
             break;
           }
           case "delta":
@@ -555,6 +600,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         </div>
       </div>
       <ProposalDialog offer={offer} onClose={() => setOffer(null)} />
+      <ThoughtSheet />
       <DemoNoticeDialog
         open={heldForNotice !== null}
         providerId={choice?.providerId ?? null}

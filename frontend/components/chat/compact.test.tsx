@@ -44,7 +44,8 @@ function conversation(extra: Record<string, unknown> = {}) {
     last_activity_at: "2026-09-23T10:00:00Z",
     created_at: "2026-09-23T10:00:00Z",
     last_prompt_tokens: 1000,
-    held_proposal: null,
+    held_proposal_id: null,
+    proposals: [],
     context: { tokens: 1000, estimated: false, context_length: 131072 },
     messages: TEN,
     ...extra,
@@ -60,7 +61,7 @@ function figure() {
   return screen.getByTestId("context-figure").textContent;
 }
 
-const nothingHeld = json(200, { held_proposal: null });
+const nothingHeld = json(200, { proposal: null });
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/app/c1");
