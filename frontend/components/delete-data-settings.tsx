@@ -1,5 +1,6 @@
 "use client";
 
+import { CheckIcon, LoaderCircleIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useDemo } from "@/components/demo/demo-context";
@@ -21,6 +22,10 @@ import {
   logOut,
 } from "@/lib/account";
 import { ApiError } from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+/** How long the tick shows before the dialog closes or the logout starts. */
+export const DONE_MS = 800;
 
 type Action = {
   id: "content" | "usage" | "account";
@@ -77,33 +82,36 @@ const ACTIONS: Action[] = [
 export function DeleteDataSection() {
   const demo = useDemo();
   const [action, setAction] = useState<Action | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<"idle" | "busy" | "done">("idle");
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<string | null>(null);
+  const busy = phase !== "idle";
 
   if (demo) return null;
 
   function open(chosen: Action) {
     setError(null);
-    setDone(null);
+    setPhase("idle");
     setAction(chosen);
   }
 
   async function confirmDelete() {
     if (!action) return;
-    setBusy(true);
+    setPhase("busy");
     setError(null);
     try {
       await action.run();
-      action.after();
-      if (action.id !== "account") {
-        setDone(`${action.label}: done.`);
-        setAction(null);
-        setBusy(false);
-      }
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Could not delete. Try again.");
-      setBusy(false);
+      setPhase("idle");
+      return;
+    }
+    // The tick shows for a moment, then the dialog closes, or the logout starts.
+    setPhase("done");
+    await new Promise((resolve) => setTimeout(resolve, DONE_MS));
+    action.after();
+    if (action.id !== "account") {
+      setAction(null);
+      setPhase("idle");
     }
   }
 
@@ -127,11 +135,6 @@ export function DeleteDataSection() {
             <p className="text-sm text-muted-foreground">{item.description}</p>
           </div>
         ))}
-        {done && (
-          <p role="status" className="text-sm text-muted-foreground">
-            {done}
-          </p>
-        )}
       </CardContent>
       <Dialog open={action !== null} onOpenChange={(next) => !next && !busy && setAction(null)}>
         <DialogContent showCloseButton={false}>
@@ -146,8 +149,25 @@ export function DeleteDataSection() {
                 <Button variant="outline" onClick={() => setAction(null)} disabled={busy}>
                   Cancel
                 </Button>
-                <Button variant="destructive" onClick={confirmDelete} disabled={busy}>
-                  {action.confirm}
+                <Button
+                  variant="destructive"
+                  onClick={confirmDelete}
+                  disabled={busy}
+                  aria-label={
+                    phase === "busy" ? "Deleting…" : phase === "done" ? "Deleted" : undefined
+                  }
+                  className={cn(
+                    "relative disabled:opacity-100",
+                    phase === "busy" && "bg-amber-600/10 text-amber-600",
+                    phase === "done" && "bg-green-600/10 text-green-600",
+                  )}
+                >
+                  {/* The label keeps the button's width while the icon shows. */}
+                  <span className={cn(busy && "invisible")}>{action.confirm}</span>
+                  {phase === "busy" && (
+                    <LoaderCircleIcon aria-hidden className="absolute animate-spin" />
+                  )}
+                  {phase === "done" && <CheckIcon aria-hidden className="absolute" />}
                 </Button>
               </DialogFooter>
             </>

@@ -55,8 +55,9 @@ describe("Your data", () => {
     expect(within(dialog).getByText(/usage history stay/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete content" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Delete content: done.");
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(await within(dialog).findByRole("button", { name: "Deleted" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), { timeout: 2000 });
+    expect(screen.queryByRole("status")).toBeNull();
     expect(api.calls.map((call) => `${call.method} ${call.path}`)).toEqual(["DELETE /api/me/content"]);
     expect(logOut).not.toHaveBeenCalled();
   });
@@ -71,20 +72,30 @@ describe("Your data", () => {
       within(openDialog("Delete usage history")).getByRole("button", { name: "Delete usage history" }),
     );
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Delete usage history: done.");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), { timeout: 2000 });
     expect(api.calls.map((call) => `${call.method} ${call.path}`)).toEqual(["DELETE /api/me/usage"]);
     expect(heard).toHaveBeenCalledTimes(1);
     expect(logOut).not.toHaveBeenCalled();
     window.removeEventListener(USAGE_DELETED, heard);
   });
 
-  it("deletes the account, then logs out", async () => {
-    const api = fakeApi({ "DELETE /api/me": deleted() });
+  it("deletes the account with a spinner, then a tick, then logs out", async () => {
+    let answer!: (response: Response) => void;
+    const api = fakeApi({ "DELETE /api/me": () => new Promise<Response>((resolve) => (answer = resolve)) });
     render(<DeleteDataSection />);
 
-    fireEvent.click(within(openDialog("Delete account")).getByRole("button", { name: "Delete account" }));
+    const dialog = openDialog("Delete account");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete account" }));
 
-    await waitFor(() => expect(logOut).toHaveBeenCalledTimes(1));
+    const spinner = await within(dialog).findByRole("button", { name: "Deleting…" });
+    expect(spinner).toBeDisabled();
+    expect(spinner).toHaveClass("bg-amber-600/10");
+    answer(deleted());
+    const tick = await within(dialog).findByRole("button", { name: "Deleted" });
+    expect(tick).toHaveClass("bg-green-600/10");
+    expect(logOut).not.toHaveBeenCalled();
+
+    await waitFor(() => expect(logOut).toHaveBeenCalledTimes(1), { timeout: 2000 });
     expect(api.calls.map((call) => `${call.method} ${call.path}`)).toEqual(["DELETE /api/me"]);
   });
 
