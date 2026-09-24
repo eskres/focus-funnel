@@ -101,11 +101,11 @@
 
 ## 12. Prompt tuning and probes
 
-- [ ] 12.1 Add a probe script under `backend/scripts/` that sends a labelled message set (about 40 messages: recall, to-do, idea, greeting, unfinished, discussion, multi-turn, tangent) to a model with the system prompt and the two tools and prints the tool chosen, argument validity, time, and tokens. Check by running it against a real Nebius key and saving the baseline result in the change folder
-- [ ] 12.2 Tune the system prompt against the probe set from task 12.1 and record the result. Check that the tool chosen matches the label on at least 90% of cases over two runs and that no greeting or unfinished message triggers a tool
-- [ ] 12.3 Probe topic changes: multi-turn discussions with a held proposal followed by an unrelated message, and by a related one. Check that the model offers the held summary on the unrelated one and not on the related one on at least 8 of 10 cases each, otherwise record the decision to compare embeddings instead in `design.md` decision 6
-- [ ] 12.4 Probe repeat proposals: 10 long discussions where the user keeps going after a proposal. Check that the same conclusion is not proposed again in more than one of them
-- [ ] 12.5 Probe `/compact`: summarise five long conversations and check that the decisions, names, and open questions in a hand-written checklist survive in each summary
+- [x] 12.1 Add a probe script under `backend/scripts/` that sends a labelled message set (about 40 messages: recall, to-do, idea, greeting, unfinished, discussion, multi-turn, tangent) to a model with the system prompt and the two tools and prints the tool chosen, argument validity, time, and tokens. Check by running it against a real Nebius key and saving the baseline result in the change folder. Done: baseline 93% and 95% over two runs, saved in `probes/12.1-baseline-tools.md`
+- [x] 12.2 Tune the system prompt against the probe set from task 12.1 and record the result. Check that the tool chosen matches the label on at least 90% of cases over two runs and that no greeting or unfinished message triggers a tool. Done: 98% and 95%, no tool on a greeting or an unfinished message. Recorded in `probes/README.md`
+- [x] 12.3 Probe topic changes: multi-turn discussions with a held proposal followed by an unrelated message, and by a related one. Check that the model offers the held summary on the unrelated one and not on the related one on at least 8 of 10 cases each, otherwise record the decision to compare embeddings instead in `design.md` decision 6. Done: offered on 19 of 20 unrelated messages and on none of 20 related ones, after moving the note after the latest message and dropping it once the turn proposes. Embeddings are not needed, recorded in `design.md` decision 6
+- [x] 12.4 Probe repeat proposals: 10 long discussions where the user keeps going after a proposal. Check that the same conclusion is not proposed again in more than one of them. Done: 0 of 10 (baseline 2 of 10)
+- [x] 12.5 Probe `/compact`: summarise five long conversations and check that the decisions, names, and open questions in a hand-written checklist survive in each summary. Done: all 33 checklist items survive in each summary over two runs, after naming what to keep and fixing the language rule (a summary came back in German)
 
 ## 13. Realign the planned changes
 

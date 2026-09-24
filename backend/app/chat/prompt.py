@@ -25,9 +25,15 @@ as a to-do or an idea, and when a discussion reaches a conclusion or a \
 decision. The summary keeps the key findings. The user reviews and edits the \
 proposal before anything is saved.
 
+A to-do or an idea the user states is proposed right away. When the user \
+asks for help thinking something through, talk with them first and propose \
+once they reach a conclusion. Propose each conclusion once: details, doubts, \
+and next steps that follow it are not proposed again.
+
 Reply in plain text, without a tool, to greetings, small talk, and messages \
 that look unfinished. When you cannot tell what the user wants, ask one short \
 question. Never suggest deleting a conversation."""
+
 
 TOOLS: list[dict[str, Any]] = [
     {
@@ -74,15 +80,18 @@ TOOLS: list[dict[str, Any]] = [
 
 
 HELD_PROPOSAL_NOTE = """\
-The user was already shown this proposal to file, and it is held until they \
-confirm it:
+A proposal from this conversation was shown to the user and is held until \
+they confirm it:
 Title: {title}
 Summary: {summary}
 Tags: {tags}
 
-Do not propose it again. If the user's latest message is about an unrelated \
-topic, first call propose_thought with a summary of everything discussed so \
-far, then answer the new message."""
+Do not propose it again while the user keeps talking about it. Before you \
+answer, decide whether the user's latest message is still about this \
+proposal's topic. If it is about something else (a new question, a new task, \
+or a new subject), your first action must be a propose_thought call with the \
+held proposal, updated with anything discussed since. Then answer the new \
+message."""
 
 
 def held_proposal_note(held_proposal: dict[str, Any]) -> str:
@@ -91,6 +100,16 @@ def held_proposal_note(held_proposal: dict[str, Any]) -> str:
         summary=held_proposal.get("summary", ""),
         tags=", ".join(held_proposal.get("tags") or []) or "none",
     )
+
+
+def drop_held_note(context: list[dict[str, Any]], held_proposal: dict[str, Any] | None) -> None:
+    """Remove the held-proposal note once the turn has proposed, so the model
+    does not follow the note again in the next round."""
+    if held_proposal is None:
+        return
+    note = {"role": "system", "content": held_proposal_note(held_proposal)}
+    if note in context:
+        context.remove(note)
 
 
 def forced_tool(name: str) -> dict[str, Any]:
@@ -125,8 +144,9 @@ def _as_model_message(message: Message) -> dict[str, Any] | None:
 def build_context(
     messages: list[Message], held_proposal: dict[str, Any] | None = None
 ) -> list[dict[str, Any]]:
-    """The system prompt, the latest summary if any, the held-proposal note if
-    a proposal is held, then every message not compacted."""
+    """The system prompt, the latest summary if any, every message not
+    compacted, then the held-proposal note if a proposal is held. The note
+    comes last because the model follows it far more often there."""
     context: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     summaries = [m for m in messages if m.role == "summary" and not m.compacted]
     if summaries:
@@ -136,14 +156,14 @@ def build_context(
                 "content": "Summary of the earlier conversation:\n" + (summaries[-1].content or ""),
             }
         )
-    if held_proposal is not None:
-        context.append({"role": "system", "content": held_proposal_note(held_proposal)})
     for message in messages:
         if message.compacted or message.role == "summary":
             continue
         converted = _as_model_message(message)
         if converted is not None:
             context.append(converted)
+    if held_proposal is not None:
+        context.append({"role": "system", "content": held_proposal_note(held_proposal)})
     return context
 
 
