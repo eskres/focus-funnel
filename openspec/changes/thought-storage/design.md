@@ -68,7 +68,7 @@ The operator sets `EMBEDDING_PROVIDER` (a preset id, default `nebius`), `EMBEDDI
 
 `embed_texts(session, user, provider_id, model, texts, *, kind, conversation_id=None)` builds the client with `client_for()`, so it uses only that user's key, and demo mode gets the held key as for chat. It calls `embeddings.create` with a 10-second timeout, maps errors with `map_provider_error(..., model_id=model)`, checks that every vector has the same length, and records one usage event of kind `embed` with the reported prompt tokens and no completion tokens. The cost uses the model list's prompt price when the provider lists one, else unknown. Texts go in batches of at most 64.
 
-**Probe (task 1.1, 2026-09-24).** Only a Nebius key was available; NVIDIA and OpenRouter are not probed yet. Nebius serves one embedding model:
+**Probe (task 1.1, 2026-09-24).** Nebius serves one embedding model:
 
 | Model | Works | Native size | `dimensions` honored | `usage.prompt_tokens` | In the model list with a price |
 |---|---|---|---|---|---|
@@ -76,6 +76,20 @@ The operator sets `EMBEDDING_PROVIDER` (a preset id, default `nebius`), `EMBEDDI
 | `BAAI/bge-en-icl`, `BAAI/bge-multilingual-gemma2`, `intfloat/e5-mistral-7b-instruct`, `Qwen/Qwen3-Embedding-4B`, `Qwen/Qwen3-Embedding-0.6B` | no (404, "does not exist") | | | | not listed |
 
 The shortened vector is the native vector's first N values, normalized again (cosine 1.0 against the renormalized prefix), so Qwen3-Embedding is a true Matryoshka model and shorter vectors lose only what the evaluation measures. With one candidate model, the evaluation compares its sizes (decision 9). Provisional default: `EMBEDDING_PROVIDER=nebius`, `EMBEDDING_MODEL=Qwen/Qwen3-Embedding-8B`.
+
+NVIDIA and OpenRouter, probed later the same day with keys of their own:
+
+| Provider | Model | Works | Native size | `dimensions` honored | `usage.prompt_tokens` | Listed with a price |
+|---|---|---|---|---|---|---|
+| NVIDIA | `nvidia/nemotron-3-embed-1b` | yes | 2048 | no ("must be one of 2048") | yes | no (NVIDIA lists no prices) |
+| NVIDIA | `nvidia/llama-nemotron-embed-vl-1b-v2` | only with `input_type` | 2048 | yes (1024, 256) | yes | no |
+| NVIDIA | `nvidia/embed-qa-4`, `nvidia/llama-3.2-nv-embedqa-1b-v1`, `nvidia/nv-embedqa-mistral-7b-v2`, `nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1`, `snowflake/arctic-embed-l` | no (404: listed, but the function behind it is gone) | | | | no |
+| OpenRouter | `nvidia/nemotron-3-embed-1b:free` | yes | 2048 | no | yes | yes, free |
+| OpenRouter | `nvidia/llama-nemotron-embed-vl-1b-v2:free` | yes, no `input_type` needed | 2048 | yes (1024, 256) | yes | yes, free |
+| OpenRouter | `liquid/lfm-2.5-embedding-350m:free` | yes | 1024 | 1024 only (256 refused) | yes | yes, free |
+| OpenRouter | `qwen/qwen3-embedding-8b`, `openai/text-embedding-3-small`, `voyageai/voyage-4` | not checked: the key had reached its monthly spending limit (403) | | | | yes ($0.01, $0.02, $0.06 per million) |
+
+OpenRouter lists 37 embedding models, each with a price and `output_modalities: embeddings`, including `qwen/qwen3-embedding-8b` at the Nebius price; NVIDIA lists seven, five of which no longer answer. NVIDIA's asymmetric models refuse a call without `input_type` (`query` or `passage`), which `embed_texts()` does not send, so on NVIDIA only `nvidia/nemotron-3-embed-1b` works with the app today, and only at 2048 dimensions, above the size the speed target allows (decision 10). The evaluation was not rerun for these: Nebius remains the default.
 
 ### 5. Exact hybrid search in one query
 
