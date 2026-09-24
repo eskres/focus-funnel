@@ -38,7 +38,7 @@ def key_row(
 
 
 async def make_user(session, sub: str) -> User:
-    user = User(auth0_sub=sub)
+    user = User(issuer="test-issuer", subject=sub)
     session.add(user)
     await session.commit()
     return user

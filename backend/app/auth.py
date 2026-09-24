@@ -154,8 +154,8 @@ async def get_token_claims(
 _INSERTS_BY_DIALECT = {"postgresql": postgresql_insert, "sqlite": sqlite_insert}
 
 
-async def get_or_create_user(session: AsyncSession, auth0_sub: str) -> User:
-    """Return the user for an Auth0 subject, creating it on first sight.
+async def get_or_create_user(session: AsyncSession, issuer: str, subject: str) -> User:
+    """Return the user for an issuer and subject, creating it on first sight.
 
     INSERT ... ON CONFLICT DO NOTHING keeps concurrent first requests from
     creating duplicates without an application-level lock.
@@ -164,12 +164,14 @@ async def get_or_create_user(session: AsyncSession, auth0_sub: str) -> User:
     insert = _INSERTS_BY_DIALECT[dialect]
     await session.execute(
         insert(User)
-        .values(id=uuid.uuid4(), auth0_sub=auth0_sub)
-        .on_conflict_do_nothing(index_elements=[User.auth0_sub])
+        .values(id=uuid.uuid4(), issuer=issuer, subject=subject)
+        .on_conflict_do_nothing(index_elements=[User.issuer, User.subject])
     )
     await session.commit()
     return (
-        await session.execute(select(User).where(User.auth0_sub == auth0_sub))
+        await session.execute(
+            select(User).where(User.issuer == issuer, User.subject == subject)
+        )
     ).scalar_one()
 
 
@@ -177,4 +179,4 @@ async def get_current_user(
     claims: dict[str, Any] = Depends(get_token_claims),
     session: AsyncSession = Depends(get_session),
 ) -> User:
-    return await get_or_create_user(session, claims["sub"])
+    return await get_or_create_user(session, claims["iss"], claims["sub"])

@@ -12,8 +12,9 @@
 ## 3. Data
 
 - [ ] 3.1 Add one migration that renames `users.auth0_sub` to `subject`, adds `issuer` (existing rows `auth0-legacy`), `expires_at`, and `demo_notice_accepted_at`, and swaps the unique index to `(issuer, subject)`. Check that `alembic upgrade head` then `downgrade -1` runs cleanly on an empty SQLite database and on the compose Postgres, that an existing row survives as `auth0-legacy`, and that there is a single Alembic head
-- [ ] 3.2 Change `get_or_create_user` to take an issuer and subject. Check with pytest that two concurrent first requests create one row, and that the same subject from two issuers creates two users who cannot see each other's records
-- [ ] 3.3 Add `delete_user_data(user)` that deletes the user and everything that cascades from it. Check with pytest that after it runs no row for that user remains in any user-owned table and another user's rows are unchanged
+  - Postgres check not run: no Docker. The SQLite check passed: `alembic upgrade head` then `downgrade -1` on an empty database, an existing row survives as `auth0-legacy`, and there is a single Alembic head (`tests/test_auth_modes_migration.py`).
+- [x] 3.2 Change `get_or_create_user` to take an issuer and subject. Check with pytest that two concurrent first requests create one row, and that the same subject from two issuers creates two users who cannot see each other's records
+- [x] 3.3 Add `delete_user_data(user)` that deletes the user and everything that cascades from it. Check with pytest that after it runs no row for that user remains in any user-owned table and another user's rows are unchanged
 
 ## 4. Backend authentication
 

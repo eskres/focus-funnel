@@ -28,7 +28,7 @@ async def session():
 
 
 async def make_user(session, sub: str = "auth0|alice") -> User:
-    user = User(auth0_sub=sub)
+    user = User(issuer="test-issuer", subject=sub)
     session.add(user)
     await session.commit()
     return user

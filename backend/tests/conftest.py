@@ -77,12 +77,12 @@ def test_database_url(tmp_path, settings_env) -> str:
     return url
 
 
-def count_users(url: str, auth0_sub: str | None = None) -> int:
+def count_users(url: str, subject: str | None = None) -> int:
     async def count():
         engine = create_engine(url, poolclass=NullPool)
         query = select(func.count()).select_from(User)
-        if auth0_sub is not None:
-            query = query.where(User.auth0_sub == auth0_sub)
+        if subject is not None:
+            query = query.where(User.subject == subject)
         async with engine.connect() as connection:
             result = (await connection.execute(query)).scalar_one()
         await engine.dispose()

@@ -44,7 +44,8 @@ def test_usage_tokens_may_be_unknown_after_upgrade_and_not_after_downgrade(tmp_p
             rows = conn.execute("PRAGMA table_info(usage_events)").fetchall()
         return {row[1]: not row[3] for row in rows if row[1].endswith("_tokens")}
 
-    assert run_alembic(db_url, "upgrade", "head").returncode == 0
+    # Later revisions exist, so this stops at the usage change to test it alone.
+    assert run_alembic(db_url, "upgrade", "7c2e4f9a1d35").returncode == 0
     assert token_columns_nullable() == {"prompt_tokens": True, "completion_tokens": True}
 
     res = run_alembic(db_url, "downgrade", "-1")
@@ -52,4 +53,4 @@ def test_usage_tokens_may_be_unknown_after_upgrade_and_not_after_downgrade(tmp_p
     assert token_columns_nullable() == {"prompt_tokens": False, "completion_tokens": False}
 
     res = run_alembic(db_url, "history")
-    assert "bc1bdf980860 -> 7c2e4f9a1d35 (head)" in res.stdout
+    assert "bc1bdf980860 -> 7c2e4f9a1d35" in res.stdout

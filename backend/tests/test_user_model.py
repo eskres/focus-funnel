@@ -18,7 +18,7 @@ async def session():
 
 
 async def test_user_gets_id_and_created_at(session):
-    session.add(User(auth0_sub="auth0|alice"))
+    session.add(User(issuer="test-issuer", subject="auth0|alice"))
     await session.commit()
 
     user = (await session.execute(select(User))).scalar_one()
@@ -26,10 +26,10 @@ async def test_user_gets_id_and_created_at(session):
     assert user.created_at is not None
 
 
-async def test_duplicate_auth0_sub_is_rejected(session):
-    session.add(User(auth0_sub="auth0|alice"))
+async def test_duplicate_issuer_and_subject_is_rejected(session):
+    session.add(User(issuer="test-issuer", subject="auth0|alice"))
     await session.commit()
 
-    session.add(User(auth0_sub="auth0|alice"))
+    session.add(User(issuer="test-issuer", subject="auth0|alice"))
     with pytest.raises(IntegrityError):
         await session.commit()
