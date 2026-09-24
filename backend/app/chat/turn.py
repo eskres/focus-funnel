@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
+import httpx2
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.config import ChatConfig
@@ -23,9 +24,11 @@ from app.chat.tools import (
     PROPOSAL_SHOWN,
     ToolArgumentError,
     parse_proposal,
-    search_thoughts,
+    parse_search,
+    search_tool_result,
 )
-from app.errors import ApiError, output_limit_reached, tool_loop_limit
+from app.config import Settings, get_settings
+from app.errors import ApiError, ErrorCode, output_limit_reached, tool_loop_limit
 from app.models import Conversation, Message, User
 from app.provider_config import StreamUsage
 
@@ -104,8 +107,12 @@ class Turn:
         config: ChatConfig,
         context: list[dict[str, Any]],
         forced_tool: dict[str, Any] | None = None,
+        settings: Settings | None = None,
+        http_client: httpx2.AsyncClient | None = None,
     ):
         self.session = session
+        self.settings = settings or get_settings()
+        self.http_client = http_client
         self.user = user
         self.conversation = conversation
         self.call = call
@@ -239,14 +246,23 @@ class Turn:
     async def _run_tool(self, tool_call: dict[str, Any], position: int) -> AsyncIterator[Event]:
         name = tool_call["function"]["name"]
         summary = ""
+        extra: dict[str, Any] = {}
         try:
             arguments = tool_arguments(tool_call["function"]["arguments"])
             if name == SEARCH_TOOL:
-                query = arguments.get("query")
-                if not isinstance(query, str) or not query.strip():
-                    raise ToolArgumentError("query must be a non-empty string")
-                result = await search_thoughts(self.user, query.strip())
-                summary = f"Searched your thoughts for “{query.strip()}”"
+                search = parse_search(arguments)
+                found = await search_tool_result(
+                    self.session,
+                    self.user,
+                    search,
+                    settings=self.settings,
+                    config=self.config.search,
+                    conversation_id=self.conversation.id,
+                    http_client=self.http_client,
+                )
+                result = found.text
+                extra = {"thought_ids": found.thought_ids}
+                summary = f"Searched your thoughts for “{search.query}”"
             elif name == PROPOSE_TOOL:
                 proposal = parse_proposal(arguments)
                 drop_held_note(self.context, self.conversation.held_proposal)
@@ -260,7 +276,12 @@ class Turn:
             # Sent back to the model, which gets another round to call it right.
             result = f"Error: {exc}. Call the tool again with valid arguments."
             summary = "The tool call was not valid"
+        except ApiError as exc:
+            if exc.code != ErrorCode.VALIDATION_ERROR:
+                raise
+            result = f"Error: {exc.message}. Call the tool again with valid arguments."
+            summary = "The tool call was not valid"
 
         await self._store(role="tool", tool_call_id=tool_call["id"], content=result)
         self.context.append({"role": "tool", "tool_call_id": tool_call["id"], "content": result})
-        yield ("tool", {"name": name, "phase": "end", "summary": summary})
+        yield ("tool", {"name": name, "phase": "end", "summary": summary, **extra})

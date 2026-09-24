@@ -31,6 +31,49 @@ class EffortRule:
 
 
 @dataclass(frozen=True)
+class SimilarityRule:
+    match: str
+    value: float
+
+
+@dataclass(frozen=True)
+class InstructionRule:
+    match: str
+    text: str
+
+
+@dataclass(frozen=True)
+class SearchConfig:
+    """Thought search tuning. See openspec thought-storage design decision 8."""
+
+    limit: int
+    candidates: int
+    rrf_k: int
+    min_similarity: float
+    similarity_rules: tuple[SimilarityRule, ...]
+    min_word_share: float
+    backfill_batch: int
+    budget_chars: int
+    summary_chars: int
+    excerpt_chars: int
+    query_instructions: tuple[InstructionRule, ...] = ()
+
+    def min_similarity_for(self, model: str) -> float:
+        """The cut-off for a model: the first rule matching its id, else the default."""
+        for rule in self.similarity_rules:
+            if fnmatchcase(model.lower(), rule.match.lower()):
+                return rule.value
+        return self.min_similarity
+
+    def query_instruction_for(self, model: str) -> str:
+        """The text put before a query for a model: the first rule matching its id, else none."""
+        for rule in self.query_instructions:
+            if fnmatchcase(model.lower(), rule.match.lower()):
+                return rule.text
+        return ""
+
+
+@dataclass(frozen=True)
 class ChatConfig:
     temperature: TemperatureConfig
     reply_max_tokens: int
@@ -40,6 +83,7 @@ class ChatConfig:
     model_hint: str
     documented_efforts: tuple[str, ...]
     unsupported_efforts: tuple[EffortRule, ...]
+    search: SearchConfig
 
     def efforts_for(self, model: str) -> list[str]:
         """The efforts offered for a model: every documented one it is not known to refuse."""
@@ -64,11 +108,68 @@ def _number(raw: dict, name: str, where: str = "") -> float:
     return float(value)
 
 
-def _positive_int(raw: dict, name: str) -> int:
+def _positive_int(raw: dict, name: str, where: str = "") -> int:
     value = raw.get(name)
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise ChatConfigError(f"'{name}' must be a whole number of at least 1")
+        raise ChatConfigError(f"'{where}{name}' must be a whole number of at least 1")
     return value
+
+
+def _similarity(value: object, where: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+        raise ChatConfigError(f"'{where}' must be a number from 0 to 1")
+    return float(value)
+
+
+def _parse_search(raw: object) -> SearchConfig:
+    if not isinstance(raw, dict):
+        raise ChatConfigError("'search' must be a mapping of search settings")
+    ints = {
+        name: _positive_int(raw, name, "search.")
+        for name in (
+            "limit",
+            "candidates",
+            "rrf_k",
+            "backfill_batch",
+            "budget_chars",
+            "summary_chars",
+            "excerpt_chars",
+        )
+    }
+    if ints["candidates"] < ints["limit"]:
+        raise ChatConfigError("'search.candidates' must not be below 'search.limit'")
+    similarity = raw.get("min_similarity")
+    if not isinstance(similarity, dict):
+        raise ChatConfigError("'search.min_similarity' must be a mapping with default and models")
+    default = _similarity(similarity.get("default"), "search.min_similarity.default")
+    rules_raw = similarity.get("models", [])
+    if not isinstance(rules_raw, list):
+        raise ChatConfigError("'search.min_similarity.models' must be a list")
+    rules = []
+    for index, rule in enumerate(rules_raw):
+        where = f"search.min_similarity.models[{index}]"
+        if not isinstance(rule, dict) or not isinstance(rule.get("match"), str) or not rule["match"]:
+            raise ChatConfigError(f"'{where}' needs a 'match' model id")
+        rules.append(SimilarityRule(match=rule["match"], value=_similarity(rule.get("value"), f"{where}.value")))
+    word_share = _similarity(raw.get("min_word_share"), "search.min_word_share")
+    instructions_raw = raw.get("query_instruction", [])
+    if not isinstance(instructions_raw, list):
+        raise ChatConfigError("'search.query_instruction' must be a list")
+    instructions = []
+    for index, rule in enumerate(instructions_raw):
+        where = f"search.query_instruction[{index}]"
+        if not isinstance(rule, dict) or not isinstance(rule.get("match"), str) or not rule["match"]:
+            raise ChatConfigError(f"'{where}' needs a 'match' model id")
+        if not isinstance(rule.get("text"), str) or not rule["text"].strip():
+            raise ChatConfigError(f"'{where}.text' must be a non-empty string")
+        instructions.append(InstructionRule(match=rule["match"], text=rule["text"]))
+    return SearchConfig(
+        min_similarity=default,
+        similarity_rules=tuple(rules),
+        min_word_share=word_share,
+        query_instructions=tuple(instructions),
+        **ints,
+    )
 
 
 def _parse_temperature(raw: object) -> TemperatureConfig:
@@ -141,6 +242,7 @@ def load_chat_config(path: str | Path | None = None) -> ChatConfig:
         model_hint=hint.strip(),
         documented_efforts=documented,
         unsupported_efforts=rules,
+        search=_parse_search(raw.get("search")),
     )
 
 

@@ -14,6 +14,9 @@ from app.models import (
     Conversation,
     Message,
     ProviderKey,
+    SearchIndex,
+    Thought,
+    ThoughtEmbedding,
     UsageEvent,
     User,
     UserSettings,
@@ -31,6 +34,11 @@ USER_OWNED = {
     ChatModel: lambda user_id: ChatModel.user_id == user_id,
     UserSettings: lambda user_id: UserSettings.user_id == user_id,
     UsageEvent: lambda user_id: UsageEvent.user_id == user_id,
+    Thought: lambda user_id: Thought.user_id == user_id,
+    SearchIndex: lambda user_id: SearchIndex.user_id == user_id,
+    ThoughtEmbedding: lambda user_id: ThoughtEmbedding.thought_id.in_(
+        select(Thought.id).where(Thought.user_id == user_id)
+    ),
 }
 
 
@@ -39,7 +47,7 @@ def test_every_user_owned_table_is_listed():
     owned = set()
     for table in Base.metadata.sorted_tables:
         for fk in table.foreign_keys:
-            if fk.column.table.name in ("users", "conversations"):
+            if fk.column.table.name in ("users", "conversations", "thoughts", "search_indexes"):
                 owned.add(table.name)
                 assert fk.ondelete == "CASCADE" or fk.parent.nullable, (table.name, fk)
     assert owned == {model.__tablename__ for model in USER_OWNED}
@@ -65,6 +73,20 @@ async def add_everything(session, user: User) -> None:
                 completion_tokens=1,
             ),
         ]
+    )
+    thought = Thought(user_id=user.id, title="t", summary="s", tags=["a"])
+    index = SearchIndex(
+        user_id=user.id,
+        version=1,
+        embedding_provider="nebius",
+        embedding_model="m",
+        dimension=2,
+        status="active",
+    )
+    session.add_all([thought, index])
+    await session.flush()
+    session.add(
+        ThoughtEmbedding(index_id=index.id, thought_id=thought.id, chunk=0, embedding=[0.1, 0.2])
     )
     await session.commit()
 

@@ -10,7 +10,7 @@ A self-hoster must set an auth mode, generate secrets, add a provider key, and p
   1. Choose the auth mode and enter its settings (for `oidc`: issuer, client id and secret; for `firebase`: project settings). Optionally set an email allow-list.
   2. Add a provider and its key from the presets, with the provider's "get a key" link and notice, or a custom local server such as Ollama. A Test lists models.
   3. Choose the default model and loadout, with the effort options and the Test from `conversation-agent`.
-  4. Check that Postgres (and later Chroma) are reachable.
+  4. Check that Postgres is reachable and has the pgvector extension.
 - The wizard is a checklist over a status endpoint, `GET /api/setup/status`, that reports what is missing. It uses the same APIs as the settings screens and has no logic of its own.
 - Protect setup mode. The server prints a one-time setup token in its log at first run, the wizard requires it, and the wizard locks when setup completes. It is never left open.
 - Keep bootstrap secrets in the environment: the database URL and the key-encryption key, which a setup script or compose step can generate. Everything the wizard chooses is stored in the database, with secrets encrypted by that key.

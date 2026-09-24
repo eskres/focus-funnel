@@ -6,7 +6,7 @@ context: |
   Focus Funnel: multi-user brain-dump chatbot, BYOK any OpenAI-compatible model
   provider (model-providers change; was Nebius-only under platform-foundation).
   Stack: Next.js App Router + shadcn/ui/Tailwind (frontend/), async FastAPI
-  (backend/), Postgres + SQLAlchemy/Alembic, ChromaDB, Auth0 (auth-modes,
+  (backend/), Postgres + pgvector + SQLAlchemy/Alembic, Auth0 (auth-modes,
   proposal only as of 2026-09-22, will replace Auth0 with oidc/firebase/demo
   modes - Auth0 is still what's actually running until that change lands).
   Providers: presets (Nebius, NVIDIA, OpenRouter) plus a user-supplied custom
@@ -36,10 +36,13 @@ context: |
   - Provider keys: AES-GCM, bound to user id and provider id, never returned
     or logged.
   - Errors: {"error":{"code","message"}}.
-  - Postgres is source of truth for thoughts; Chroma is rebuildable.
-  - One versioned Chroma collection per user. Embedding model comes from the
-    vector_collections row via one resolver. Never block per-user embedding
-    models (first post-MVP upgrade).
+  - Thoughts and their search index live in Postgres (pgvector); the index
+    is rebuildable from the thoughts table. No second store.
+  - One versioned search index per user (search_indexes row). Embedding
+    model comes from that row; one resolver picks it for new indexes. Never
+    block per-user embedding models (first post-MVP upgrade).
+  - Search priorities: speed, accuracy, and few tokens in the chat model's
+    context. Hybrid (vector + full-text), exact per user, compact results.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.

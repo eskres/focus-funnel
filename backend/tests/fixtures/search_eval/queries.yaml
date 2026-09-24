@@ -1,0 +1,57 @@
+# Evaluation queries for thought search (openspec thought-storage, design
+# decision 9). Each query lists the thoughts a good search must return
+# (`expect`); an empty list means nothing in thoughts.yaml is relevant and the
+# search should return nothing. `tags` and `since` are filters. `kind` says
+# what the query tests:
+#   exact      a word or name that appears as written
+#   code       an identifier that only exact matching finds reliably
+#   paraphrase different words for the same meaning
+#   raw        a detail that is only in the thought's raw text
+#   filter     tag and date filters
+#   nothing    no relevant thought exists
+
+queries:
+  - {id: q01, kind: exact, query: milk, expect: [t01]}
+  - {id: q02, kind: paraphrase, query: groceries to pick up, expect: [t01]}
+  - {id: q03, kind: code, query: ACME-4471, expect: [t04]}
+  - {id: q04, kind: paraphrase, query: which programming languages we chose, expect: [t03]}
+  - {id: q05, kind: exact, query: Halvorsen, expect: [t02]}
+  - {id: q06, kind: paraphrase, query: teeth cleaning, expect: [t02]}
+  - {id: q07, kind: raw, query: Alfama flat, expect: [t05]}
+  - {id: q08, kind: raw, query: tram 28, expect: [t05]}
+  - {id: q09, kind: paraphrase, query: message queue for billing, expect: [t08]}
+  - {id: q10, kind: paraphrase, query: present for my mother, expect: [t09]}
+  - {id: q11, kind: paraphrase, query: baking bread, expect: [t10]}
+  - {id: q12, kind: exact, query: winter tyres, expect: [t11]}
+  - {id: q13, kind: paraphrase, query: vehicle maintenance, expect: [t11]}
+  - {id: q14, kind: raw, query: contractor hours, expect: [t14]}
+  - {id: q15, kind: raw, query: who owns the export feature, expect: [t14]}
+  - {id: q16, kind: code, query: WED-BRG-14, expect: [t28]}
+  - {id: q17, kind: exact, query: ThinkPad battery, expect: [t29]}
+  - {id: q18, kind: paraphrase, query: why notes apps are bad at finding things, expect: [t30]}
+  - {id: q19, kind: paraphrase, query: vector database decision, expect: [t22]}
+  - {id: q20, kind: paraphrase, query: activities for the kids, expect: [t35]}
+  - {id: q21, kind: filter, query: swimming, tags: [family], expect: [t35]}
+  - {id: q22, kind: paraphrase, query: cheaper insurance, expect: [t19]}
+  - {id: q23, kind: exact, query: heat pump, expect: [t23]}
+  - {id: q24, kind: paraphrase, query: leaking kitchen faucet, expect: [t24]}
+  - {id: q25, kind: paraphrase, query: soup with lentils, expect: [t37]}
+  - {id: q26, kind: raw, query: vegetable stock, expect: [t37]}
+  - {id: q27, kind: code, query: TokenRefreshTimer, expect: [t18]}
+  - {id: q28, kind: filter, query: side project ideas, tags: [side-project], since: 2026-08-01, expect: [t17, t26]}
+  - {id: q29, kind: filter, query: technical decisions, tags: [decision], since: 2026-08-01, expect: [t08, t22]}
+  - {id: q30, kind: exact, query: Rust, expect: [t03, t40]}
+  - {id: q31, kind: paraphrase, query: mountain walk, expect: [t52]}
+  - {id: q32, kind: exact, query: Besseggen, expect: [t52]}
+  - {id: q33, kind: paraphrase, query: database version upgrade, expect: [t47]}
+  - {id: q34, kind: paraphrase, query: avoid losing my photos, expect: [t38]}
+  - {id: q35, kind: exact, query: iPhone, expect: [t49]}
+  - {id: q36, kind: exact, query: flaky test, expect: [t18]}
+  - {id: q37, kind: paraphrase, query: error code when the provider throttles us, expect: [t43]}
+  - {id: q38, kind: exact, query: birthday, expect: [t09]}
+  - {id: q39, kind: paraphrase, query: 2FA, expect: [t60]}
+  - {id: q40, kind: nothing, query: quantum physics lecture, expect: []}
+  - {id: q41, kind: nothing, query: horse riding lessons, expect: []}
+  - {id: q42, kind: nothing, query: snowboard wax, expect: []}
+  - {id: q43, kind: nothing, query: Tokyo restaurant recommendations, expect: []}
+  - {id: q44, kind: filter, query: plans, tags: [astronomy], expect: []}

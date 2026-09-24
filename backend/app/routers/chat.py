@@ -205,6 +205,8 @@ async def chat(
             forced_tool=forced_tool(FORCED_TOOLS[parsed.command])
             if parsed.command in FORCED_TOOLS
             else None,
+            settings=settings,
+            http_client=http_client,
         )
         try:
             await turn.open()

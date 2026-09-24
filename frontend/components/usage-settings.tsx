@@ -7,6 +7,7 @@ import { UsageChart } from "@/components/usage-chart";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { USAGE_DELETED } from "@/lib/account";
 import { ApiError, UnauthenticatedError } from "@/lib/api";
 import { redirectToLogin } from "@/lib/redirect-to-login";
 import { USAGE_PERIODS, formatUsd, getUsage, type UsageReport } from "@/lib/usage";
@@ -28,6 +29,14 @@ export function UsageSection() {
   const [report, setReport] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Bumped when the usage history is deleted from the "Your data" section.
+  const [reloads, setReloads] = useState(0);
+
+  useEffect(() => {
+    const onDeleted = () => setReloads((count) => count + 1);
+    window.addEventListener(USAGE_DELETED, onDeleted);
+    return () => window.removeEventListener(USAGE_DELETED, onDeleted);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +60,7 @@ export function UsageSection() {
     return () => {
       cancelled = true;
     };
-  }, [days]);
+  }, [days, reloads]);
 
   function choose(period: number) {
     if (period === days) return;

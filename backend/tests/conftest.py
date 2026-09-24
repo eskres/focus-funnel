@@ -8,7 +8,7 @@ import httpx2
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.pool import NullPool
 
 from app.auth import JwksCache
@@ -45,6 +45,19 @@ def clear_settings_cache():
     clear_model_info_cache()
 
 
+@pytest.fixture(autouse=True)
+def require_postgres(request):
+    """A `postgres` test fails, rather than skips, without a Postgres to run on."""
+    if request.node.get_closest_marker("postgres") is None:
+        return
+    url = os.environ.get("TEST_DATABASE_URL", "")
+    if not url.startswith("postgresql"):
+        pytest.fail(
+            "TEST_DATABASE_URL must point at a Postgres with pgvector to run `postgres` tests",
+            pytrace=False,
+        )
+
+
 @pytest.fixture
 def settings_env(monkeypatch):
     """Set a complete, valid backend environment."""
@@ -68,6 +81,8 @@ def test_database_url(tmp_path, settings_env) -> str:
     async def reset_tables():
         engine = create_engine(url, poolclass=NullPool)
         async with engine.begin() as connection:
+            if connection.dialect.name == "postgresql":
+                await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await connection.run_sync(Base.metadata.drop_all)
             await connection.run_sync(Base.metadata.create_all)
         await engine.dispose()

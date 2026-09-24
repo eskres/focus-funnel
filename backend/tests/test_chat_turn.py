@@ -9,7 +9,8 @@ from openai import AsyncOpenAI
 from sqlalchemy import select, update
 
 import app.chat.turn as turn_module
-from app.chat.prompt import SYSTEM_PROMPT, build_context
+from app.chat.prompt import system_prompt, build_context
+from app.chat.tools import SearchToolResult
 from app.errors import ErrorCode
 from app.models import Conversation, Message
 from tests.chat_helpers import (
@@ -66,7 +67,7 @@ def message(position, role, content=None, **fields) -> Message:
 def test_the_context_is_the_prompt_then_the_messages():
     context = build_context([message(0, "user", "hi"), message(1, "assistant", "Hello")])
     assert context == [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt()},
         {"role": "user", "content": "hi"},
         {"role": "assistant", "content": "Hello"},
     ]
@@ -183,7 +184,7 @@ def test_split_tool_call_arguments_are_joined(client, alice, fake_llm):
     ready_user(client, alice)
     fake_llm.queue(
         tool_call_chunks("search_thoughts", '{"query": "oat milk"}') + [finish_chunk("tool_calls")],
-        text_chunks("Search is not available yet."),
+        text_chunks("Nothing filed about that."),
     )
 
     response = chat(client, alice, "what did I say about oat milk?")
@@ -202,7 +203,7 @@ def test_a_tool_result_reaches_the_next_call(client, alice, fake_llm):
     ready_user(client, alice)
     fake_llm.queue(
         tool_call_chunks("search_thoughts", '{"query": "milk"}', call_id="call_abc"),
-        text_chunks("Not available yet, sorry."),
+        text_chunks("Nothing about milk, sorry."),
     )
 
     response = chat(client, alice, "what about milk?")
@@ -212,7 +213,7 @@ def test_a_tool_result_reaches_the_next_call(client, alice, fake_llm):
     assert second[-2]["tool_calls"][0]["id"] == "call_abc"
     assert second[-1]["role"] == "tool"
     assert second[-1]["tool_call_id"] == "call_abc"
-    assert "not available yet" in second[-1]["content"]
+    assert second[-1]["content"] == "No filed thoughts match."
     assert names(response) == ["conversation", "tool", "tool", "delta", "done"]
 
 
@@ -761,7 +762,7 @@ def test_invalid_proposal_arguments_are_refused(client, alice, fake_llm, argumen
     assert stored(client, alice, conversation_id_of(response))["held_proposal"] is None
 
 
-# --- 7.3 the search stub ---
+# --- the search tool (thought-storage 6.2 has the tests with stored thoughts) ---
 
 
 def test_the_search_result_reaches_the_model(client, alice, fake_llm):
@@ -770,14 +771,15 @@ def test_the_search_result_reaches_the_model(client, alice, fake_llm):
 
     chat(client, alice, "what did I say about rent?")
 
-    assert "not available yet" in fake_llm.chat_requests[1]["messages"][-1]["content"]
+    assert fake_llm.chat_requests[1]["messages"][-1]["content"] == "No filed thoughts match."
+    assert fake_llm.embed_requests == []
 
 
 def test_the_search_function_can_be_replaced(client, alice, fake_llm, monkeypatch):
-    async def found(user, query):
-        return f"1 thought about {query}: pay rent on the 1st"
+    async def found(session, user, arguments, **options):
+        return SearchToolResult(text=f"1 thought about {arguments.query}: pay rent on the 1st")
 
-    monkeypatch.setattr(turn_module, "search_thoughts", found)
+    monkeypatch.setattr(turn_module, "search_tool_result", found)
     ready_user(client, alice)
     fake_llm.queue(tool_call_chunks("search_thoughts", '{"query": "rent"}'), text_chunks("ok"))
 

@@ -11,7 +11,8 @@ from app.db import Base
 class UsageEvent(Base):
     """Tokens and estimated cost of one model call. Holds no message text.
 
-    kind is chat, compact, proposal, or test. Deleting the conversation keeps
+    kind is chat, compact, proposal, test, or embed (an embedding call, which
+    has no completion tokens). Deleting the conversation keeps
     the record, so the spend history stays whole. The tokens are unknown for
     a provider whose stream reports no usage, and the cost is unknown then
     and for a model with no listed price.

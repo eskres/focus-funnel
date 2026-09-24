@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { ProviderKeyAlert, providerKeyAlertCode } from "@/components/provider-key-alert";
-import type { ProviderStatus } from "@/components/providers-settings";
+import { PROVIDER_KEYS_CHANGED, type ProviderStatus } from "@/components/providers-settings";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -109,6 +109,13 @@ export function ModelSettingsSection() {
     };
   }, []);
 
+  // A key saved or deleted in the providers section changes what can be chosen.
+  useEffect(() => {
+    const onKeysChanged = () => void refreshProviders();
+    window.addEventListener(PROVIDER_KEYS_CHANGED, onKeysChanged);
+    return () => window.removeEventListener(PROVIDER_KEYS_CHANGED, onKeysChanged);
+  }, []);
+
   // Load each provider's model list once, for the choosers.
   const providerIds = [...new Set(slots.map((slot) => slot.providerId).filter(Boolean))];
   useEffect(() => {
@@ -128,6 +135,22 @@ export function ModelSettingsSection() {
     // providerIds is derived from slots; a changed list is keyed by its ids.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [providerIds.join("\u0000"), lists]);
+
+  /** Reads the providers again, and returns the usable ones, or null if that failed. */
+  async function refreshProviders(): Promise<ProviderStatus[] | null> {
+    // A list that failed for want of a key is fetched again.
+    setLists((loaded) =>
+      Object.fromEntries(Object.entries(loaded).filter(([, list]) => !("error" in list))),
+    );
+    try {
+      const refreshed = await apiFetch<{ providers: ProviderStatus[] }>("/api/providers");
+      setProviders(refreshed.providers);
+      return refreshed.providers.filter(usable);
+    } catch {
+      // Keep the list already shown.
+      return null;
+    }
+  }
 
   if (loadError) {
     return (
@@ -162,18 +185,7 @@ export function ModelSettingsSection() {
   async function addSlot() {
     if (full) return;
     // A key may have been saved in the providers section since this page loaded.
-    let current = choosable;
-    try {
-      const refreshed = await apiFetch<{ providers: ProviderStatus[] }>("/api/providers");
-      setProviders(refreshed.providers);
-      current = refreshed.providers.filter(usable);
-    } catch {
-      // Keep the list already shown.
-    }
-    // A list that failed for want of a key is fetched again.
-    setLists((loaded) =>
-      Object.fromEntries(Object.entries(loaded).filter(([, list]) => !("error" in list))),
-    );
+    const current = (await refreshProviders()) ?? choosable;
     const providerId = current[0]?.id ?? "";
     setSlots((current) => [
       ...current,

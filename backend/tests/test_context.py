@@ -2,7 +2,7 @@
 
 from sqlalchemy import select
 
-from app.chat.prompt import SYSTEM_PROMPT
+from app.chat.prompt import build_context, system_prompt
 from app.models import UsageEvent
 from tests.chat_helpers import (
     BIG,
@@ -305,7 +305,7 @@ def test_an_accepted_summary_replaces_the_older_messages_for_the_model(
     fake_llm.queue(text_chunks("Ok") + [usage_chunk()])
     chat(client, alice, "next", conversation_id)
     sent = fake_llm.chat_requests[0]["messages"]
-    assert sent[0] == {"role": "system", "content": SYSTEM_PROMPT}
+    assert sent[0] == {"role": "system", "content": system_prompt()}
     assert sent[1]["content"].endswith("We agreed the rent is 900.")
     assert [m["content"] for m in sent[2:]] == [*TEN[4:], "next"]
 
@@ -509,3 +509,11 @@ def test_a_switch_to_a_smaller_context_refuses_the_next_message(
     fake_llm.queue(text_chunks("Back on Nano") + [usage_chunk()])
     back = chat(client, alice, "next", conversation_id, provider_id="nebius", model=NANO)
     assert back.status_code == 200
+
+
+def test_the_system_prompt_carries_todays_date():
+    from datetime import date
+
+    prompt = system_prompt(date(2026, 9, 24))
+    assert prompt.endswith("\n\nToday is Thursday 2026-09-24.")
+    assert build_context([], today=date(2026, 9, 24))[0]["content"] == prompt

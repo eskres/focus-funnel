@@ -49,6 +49,7 @@ def test_the_shipped_file_loads():
         "compact_keep_recent",
         "model_hint",
         "efforts",
+        "search",
     ],
 )
 def test_a_missing_value_fails_naming_it(tmp_path, key):
@@ -78,6 +79,61 @@ def test_a_missing_value_fails_naming_it(tmp_path, key):
 def test_an_out_of_range_value_fails_naming_it(tmp_path, change, name):
     with pytest.raises(ChatConfigError, match=name):
         load_chat_config(write(tmp_path, {**VALID, **change}))
+
+
+def search_with(**change) -> dict:
+    return {**VALID, "search": {**VALID["search"], **change}}
+
+
+def test_search_settings_load():
+    search = load_chat_config(FIXTURES / "valid.yaml").search
+    assert (search.limit, search.candidates, search.rrf_k) == (8, 50, 60)
+    assert (search.budget_chars, search.summary_chars, search.excerpt_chars) == (2400, 400, 240)
+    assert search.backfill_batch == 16
+    assert search.min_word_share == 0.6
+
+
+def test_min_similarity_is_picked_per_model():
+    search = load_chat_config(FIXTURES / "valid.yaml").search
+    assert search.min_similarity_for("vendor/embed-large") == 0.6
+    assert search.min_similarity_for("Vendor/Embed-small") == 0.6
+    assert search.min_similarity_for("other/model") == 0.35
+
+
+def test_query_instruction_is_picked_per_model():
+    search = load_chat_config(FIXTURES / "valid.yaml").search
+    assert search.query_instruction_for("Vendor/Embed-large") == "Instruct: find notes\nQuery:"
+    assert search.query_instruction_for("other/model") == ""
+
+
+@pytest.mark.parametrize(
+    "change, name",
+    [
+        ({"limit": 0}, "search.limit"),
+        ({"candidates": 4}, "search.candidates"),
+        ({"budget_chars": -1}, "search.budget_chars"),
+        ({"backfill_batch": 1.5}, "search.backfill_batch"),
+        ({"min_similarity": {"default": 1.5}}, "search.min_similarity.default"),
+        ({"min_similarity": 0.3}, "search.min_similarity"),
+        ({"min_similarity": {"default": 0.3, "models": [{"match": "m", "value": -0.1}]}}, "models"),
+        ({"min_similarity": {"default": 0.3, "models": [{"value": 0.5}]}}, "match"),
+        ({"min_word_share": -1}, "search.min_word_share"),
+        ({"min_word_share": 1.5}, "search.min_word_share"),
+        ({"query_instruction": "Query:"}, "search.query_instruction"),
+        ({"query_instruction": [{"text": "Query:"}]}, "match"),
+        ({"query_instruction": [{"match": "m", "text": " "}]}, "text"),
+    ],
+)
+def test_an_invalid_search_value_fails_naming_it(tmp_path, change, name):
+    with pytest.raises(ChatConfigError, match=name):
+        load_chat_config(write(tmp_path, search_with(**change)))
+
+
+def test_a_missing_search_value_fails_naming_it(tmp_path):
+    search = {**VALID["search"]}
+    search.pop("excerpt_chars")
+    with pytest.raises(ChatConfigError, match="search.excerpt_chars"):
+        load_chat_config(write(tmp_path, {**VALID, "search": search}))
 
 
 def test_the_file_chooses_no_model():

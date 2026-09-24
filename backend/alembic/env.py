@@ -25,6 +25,15 @@ def get_url() -> str:
     return url
 
 
+def include_object(obj, name, type_, reflected, compare_to) -> bool:
+    """Leave an index that exists only on another database out of comparisons."""
+    if type_ == "index" and not reflected:
+        only = obj.info.get("only_dialect")
+        if only is not None and only != context.get_context().dialect.name:
+            return False
+    return True
+
+
 def run_migrations_offline() -> None:
     url = get_url()
     context.configure(
@@ -33,6 +42,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         render_as_batch=url.startswith("sqlite"),
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -45,6 +55,7 @@ def do_run_migrations(connection: Connection) -> None:
         target_metadata=target_metadata,
         # SQLite can't ALTER most constraints; batch mode rebuilds tables instead.
         render_as_batch=connection.dialect.name == "sqlite",
+        include_object=include_object,
     )
 
     with context.begin_transaction():

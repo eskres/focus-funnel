@@ -35,3 +35,45 @@ efforts:
       efforts: [none]   # probed: empty answers on 10 of 10 calls
     - match: openai/gpt-oss-*
       efforts: [none, minimal]   # refused by the provider
+
+# Thought search (openspec thought-storage, design decisions 5, 7, and 8).
+# min_similarity is provisional until the evaluation in task 6.4 sets it:
+# rerun backend/scripts/search_eval.py after changing the embedding model.
+# min_word_share was set from the same evaluation's words-only sweep, which
+# does not depend on the model.
+search:
+  # Most results returned, and candidates taken from each ranking before
+  # they are merged.
+  limit: 8
+  candidates: 50
+  # Reciprocal rank fusion constant: a larger value flattens the ranking.
+  rrf_k: 60
+  # A thought passes if its cosine similarity reaches min_similarity, or it
+  # holds at least min_word_share of the query's words (after English stop
+  # words are dropped and words are reduced to their stem).
+  # Similarity scales differ per model, so rules can override the default;
+  # the first matching rule wins (shell-style wildcards on the model id).
+  # Set from the evaluation (scripts/search_eval.py): the highest value that
+  # keeps recall at 5 within 0.01 of its best. The default is unmeasured.
+  min_similarity:
+    default: 0.35
+    models:
+      # At 256 dimensions with the query instruction below; at 512 it is 0.44,
+      # at 1024 0.43, and at 4096 0.42.
+      - match: Qwen/Qwen3-Embedding-*
+        value: 0.48
+  min_word_share: 0.5
+  # Missing embeddings filled in per request, within the call it makes anyway.
+  backfill_batch: 16
+  # The search tool's result for the model: about 4 characters a token.
+  budget_chars: 2400
+  summary_chars: 400
+  excerpt_chars: 240
+  # Some embedding models expect a task instruction before a query, and none
+  # before the text they search. The first matching rule wins (shell-style
+  # wildcards on the model id); a model with no rule gets the query as is.
+  # Qwen3-Embedding: with it, the evaluation's "nothing" queries all come back
+  # empty and unexpected results fall from 3.5 to 0.7 per query.
+  query_instruction:
+    - match: Qwen/Qwen3-Embedding-*
+      text: "Instruct: Given a search query, retrieve the user's notes that match it\nQuery:"

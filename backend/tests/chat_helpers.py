@@ -22,6 +22,7 @@ from app.auth import get_jwks_cache
 from app.main import app
 from app.providers import get_provider_http_client
 from tests.conftest import FakeProvider
+from tests.thought_helpers import concept_embedder, words
 
 PROVIDERS_FIXTURE = Path(__file__).parent / "fixtures" / "providers" / "valid.yaml"
 NANO = "vendor/nano-model"
@@ -176,6 +177,10 @@ class FakeLLM(FakeProvider):
         self.models = models if models is not None else MODEL_LIST
         self.chat_requests: list[dict] = []
         self.model_list_calls = 0
+        # /embeddings answers with this embedder unless a reply is queued.
+        self.embedder = concept_embedder()
+        self.embed_replies: list[Reply] = []
+        self.embed_requests: list[dict] = []
 
     def queue(self, *replies: Reply) -> "FakeLLM":
         self.replies.extend(replies)
@@ -185,6 +190,8 @@ class FakeLLM(FakeProvider):
         if request.url.path.endswith("/models"):
             self.model_list_calls += 1
             return httpx2.Response(200, json=self.models)
+        if request.url.path.endswith("/embeddings"):
+            return self._embed(request)
         if request.url.path.endswith("/chat/completions"):
             body = json.loads(request.content)
             self.chat_requests.append(body)
@@ -201,6 +208,29 @@ class FakeLLM(FakeProvider):
                 )
             return httpx2.Response(200, json=reply)
         return httpx2.Response(404, json={"error": {"message": "no route"}})
+
+    def _embed(self, request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        self.embed_requests.append(body)
+        if self.embed_replies:
+            reply = self.embed_replies.pop(0)
+            if callable(reply) and not isinstance(reply, httpx2.Response):
+                return reply(request)
+            return reply
+        texts = body["input"] if isinstance(body["input"], list) else [body["input"]]
+        tokens = sum(len(words(text)) for text in texts)
+        return httpx2.Response(
+            200,
+            json={
+                "object": "list",
+                "model": body["model"],
+                "data": [
+                    {"object": "embedding", "index": index, "embedding": self.embedder(text)}
+                    for index, text in enumerate(texts)
+                ],
+                "usage": {"prompt_tokens": tokens, "total_tokens": tokens},
+            },
+        )
 
     def http_client(self) -> httpx2.AsyncClient:
         return _SharedClient(transport=httpx2.MockTransport(self._handle))

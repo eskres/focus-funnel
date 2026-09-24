@@ -1,6 +1,6 @@
 """Probe the chat's system prompt and tools against a real model.
 
-Four probes, each with its data set in scripts/probe_data/:
+Five probes, each with its data set in scripts/probe_data/:
 
   tools    labelled messages: does the model pick the tool the label names?
   topic    a held proposal, then an unrelated or a related message: does the
@@ -9,6 +9,8 @@ Four probes, each with its data set in scripts/probe_data/:
            the model propose the same conclusion again?
   compact  long conversations summarised as /compact does: do the checklist
            items survive in the summary?
+  search   recall questions: does the model search with key words rather than
+           the question, and pass a tag or a start date when the user names one?
 
 The probes build the context with the app's own code (build_context,
 plan_compaction, compaction_request), so they test what the chat sends.
@@ -27,6 +29,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +46,7 @@ from app.chat.prompt import (
     drop_held_note,
     tool_arguments,
 )
-from app.chat.tools import PROPOSAL_SHOWN, ToolArgumentError, parse_proposal
+from app.chat.tools import PROPOSAL_SHOWN, ToolArgumentError, parse_proposal, parse_search
 from app.models import Message
 
 DATA = Path(__file__).parent / "probe_data"
@@ -143,8 +146,8 @@ def _valid(name: str, raw: str) -> bool:
             parse_proposal(arguments)
             return True
         if name == SEARCH_TOOL:
-            query = arguments.get("query")
-            return isinstance(query, str) and bool(query.strip())
+            parse_search(arguments)
+            return True
     except (ValueError, ToolArgumentError):
         return False
     return False
@@ -478,11 +481,69 @@ async def probe_compact(settings: Settings, runs: int) -> tuple[list[str], bool]
     return lines, passed
 
 
+QUESTION_WORDS = ("what", "which", "did", "do", "have", "when", "where", "who", "how", "remind", "show", "find", "anything")
+
+
+def _since_ok(expected: str | None, since: date | None, today: date) -> bool:
+    if expected is None:
+        return True
+    if since is None:
+        return False
+    if expected == "month":
+        return since == today.replace(day=1)
+    if expected == "week":
+        return today - timedelta(days=8) <= since <= today
+    if expected == "year":
+        return since == today.replace(month=1, day=1)
+    raise ValueError(f"unknown since: {expected}")
+
+
+async def probe_search(settings: Settings, runs: int) -> tuple[list[str], bool]:
+    cases = yaml.safe_load((DATA / "search.yaml").read_text())["cases"]
+    today = datetime.now(UTC).date()
+    jobs = [
+        (run, case, run_turn(settings, transcript([{"user": case["message"]}]), None))
+        for run in range(runs)
+        for case in cases
+    ]
+    results = await asyncio.gather(*(job for _, _, job in jobs))
+
+    lines = _header("Search arguments probe", settings, runs)
+    lines.append(f"Today, as the prompt says: {today.isoformat()}.")
+    lines.append("")
+    lines += ["| Run | Case | Searched | Key words | Tag | Since | Arguments |"]
+    lines += ["|---|---|---|---|---|---|---|"]
+    checks: list[bool] = []
+    for (run, case, _), turn in zip(jobs, results):
+        search = next((c for c in turn.calls if c["name"] == SEARCH_TOOL and c["valid"]), None)
+        searched = not turn.error and turn.first_tool == SEARCH_TOOL and search is not None
+        args = parse_search(tool_arguments(search["arguments"])) if search else None
+        query = args.query.lower() if args else ""
+        keywords = bool(args) and "?" not in query and not query.startswith(QUESTION_WORDS) and any(
+            word in query for word in case["words"]
+        )
+        tag_ok = case.get("tag") is None or bool(
+            args and args.tags and case["tag"] in [tag.lower() for tag in args.tags]
+        )
+        since_ok = _since_ok(case.get("since"), args.since if args else None, today)
+        checks += [searched, keywords, tag_ok, since_ok]
+        mark = lambda ok: "✓" if ok else "✗"  # noqa: E731
+        lines.append(
+            f"| {run + 1} | {case['id']} | {mark(searched)} | {mark(keywords)} | "
+            f"{mark(tag_ok) if 'tag' in case else '–'} | {mark(since_ok) if 'since' in case else '–'} | "
+            f"{_short(search['arguments'] if search else _tool_cell(turn), 60)} |"
+        )
+    share = sum(checks) / len(checks)
+    lines += ["", f"{sum(checks)} of {len(checks)} checks pass ({share:.0%}).", f"- {_timing(list(results))}"]
+    return lines, share >= 0.9
+
+
 PROBES = {
     "tools": probe_tools,
     "topic": probe_topic,
     "repeat": probe_repeat,
     "compact": probe_compact,
+    "search": probe_search,
 }
 
 

@@ -28,10 +28,19 @@ class Settings(BaseSettings):
 
     database_url: str = Field(min_length=1)
     key_encryption_key: bytes
-    chroma_url: str = "http://chroma:8000"
     # Lets an operator turn off the custom provider (an arbitrary base URL).
     # Demo mode forces it off.
     allow_custom_provider: bool = True
+
+    # The embedding model that builds new search indexes, called with each
+    # user's own key for this provider. An existing index keeps the model it
+    # was built with until the operator rebuilds it (python -m app.reembed).
+    embedding_provider: str = "nebius"
+    # Chosen by the evaluation (openspec thought-storage design decision 9).
+    embedding_model: str = "Qwen/Qwen3-Embedding-8B"
+    # Sent as `dimensions` to models that can shorten their vectors.
+    # "native" sends none, for a model that cannot, or to keep full vectors.
+    embedding_dimensions: int | None = Field(default=256, gt=0)
 
     auth_mode: str | None = None
     oidc_issuer: str | None = None
@@ -73,6 +82,31 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             value = value.strip()
             return value or None
+        return value
+
+    @field_validator("embedding_dimensions", mode="before")
+    @classmethod
+    def native_dimensions(cls, value: object) -> object:
+        if isinstance(value, str) and value.strip().lower() == "native":
+            return None
+        return value
+
+    @field_validator("embedding_provider", "embedding_model")
+    @classmethod
+    def embedding_setting_required(cls, value: str, info) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError(f"{info.field_name.upper()} must not be empty")
+        return value
+
+    @field_validator("embedding_provider")
+    @classmethod
+    def embedding_provider_not_custom(cls, value: str) -> str:
+        if value.lower() == "custom":
+            raise ValueError(
+                "EMBEDDING_PROVIDER cannot be custom: its address differs per user. "
+                "Choose a preset from providers.yaml"
+            )
         return value
 
     @model_validator(mode="after")

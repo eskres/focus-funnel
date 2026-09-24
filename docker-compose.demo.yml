@@ -1,6 +1,6 @@
 # A public demo instance (AUTH_MODE=demo):
 #   docker compose -f docker-compose.yml -f docker-compose.demo.yml up
-# Postgres and Chroma keep their data in memory only, so a restart wipes every
+# Postgres keeps its data in memory only, so a restart wipes every
 # demo session. Leave every OIDC_* and FIREBASE_* value in .env empty: demo
 # mode refuses to start with them. See docs/login.md.
 services:
@@ -8,11 +8,6 @@ services:
     volumes: !reset []
     tmpfs:
       - /var/lib/postgresql
-
-  chroma:
-    volumes: !reset []
-    tmpfs:
-      - /data
 
   backend:
     environment:

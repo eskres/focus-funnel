@@ -18,8 +18,9 @@ You bring your own model provider. Each user saves their own API key for Nebius,
 
 - **Conversations:** each conversation is stored. The sidebar lists them newest first, and you can rename, archive, restore, or delete each one.
 - **Models:** in Settings you choose up to five models. One of them is the default. Each model has a reasoning effort, and you set one temperature for all of them. The message box has a dropdown to switch model inside a conversation.
+- **Search:** the search tool finds your filed thoughts by meaning and by words at once, in Postgres with pgvector. [docs/search.md](docs/search.md) covers the embedding model, tuning, and rebuilding search indexes.
 
-Not built yet: saving and searching thoughts, `/compact`, the context meter, and usage tracking. For now, the search tool and the Confirm button answer that the feature is not available yet.
+Not built yet: saving a thought from the chat. For now, the Confirm button answers that saving is not available yet.
 
 ## Stack
 
@@ -27,8 +28,7 @@ Not built yet: saving and searching thoughts, `/compact`, the context meter, and
 |---|---|
 | Frontend | Next.js (App Router), shadcn/ui with Base UI, Tailwind |
 | Backend | FastAPI (async), SQLAlchemy, Alembic |
-| Database | Postgres (SQLite in tests) |
-| Vector store | ChromaDB (not used yet) |
+| Database | Postgres with pgvector for thought search (SQLite in tests) |
 | Login | Any OpenID Connect provider (such as Pocket ID), Firebase, or an anonymous demo mode |
 | Models | Any OpenAI-compatible API, through the `openai` SDK |
 
@@ -50,7 +50,7 @@ Without the Pocket ID overlay, start everything with:
 docker compose up --build
 ```
 
-The backend applies database migrations each time it starts. Postgres and Chroma keep their data in `.data/`.
+The backend applies database migrations each time it starts. Postgres keeps its data in `.data/`.
 
 To expose the backend on port 8000 and Postgres on port 55432 for debugging, run:
 
@@ -70,11 +70,20 @@ uv sync
 uv run pytest
 ```
 
-The tests use SQLite by default. To run them against Postgres, set `TEST_DATABASE_URL`, for example to the compose Postgres from `docker-compose.dev.yml`:
+The tests use SQLite by default. To run them against Postgres, set `TEST_DATABASE_URL`, for example to a test database in the compose Postgres from `docker-compose.dev.yml`. Use a database of its own, never the app's: the tests drop every table they create. Create it once:
 
 ```sh
-TEST_DATABASE_URL=postgresql+asyncpg://focus_funnel:focus_funnel@localhost:55432/focus_funnel uv run pytest
+docker compose exec postgres createdb -U focus_funnel focus_funnel_test
+TEST_DATABASE_URL=postgresql+asyncpg://focus_funnel:focus_funnel@localhost:55432/focus_funnel_test uv run pytest
 ```
+
+Thought storage and search need Postgres with pgvector, so their tests are marked `postgres` and left out of the runs above. Run them on their own, against a Postgres that has the `vector` extension, such as the compose one:
+
+```sh
+TEST_DATABASE_URL=postgresql+asyncpg://focus_funnel:focus_funnel@localhost:55432/focus_funnel_test uv run pytest -m postgres
+```
+
+Without `TEST_DATABASE_URL` they fail instead of being skipped.
 
 To create a migration after you change a model:
 

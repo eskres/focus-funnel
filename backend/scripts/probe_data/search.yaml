@@ -1,0 +1,19 @@
+# Recall messages for the search arguments probe (thought-storage task 6.3).
+# Every case expects a search_thoughts call whose query holds key words, not
+# a question. `words` lists words the query should contain (any one is
+# enough); `tag` names a tag the call should pass; `since` is the start date
+# the call should pass: month (the first of this month), week (within the
+# last 7 days), or year (the first of January this year).
+
+cases:
+  - {id: plain-1, message: "What did I decide about the car insurance?", words: [car, insurance]}
+  - {id: plain-2, message: "did I write down the name of that podcast Tom recommended", words: [podcast, tom]}
+  - {id: plain-3, message: "Remind me what I noted about the dentist", words: [dentist]}
+  - {id: code-1, message: "What was invoice ACME-4471 about?", words: [acme-4471, acme]}
+  - {id: code-2, message: "Find my note with the hotel code WED-BRG-14", words: [wed-brg-14, wed]}
+  - {id: tag-1, message: "What work ideas have I filed?", words: [idea, ideas], tag: work}
+  - {id: tag-2, message: "Show me my travel plans", words: [travel, plans, trip], tag: travel}
+  - {id: since-1, message: "What did I file this month about the garden?", words: [garden], since: month}
+  - {id: since-2, message: "Anything I noted this week about the move?", words: [move, moving], since: week}
+  - {id: both-1, message: "Which work decisions did I note this month?", words: [decision, decisions], tag: work, since: month}
+  - {id: both-2, message: "What family stuff have I filed this year?", words: [family], tag: family, since: year}
