@@ -46,7 +46,7 @@
 
 ## 8. Deleting a user's data
 
-- [ ] 8.1 Add `DELETE /api/me`, answering 404 in demo mode. Check with pytest on Postgres that it answers 204, that no row remains for the user in any user-owned table including the three new ones, that another user's data is unchanged, that the next request with the same login starts a new empty user, and that "End demo" and demo expiry remove a demo user's thoughts and entries
+- [x] 8.1 Add `DELETE /api/me`, answering 404 in demo mode. Check with pytest on Postgres that it answers 204, that no row remains for the user in any user-owned table including the three new ones, that another user's data is unchanged, that the next request with the same login starts a new empty user, and that "End demo" and demo expiry remove a demo user's thoughts and entries
 - [ ] 8.2 Add the "Delete my data" section to settings with a confirmation dialog listing what is deleted, then logging out, hidden in demo mode. Check with Vitest that cancel calls nothing, that confirm calls `DELETE /api/me` and then goes to `/auth/logout`, that an error keeps the user on the page with its message, and that the section is absent in demo mode
 
 ## 9. Full system check
