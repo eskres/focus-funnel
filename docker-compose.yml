@@ -1,7 +1,7 @@
 services:
   postgres:
     # Postgres 18 with the pgvector extension, which thought search needs.
-    image: pgvector/pgvector:0.8.1-pg18
+    image: pgvector/pgvector:0.8.1-pg18-trixie
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-focus_funnel}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-focus_funnel}

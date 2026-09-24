@@ -11,7 +11,7 @@ Everything lives in Postgres, with the [pgvector](https://github.com/pgvector/pg
 
 ## Postgres needs pgvector
 
-The compose file runs `pgvector/pgvector:0.8.1-pg18`, which has it. On your own Postgres, install pgvector 0.7 or later. The first migration runs `CREATE EXTENSION IF NOT EXISTS vector`, which needs a role allowed to create extensions; on a managed database you may have to enable it yourself first.
+The compose file runs `pgvector/pgvector:0.8.1-pg18-trixie`, which has it. It is the Debian 13 (trixie) build, like the `postgres:18` image, so a data directory from that image keeps its collation version. On your own Postgres, install pgvector 0.7 or later. The first migration runs `CREATE EXTENSION IF NOT EXISTS vector`, which needs a role allowed to create extensions; on a managed database you may have to enable it yourself first.
 
 The backend refuses to start without the extension, or with a version before 0.7, and the message says which.
 

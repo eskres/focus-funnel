@@ -33,7 +33,7 @@ Three goals drive the choices below: speed, accuracy, and few tokens in the chat
 
 ### 1. pgvector in the existing Postgres, Chroma removed
 
-The compose Postgres image becomes `pgvector/pgvector` for Postgres 18, pinned to a 0.8 release. The migration runs `CREATE EXTENSION IF NOT EXISTS vector`. pgvector 0.7 or later is required, for `halfvec` (decision 2); startup refuses an older one, naming the version. The Chroma service, `CHROMA_URL`, the `chroma_url` setting, and the demo overlay's Chroma `tmpfs` are removed. The backend adds the `pgvector` Python package for the SQLAlchemy type.
+The compose Postgres image becomes `pgvector/pgvector:0.8.1-pg18-trixie`: Postgres 18, pinned to a 0.8 release, on Debian 13 (trixie). The plain `-pg18` tag is Debian 12, whose older glibc makes Postgres warn of a collation version mismatch on a data directory from `postgres:18.6` (Debian 13), and text indexes built under the other glibc may sort differently. The migration runs `CREATE EXTENSION IF NOT EXISTS vector`. pgvector 0.7 or later is required, for `halfvec` (decision 2); startup refuses an older one, naming the version. The Chroma service, `CHROMA_URL`, the `chroma_url` setting, and the demo overlay's Chroma `tmpfs` are removed. The backend adds the `pgvector` Python package for the SQLAlchemy type.
 
 An operator on a managed Postgres must have the extension available; `docs/search.md` says so, and startup fails with a clear message if the extension is missing.
 
@@ -213,7 +213,7 @@ Tests that store or search are marked `postgres`. The default `pytest` run desel
 
 ## Migration Plan
 
-1. Switch the compose Postgres image to pgvector for Postgres 18. The data directory is compatible, since it is the same Postgres major version with an added extension.
+1. Switch the compose Postgres image to pgvector for Postgres 18 on trixie. The data directory is compatible, since it is the same Postgres major version and the same glibc, with an added extension.
 2. The Alembic migration creates the extension and the three tables. It runs at startup like the others, and `downgrade -1` drops the tables; the extension stays, since other databases on the server may use it.
 3. Remove the Chroma service and settings. `.data/chroma` can be deleted; it holds nothing.
 4. Rollback: downgrade the migration and restore the previous compose file. No thought existed before this change.
