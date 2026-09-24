@@ -2,136 +2,199 @@
 
 See `proposal.md` for why. What exists today:
 
-- `app/chat/tools.py` has `search_thoughts(user, query)`, which returns "not available yet", and `save_thought(user, proposal)`, which `push-and-pull` replaces. `turn.py` calls `search_thoughts` from `_run_tool` and stores the returned text as the tool message.
+- `app/chat/tools.py` has `search_thoughts(user, query)`, which returns "not available yet", and `save_thought(user, proposal)`, which `push-and-pull` replaces. `turn.py` calls `search_thoughts` from `_run_tool` and stores the returned text as the tool message, which the model reads on every later turn of the conversation.
 - `app/providers.py` has the one client builder, `client_for(session, user, provider)`, which uses only that user's key. In demo mode the key comes from the request's held keys, never the database. `map_provider_error()` turns SDK errors into the `provider_*` codes.
 - `app/chat/usage.py` records every model call in `usage_events` with a `kind` (`chat`, `compact`, `proposal`, `test`) and a cost estimated from the model list's prices.
-- `app/user_data.py` has `delete_user_data(session, user)` from `auth-modes`. It deletes the user row and relies on `ON DELETE CASCADE`. Demo "End demo" and demo expiry both call it. Its docstring leaves Chroma to this change.
-- `docker-compose.yml` already runs `chromadb/chroma:1.5.9`, and `Settings.chroma_url` exists, but nothing talks to Chroma yet. The backend has no Chroma client dependency.
-- Tests run on SQLite with pytest. This container has no Docker, so earlier changes left their Postgres and compose checks for a machine that has it.
+- `app/user_data.py` has `delete_user_data(session, user)` from `auth-modes`. It deletes the user row and relies on `ON DELETE CASCADE`. Demo "End demo" and demo expiry both call it.
+- `docker-compose.yml` runs `postgres:18.6` and an unused `chromadb/chroma:1.5.9`. Nothing talks to Chroma.
+- Production runs on Postgres. Tests run on SQLite by default and on Postgres with `TEST_DATABASE_URL`. This container has Postgres 16 installed and can install `postgresql-16-pgvector` (0.6.0) from apt, but has no Docker.
+
+Three goals drive the choices below: speed, accuracy, and few tokens in the chat model's context. They are why the app files thoughts instead of pointing a model at a notes folder.
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Postgres holds every thought. Chroma can be deleted and rebuilt from it.
-- The embedding model is chosen in one place and recorded with each index, so a later per-user choice changes only that place.
-- Every write and every deletion path keeps Chroma in step, or leaves only entries that search ignores.
+- One database: a thought and its search entries are written and deleted in one transaction.
+- Hybrid search (meaning plus words), exact rather than approximate, in one SQL round trip.
+- A search result the chat model can use in a few hundred tokens.
+- Accuracy and speed measured against a fixed evaluation set and a fixed benchmark, not assumed.
+- The embedding model is chosen in one place and recorded with each index, so a per-user choice later changes only that place.
 
 **Non-Goals:**
 
 - Saving a confirmed proposal, a thought detail view, sources in the chat, or a category in the proposal tool. Those are `push-and-pull`. This change adds the store operation they call.
 - Any HTTP endpoint for thoughts other than deleting all of a user's data. The internal operations are Python functions.
 - A per-user embedding model, or a local embedding model (see the proposal's future option).
-- Keyword or hybrid search.
+- Reranking with a second model, and an approximate (HNSW) index. Both are measured against later if the evaluation or benchmark asks for them.
+- Thought storage on SQLite.
 
 ## Decisions
 
-### 1. Tables
+### 1. pgvector in the existing Postgres, Chroma removed
 
-One migration adds three tables. Every table references `users.id` with `ON DELETE CASCADE`, like the tables before it.
+The compose Postgres image becomes `pgvector/pgvector` for Postgres 18, pinned to a 0.8 release. The migration runs `CREATE EXTENSION IF NOT EXISTS vector`. The Chroma service, `CHROMA_URL`, the `chroma_url` setting, and the demo overlay's Chroma `tmpfs` are removed. The backend adds the `pgvector` Python package for the SQLAlchemy type.
 
-- `thoughts`: `id` (uuid), `user_id`, `title` (text), `summary` (text), `raw_text` (text, null), `category` (text, null), `created_at`, `updated_at`. Index on `(user_id, created_at)`.
-- `thought_tags`: `thought_id` (cascade from `thoughts`), `user_id`, `tag` (text, normalized lowercase). Primary key `(thought_id, tag)`, index on `(user_id, tag)`. A separate table rather than a JSON column, so a tag filter is one indexed query on SQLite and Postgres alike, and `push-and-pull` can list a user's tags for reuse.
-- `vector_collections`: `id`, `user_id`, `name` (unique), `version` (int), `embedding_provider`, `embedding_model`, `dimension` (int), `status` (`building`, `active`, `retired`), `created_at`, `retired_at` (null). A partial unique index on `user_id` where `status = 'active'` keeps one active index per user; SQLite and Postgres both support it.
+An operator on a managed Postgres must have the extension available; `docs/search.md` says so, and startup fails with a clear message if the extension is missing.
 
-Field limits (title 200, summary 4,000, raw text 20,000, 20 tags of 50 characters) are checked in the store operation, not by column types, so the error names the field.
+**Alternatives:** ChromaDB (rejected: a second store to keep in step with Postgres, hybrid search in the self-hosted server unconfirmed, and filters split across two systems); a Postgres BM25 extension such as ParadeDB `pg_search` (deferred: not in the pgvector image, and built-in full-text search is measured first).
 
-**Alternative:** tags in a JSON column (rejected: filtering needs database-specific JSON operators, and tags cannot be listed cheaply).
+### 2. Tables
 
-### 2. One Chroma collection per user and version
+One migration adds three tables. Each references `users.id` with `ON DELETE CASCADE`, like the tables before it.
 
-A collection is named `thoughts__u_<user id hex>__v<version>`, for example `thoughts__u_3f2a…__v1`. It is created when the user stores their first thought, with the provider, model, and dimension of the first embedding. Chroma's own embedding function is turned off (`embedding_function=None`), since vectors always come from the provider, and the distance is cosine. The collection's Chroma metadata repeats the provider, model, and dimension from its `vector_collections` row, so the mismatch check (decision 6) can compare the two.
+- `thoughts`: `id` (uuid), `user_id`, `title`, `summary`, `raw_text` (null), `category` (null), `tags` (`text[]`, normalized lowercase), `search_tsv` (`tsvector`), `created_at`, `updated_at`. Indexes: `(user_id, created_at)`, GIN on `tags`, GIN on `search_tsv`.
+- `search_indexes`: `id`, `user_id`, `version`, `embedding_provider`, `embedding_model`, `dimension` (int), `status` (`building`, `active`, `retired`), `created_at`, `retired_at` (null). Partial unique indexes allow one `active` and one `building` row per user.
+- `thought_embeddings`: `id`, `index_id` (cascade from `search_indexes`), `thought_id` (cascade from `thoughts`), `chunk` (int; 0 is the head, 1 and up are raw-text chunks), `start_char` and `end_char` (null for the head), `embedding` (`vector` with no fixed dimension). Index on `(index_id, thought_id)`.
 
-Each vector's id is the thought id. Its metadata holds `thought_id`, `created_at` (epoch seconds), `tags` (comma-joined, for inspection only), and `embedding_model`. The document embedded is `title + "\n\n" + summary`.
+`search_tsv` is written by the store operation in the same statement as the row, not as a generated column, so it can combine the tags array with weights: title and tags weight A, summary B, raw text C.
 
-**Alternatives:** one shared collection with a `user_id` filter (rejected: one missing filter leaks thoughts across users, and a rebuild would touch everyone); a collection per user without versions (rejected: a rebuild would have to delete the index that search is using).
+The untyped `vector` column lets indexes with different models and dimensions live in one table, which the per-user upgrade needs. Exact search needs no typed column (decision 5).
 
-### 3. A small wrapper around Chroma
+The models use type variants (`JSON` for the array and the vector, `Text` for the tsvector) on SQLite, and the migration does the same, so the rest of the suite still creates every table on SQLite and cascades still test there. Storing and searching run only on Postgres.
 
-`app/thoughts/vector_store.py` defines a `VectorStore` protocol with the few calls this change needs: create, get, and delete a collection, upsert, delete, query with an optional id filter, and list ids. `ChromaVectorStore` implements it with the `chromadb-client` package (the HTTP-only client, no ONNX runtime), pinned to the server's minor version. `InMemoryVectorStore` implements it for tests with exact cosine search.
+**Alternatives:** a separate tags table (rejected: storage is Postgres-only now, and an array with a GIN index filters in the same query); a generated `search_tsv` column (rejected: combining the tags array needs a function Postgres may not accept in a generated column).
 
-One contract test module runs against both: always against the in-memory store, and against a real Chroma when `CHROMA_TEST_URL` is set (the compose service). That keeps the SQLite suite fast and still proves the wrapper against the real server.
+### 3. What gets embedded
 
-**Alternative:** raw HTTP calls to Chroma's v2 API (kept as the fallback if task 1.2 finds the client package does not work with the pinned server; the protocol hides which is used).
+- **Head (chunk 0):** `title`, then the tags, then `summary`. Every thought has one.
+- **Raw-text chunks (1 and up):** only when `raw_text` is present and not the same as the summary. It is split into pieces of about 800 characters on paragraph, then sentence, boundaries, with about 100 characters of overlap. A 20,000-character maximum gives at most about 30 chunks.
+
+A thought's score is its best entry's score. The chunk's character range gives the excerpt shown in a result (decision 7).
 
 ### 4. Embedding through the provider seam, with the user's key
 
-The operator sets `EMBEDDING_PROVIDER` (a preset id, default `nebius`) and `EMBEDDING_MODEL` (default chosen by the probe in task 1.1). Startup refuses an unknown provider, `custom`, or an empty model, naming the setting. The model itself is not checked at startup, since that needs a key.
+The operator sets `EMBEDDING_PROVIDER` (a preset id, default `nebius`), `EMBEDDING_MODEL` (default from the probe in task 1.2), and optional `EMBEDDING_DIMENSIONS` (sent as `dimensions` to models that can shorten their vectors; set only if the probe shows the provider honors it and the evaluation shows no loss). Startup refuses an unknown provider, `custom`, or an empty model, naming the setting.
 
-`embed_texts(session, user, provider_id, model, texts, *, kind, conversation_id=None)` builds the client with `client_for()`, so it uses only that user's key, and demo mode gets the held key as for chat. It calls `embeddings.create`, maps errors with `map_provider_error(..., model_id=model)`, checks that every vector has the same length, and records one usage event of kind `embed` with the reported prompt tokens and no completion tokens. The cost uses the model list's prompt price when the provider lists one, else unknown. Texts are sent in batches of at most 64.
+`embed_texts(session, user, provider_id, model, texts, *, kind, conversation_id=None)` builds the client with `client_for()`, so it uses only that user's key, and demo mode gets the held key as for chat. It calls `embeddings.create` with a 10-second timeout, maps errors with `map_provider_error(..., model_id=model)`, checks that every vector has the same length, and records one usage event of kind `embed` with the reported prompt tokens and no completion tokens. The cost uses the model list's prompt price when the provider lists one, else unknown. Texts go in batches of at most 64.
 
-**Alternatives:** an operator-owned key (rejected: the app is bring-your-own-key, and one key would pay for every user); a local model in the backend (deferred; see the proposal).
+### 5. Exact hybrid search in one query
 
-### 5. One resolver, used only when an index is created
+`search(session, user, query, *, tags=None, since=None, until=None, newest_first=False)`:
 
-`resolve_embedding_model(user, settings) -> EmbeddingChoice(provider_id, model)` returns the instance setting for every user. It is called only when a new collection is created, by the first store or by a rebuild. Every other operation reads the provider and model from the user's `vector_collections` row. The per-user upgrade adds a lookup to the resolver and nothing else.
+1. Load the user's active index. If the user has no thoughts, return an empty result with no provider call. If tags are given and none of the user's thoughts has any of them, likewise.
+2. Build one embeddings call holding the query and up to `backfill_batch` texts of thoughts that lack entries in the active index (decision 6). If there is no active index yet, the call uses the resolver's choice and creates the index from the first vector. If the call fails, continue with words only and remember why.
+3. Check the query vector's length against the index's `dimension`, and the index's model against the model used. A mismatch means words only, a "rebuild needed" note, and a warning log naming the index.
+4. Run one SQL statement with two candidate lists and a merge:
+   - **Meaning:** `SELECT thought_id, min(embedding <=> :q)` over `thought_embeddings` for the active index, joined to `thoughts` for the filters, grouped by thought, ordered by distance, limit `candidates`. There is no approximate index: the planner reads the user's rows through the `(index_id, thought_id)` index and compares each, so recall is complete.
+   - **Words:** `thoughts` rows of the user matching the filters where `search_tsv @@ q`, ranked by `ts_rank_cd`, limit `candidates`. The query terms are OR-joined with the `simple` configuration, so a query need not contain every word, and words are matched as written, in any language.
+   - **Merge:** reciprocal rank fusion, `sum(1 / (rrf_k + rank))` over the lists a thought appears in. A thought passes if its similarity (`1 - distance`) is at least `min_similarity`, or its word match covers every query term or ranks at least `min_keyword_rank`. Order by the fused score, or by `created_at` descending for newest first. Limit `limit`.
+5. Return the thoughts with their best chunk and whether the search used words only, and why.
 
-### 6. Search
+Only step 2 leaves the database, and it is one call.
 
-`search_thoughts(session, user, query, *, tags=None, newest_first=False, limit)`:
+**Why exact:** a user's thoughts number in the hundreds or thousands. Comparing against each is fast enough (decision 10 measures it) and never misses a match that an approximate index could. An approximate per-index HNSW index is the fallback if the benchmark fails; it needs a typed column per dimension, created as a partial index per search index.
 
-1. Find the user's active collection. With none, return an empty result without calling a provider.
-2. With tags, select the ids of the user's thoughts carrying any of them from `thought_tags`. With none, return an empty result.
-3. Embed the query with the collection's provider and model.
-4. Check for a mismatch: the Chroma collection's metadata must name the same provider, model, and dimension as the row, and the query vector's length must equal the row's dimension. Otherwise raise `409 embedding_mismatch` ("The search index was built with another embedding model. Ask the operator to rebuild it.") and log the collection name.
-5. Query Chroma for `limit` results, filtered to the tag ids when tags are set.
-6. Load the matching thoughts from Postgres with `user_id = user.id`. Drop any id not found, so a leftover vector is never returned.
-7. Order by distance, or by `created_at` descending when `newest_first` is set.
+**Why `simple` and OR:** stemming is language-specific and users may write in more than one language; meaning covers inflected forms. AND-matching would drop a thought for one extra word in the query. The cut-off in the merge step keeps OR-matching from letting in weak matches.
 
-`limit` comes from `search_results` in `chat.yaml` (default 8).
+**Alternatives:** meaning only (rejected: misses names, codes, and exact phrases); words only (rejected: misses paraphrases); a weighted sum of scores instead of rank fusion (rejected: cosine and `ts_rank_cd` scales differ per model and query, and rank fusion needs no calibration).
 
-**Alternative:** filter tags after the vector query (rejected: the top results may all lack the tag, which returns too few).
+### 6. Writes and filling in missing embeddings
 
-### 7. Writes: Postgres first, then Chroma, then commit
+- **Store:** validate, then try one embeddings call for the new thought's head and chunks plus up to `backfill_batch` missing texts. Then, in one transaction, insert the thought with its `search_tsv` and, if the call worked, its entries for the active index (creating index version 1 from the resolver on a user's first vector). If a `building` index exists, embed for it too, with its own model, in a second call. A provider failure is logged and leaves the thought without entries; it is found by words at once. Only validation errors fail a store.
+- **Update:** as store. A change to title, summary, tags, or raw text rewrites `search_tsv`. A change to title, summary, or raw text deletes the thought's entries and embeds again. Tags are part of the head text, so a tag change re-embeds the head only. A category change touches neither.
+- **Delete:** delete the row. Entries cascade in the same transaction.
+- **Filling in:** a thought "lacks entries" when the active index has no chunk-0 row for it. Store and search both take the oldest `backfill_batch` such thoughts (default 16 texts) into the call they already make, so filling in never adds a network round trip.
 
-- **Store:** validate, embed, insert the thought and its tags and flush, upsert the vector into every non-retired collection of the user (the active one and a building one, each embedded with its own model), then commit. If no collection exists, create version 1 from the resolver first. A provider error or a Chroma failure rolls back, so nothing is stored. A Chroma failure maps to `503 service_unavailable`.
-- **Update:** as store. Only a changed title or summary embeds again and upserts; tag, category, or raw text changes only touch Postgres (and the vector's `tags` metadata through a metadata-only update).
-- **Delete:** delete the row and commit, then delete the vector from every non-retired collection. A Chroma failure there is logged and not raised: the leftover vector is ignored by step 6 of search and disappears at the next rebuild.
+**Alternative:** a background worker that embeds after commit (rejected: another moving part, and piggy-backing on calls the user already waits for clears a backlog within a few requests).
 
-If the commit fails after a Chroma upsert, the vector has no row and is ignored the same way. This order means Postgres is never missing a thought that Chroma has promised, and Chroma is at worst ahead with entries search drops.
+### 7. Compact results for the chat model
 
-**Alternative:** a transactional outbox that indexes in the background (rejected for now: it adds a worker, and a user filing one thought at a time can wait for one embedding call).
+The search tool (`app/chat/tools.py`) formats the result to use as few tokens as it can while still letting the model answer:
 
-### 8. The search tool
+```
+3 of your thoughts match (best first):
+1. Oat milk · 2026-09-20 · #groceries #errands
+   Buy oat milk on the way home.
+2. Lisbon trip · 2026-08-02 · #travel
+   Plan a long weekend in October.
+   > "…the flat near Alfama was cheaper than the hotel…"
+```
 
-`app/chat/tools.search_thoughts(user, query)` becomes `search_tool_result(session, user, query, conversation_id, http_client)`. It calls the search in decision 6 and formats the result for the model as a short list, one thought per entry: its date, title, tags, and summary. No match gives "No filed thoughts match this search." An `ApiError` gives its message in plain words and a line telling the model to pass it on, so the turn goes on as the spec requires; it is not re-raised. `turn.py` passes its session, conversation id, and http client at the one call site. The tool's parameters stay `query` only; `push-and-pull` decides whether the model gets tag and order options.
+- No ids in the text: a UUID costs about 20 tokens and the model does not need it. The ids go in the `tool` event for `push-and-pull` to show as sources.
+- Summaries over `summary_chars` (default 400) are cut at a word with `…`.
+- An excerpt of at most `excerpt_chars` (default 240) is shown only when the best match was a raw-text chunk. It is centered on the chunk's words that match the query when there are any, else the chunk's start.
+- Results are added best first until the next would pass `budget_chars` (default 2,400, about 600 tokens), and then a line says how many more matched and that tags or a start date would narrow the search.
+- No match: `No filed thoughts match.` Words only: the matches, then one line saying why (for example, `Searched by words only: add your Nebius key in settings to search by meaning.`).
 
-### 9. The rebuild job
+The tool takes `query` (described as the key words and names to look for, not a question), `tags` (optional list), and `since` (optional `YYYY-MM-DD`). Narrowing costs the model a few argument tokens and saves reading unrelated results. `turn.py` passes its session, conversation id, and http client at the one call site.
 
-`python -m app.reembed (--user <id> | --all) [--restart]` runs against the same database and Chroma as the server, not through the API.
+### 8. Search tuning in `chat.yaml`
+
+```yaml
+search:
+  limit: 8
+  candidates: 50
+  rrf_k: 60
+  min_similarity:
+    default: <from the evaluation>
+    models:            # similarity scales differ per model
+      - match: <model id pattern>
+        value: <from the evaluation>
+  min_keyword_rank: <from the evaluation>
+  backfill_batch: 16
+  budget_chars: 2400
+  summary_chars: 400
+  excerpt_chars: 240
+```
+
+Loaded and checked at startup like the rest of `chat.yaml`.
+
+### 9. The evaluation set and probe
+
+`backend/tests/fixtures/search_eval/` holds about 60 hand-written thoughts and about 40 queries with the thoughts each should find. They cover to-dos, ideas, decisions, names and codes, paraphrases, details only in raw text, a few in Norwegian, queries that should find nothing, and date and tag filters.
+
+`backend/scripts/search_eval.py` embeds the set with a given provider, model, and dimension (using a key from the environment), runs meaning-only, words-only, and hybrid search, and reports recall at 5, mean reciprocal rank, the rate of empty results for the "nothing" queries, and the median tool-result size in characters. The probe runs it for the candidate models and dimensions and records the choice and the tuning in this decision and in `chat.yaml`.
+
+It also writes the chosen model's vectors to a compact fixture, so a regression test runs the evaluation offline on Postgres and fails if hybrid recall at 5 or mean reciprocal rank drops more than 0.02 below the recorded baseline.
+
+### 10. The speed benchmark
+
+`backend/scripts/search_bench.py` seeds a user with 5,000 thoughts (a third with raw text) and random vectors of the chosen dimension, then runs 100 searches with random query vectors and times the SQL statement of decision 5. The target is a 95th percentile under 50 ms on the compose stack. If it fails, the order of remedies is: fewer dimensions (if the evaluation allows), `halfvec` storage, then a per-index HNSW index.
+
+### 11. One resolver, used only when an index is created
+
+`resolve_embedding_model(user, settings) -> EmbeddingChoice(provider_id, model, dimensions)` returns the instance setting for every user. It is called only when a new index is created, by a user's first vector or by a rebuild. Every other operation reads the provider and model from the user's `search_indexes` row.
+
+### 12. The rebuild job
+
+`python -m app.reembed (--user <id> | --all) [--restart]` runs against the same database as the server, not through the API.
 
 For each user, skipping demo users (issuer `demo`) and users with no thoughts:
 
-1. Refuse if the user already has a `building` collection, unless `--restart`, which drops it first. This keeps two jobs from racing.
-2. Create a `building` row with version `max + 1` and the resolver's choice, and its Chroma collection.
-3. Page through the user's thoughts in batches, embed them with that user's key, and upsert. From here on, store, update, and delete also write to this collection (decision 7).
-4. Compare the id sets of Postgres and the new collection. Upsert any missing and delete any extra, then compare again. If they still differ, drop the new collection, mark it `retired`, and report the user.
-5. In one transaction, mark the old active row `retired` and the new row `active`. Then delete the old Chroma collection. The retired row stays as a record.
+1. Refuse if the user already has a `building` index, unless `--restart`, which deletes it first.
+2. Create a `building` row with version `max + 1` and the resolver's choice.
+3. Embed the user's thoughts in batches with that user's key and insert the entries, committing per batch. From here on, store and update also embed for this index (decision 6).
+4. Repeat the fill until no thought lacks a chunk-0 entry in the new index.
+5. In one transaction: lock the user's index rows, check again that no thought lacks entries (fill the few that do, if any), mark the old `active` row `retired` and the new one `active`, and delete the old index's entries.
 
-A provider error for a user (missing, refused, or rate-limited key) drops that user's building collection, reports the user and the error code, and moves on. The job prints one line per user and exits non-zero if any user failed. Usage events are recorded against each user with kind `embed`.
+A provider error for a user (missing, refused, or rate-limited key) deletes that user's building index, reports the user and the error code, and moves on. The job prints one line per user and exits non-zero if any user failed. Usage events are recorded against each user with kind `embed`.
 
-**Alternative:** switch by renaming Chroma collections (rejected: Chroma has no atomic rename-and-swap, and the row flip is one Postgres transaction).
+### 13. Deleting a user's data
 
-### 10. Deleting a user's data
-
-`delete_user_data(session, user)` first lists the user's `vector_collections` names and deletes each Chroma collection; one that is already gone counts as deleted. If Chroma cannot be reached, it raises `503 service_unavailable` before touching Postgres, so the user can retry and nothing is half-deleted. Then it deletes the user row, which cascades to everything else, including the new tables.
+Everything is in Postgres and cascades from `users`, so `delete_user_data()` needs no change. The tests prove the cascade reaches the three new tables.
 
 - `DELETE /api/me` calls it and answers 204. In demo mode it answers 404; "End demo" is the demo path.
-- The demo cleanup loop catches the 503 per user, logs it, and tries again on its next run. An expired demo user is already refused, so waiting is safe.
 - Settings gets a "Delete my data" section with a dialog listing what will be deleted. Confirming calls the endpoint through the proxy and then goes to `/auth/logout`. It is hidden when `/api/me` reports demo mode.
+
+### 14. Tests on Postgres
+
+Tests that store or search are marked `postgres`. The default `pytest` run deselects them. `pytest -m postgres` with `TEST_DATABASE_URL` pointing at a Postgres with pgvector runs them, and fails, rather than skips, when the variable is missing. The README gives both commands, and every task check that touches storage or search runs the second. In this container that is the apt Postgres 16 with pgvector 0.6, which has everything decision 5 uses; the compose stack runs 0.8.
 
 ## Risks / Trade-offs
 
-- [A user with no key for the embedding provider cannot search or, later, save] → The tool result and the error name the provider and point to settings. The operator picks a provider most users will have. The local model option is recorded for later.
-- [The provider retires the embedding model] → Existing indexes fail with `model_unavailable` on their next query. The operator sets a new model and runs the rebuild; `docs/` explains this.
-- [Dual writes during a rebuild double the embedding calls for that user] → Only while a rebuild runs, and only for that user.
-- [Chroma client and server versions drift] → The client is pinned to the server's minor version in `pyproject.toml`, and the contract test runs against the compose server.
-- [A tag filter with thousands of ids makes a large Chroma `$in` query] → Personal thought counts are small. If it shows up, filter after a larger vector query instead.
-- [Orphan vectors after a failed Chroma delete] → Search drops them (decision 6) and a rebuild removes them. They hold only a title and summary of a thought already deleted from Postgres; the user's data deletion drops the whole collection.
-- [Stale `building` row after a crashed job] → The next run refuses and says to use `--restart`.
+- [A user with no key for the embedding provider only gets search by words] → The tool result says so and names the provider. Words still find names and exact phrases. The local model option is recorded for later.
+- [Exact search slows down as a user's collection grows] → The benchmark sets a 5,000-thought budget. Decision 10 lists the remedies in order, and the untyped column keeps them open.
+- [OR-matched words let in weak matches] → The cut-off in decision 5 and the evaluation's "nothing" queries guard against it.
+- [Thresholds depend on the model] → Per-model `min_similarity` in `chat.yaml`, set from the evaluation; rank fusion needs no threshold for ordering.
+- [The provider retires the embedding model] → Queries fall back to words only with a "rebuild needed" note. The operator sets a new model and runs the rebuild; `docs/search.md` explains this.
+- [Search is Postgres-only, so the default test run does not cover it] → The `postgres` marker fails when its database is missing, and every relevant task check runs it.
+- [A managed Postgres without pgvector] → Startup fails naming the extension, and the docs list the requirement.
+- [Embedding calls during a rebuild double for that user] → Only while it runs, and only for that user.
 
 ## Migration Plan
 
-1. The Alembic migration adds the three tables. It runs at startup like the others, and `downgrade -1` drops them.
-2. Chroma starts empty. No existing data needs moving: no thought has been stored before this change.
-3. Rollback: downgrade the migration and, if any collections were created, delete `.data/chroma` (it holds nothing else).
+1. Switch the compose Postgres image to pgvector for Postgres 18. The data directory is compatible, since it is the same Postgres major version with an added extension.
+2. The Alembic migration creates the extension and the three tables. It runs at startup like the others, and `downgrade -1` drops the tables; the extension stays, since other databases on the server may use it.
+3. Remove the Chroma service and settings. `.data/chroma` can be deleted; it holds nothing.
+4. Rollback: downgrade the migration and restore the previous compose file. No thought existed before this change.

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Keeps each user's filed thoughts durably in the database, which is the source of truth, and keeps each thought's search entry in step with it.
+Keeps each user's filed thoughts durably in the database, which is the source of truth, and keeps each thought's search entries in step with it.
 
 ## ADDED Requirements
 
@@ -37,7 +37,7 @@ The system SHALL refuse a thought with an empty title or summary, a title over 2
 
 ### Requirement: Store, update, and delete keep search in step
 
-Storing a thought SHALL make it findable by search. Updating a thought's title or summary SHALL make search find it by its new wording and not its old. Updating only tags, category, or raw text SHALL NOT need a new embedding. Deleting a thought SHALL remove it from the database and from search. When the embedding call fails, storing and updating SHALL fail with the provider error and leave the thought as it was.
+A thought and its search entries SHALL be written and deleted together, so search never returns a thought that is not stored and never misses one by its words. Storing a thought SHALL make it findable by its words at once and by its meaning once its embeddings exist. Updating a thought's title, summary, or raw text SHALL make search find it by its new content and not its old. Updating only tags or category SHALL NOT need a new embedding. Deleting a thought SHALL remove it and all its search entries.
 
 #### Scenario: Stored and found
 
@@ -47,23 +47,28 @@ Storing a thought SHALL make it findable by search. Updating a thought's title o
 #### Scenario: Reworded
 
 - **WHEN** a user changes a thought's summary from `buy oat milk` to `book the dentist` and then searches for `dentist`
-- **THEN** the search finds the thought
+- **THEN** the search finds the thought, and a search for `oat milk` no longer finds it by that summary
 
 #### Scenario: Deleted
 
 - **WHEN** a user deletes a thought and then searches for its title
 - **THEN** the search does not return it
 
-#### Scenario: Embedding fails while storing
+### Requirement: A provider failure never loses a thought
 
-- **WHEN** the embedding provider is unreachable while a thought is stored
-- **THEN** storing fails with `provider_unreachable` and no thought is stored
+Storing or updating a valid thought SHALL succeed even when its embedding call fails. The thought SHALL then be findable by its words at once. Its missing embeddings SHALL be created on the user's next store or search that can reach the provider, or by the rebuild job, without the user doing anything.
 
-### Requirement: The database is the source of truth
+#### Scenario: Provider down while storing
 
-Search results SHALL be built from the thoughts in the database. A search entry with no matching thought in the database SHALL NOT be returned. The search index SHALL be rebuildable from the database alone.
+- **WHEN** a user stores a thought while the embedding provider is unreachable
+- **THEN** the thought is stored and a search for a word in its title finds it
 
-#### Scenario: Leftover search entry
+#### Scenario: Filled in later
 
-- **WHEN** the search index holds an entry for a thought that is no longer in the database
-- **THEN** a search never returns that entry
+- **WHEN** the provider is reachable again and the user searches
+- **THEN** the stored thought gets its embeddings and is found by meaning from then on
+
+#### Scenario: No key
+
+- **WHEN** a user without a key for the embedding provider stores a thought
+- **THEN** the thought is stored and is findable by its words

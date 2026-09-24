@@ -2,24 +2,19 @@
 
 ## Purpose
 
-Lets a user delete everything the app stores about them, in the database and in the search index, in one step.
+Lets a user delete everything the app stores about them, including their thoughts and search index, in one step.
 
 ## ADDED Requirements
 
 ### Requirement: Delete my data
 
-A logged-in user SHALL be able to delete all of their stored data with one request. It SHALL delete their thoughts and search indexes, provider keys, model loadout and chat settings, conversations, messages, and usage records, and their user record. Another user's data SHALL be unchanged. If the search index cannot be reached, the request SHALL fail with `service_unavailable` and delete nothing, so it can be retried.
+A logged-in user SHALL be able to delete all of their stored data with one request. It SHALL delete, in one transaction, their thoughts and search indexes, provider keys, model loadout and chat settings, conversations, messages, and usage records, and their user record. Another user's data SHALL be unchanged.
 
 #### Scenario: Everything deleted
 
 - **WHEN** a user with thoughts, a key, conversations, and usage records deletes their data
-- **THEN** none of those remain in the database or the search index
+- **THEN** none of those remain
 - **AND** another user's data is unchanged
-
-#### Scenario: Search index unreachable
-
-- **WHEN** a user deletes their data while the search index cannot be reached
-- **THEN** the request fails with `service_unavailable` and nothing is deleted
 
 #### Scenario: Next login
 
@@ -45,11 +40,11 @@ The settings page SHALL offer "Delete my data" with a confirmation step that say
 - **WHEN** a demo visitor opens settings
 - **THEN** "Delete my data" is not offered
 
-### Requirement: Every deletion path clears the search index
+### Requirement: Every deletion path removes thoughts
 
-Every path that deletes a user, including demo session end and demo expiry, SHALL also delete that user's search indexes.
+Every path that deletes a user, including demo session end and demo expiry, SHALL also delete that user's thoughts and search indexes.
 
 #### Scenario: Demo expiry
 
 - **WHEN** a demo user with stored thoughts expires and is cleaned up
-- **THEN** their search indexes are deleted too
+- **THEN** their thoughts and search entries are deleted too

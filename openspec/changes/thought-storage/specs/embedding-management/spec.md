@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Chooses which embedding model builds each user's search index, records it with the index, and lets an operator rebuild indexes with another model without stopping search.
+Chooses which embedding model builds each user's search index, records it with the index, fills in missing embeddings, and lets an operator rebuild indexes with another model without stopping search.
 
 ## ADDED Requirements
 
@@ -26,7 +26,7 @@ Each user SHALL have their own search index, never shared with another user. Eac
 
 #### Scenario: First thought
 
-- **WHEN** a user stores their first thought
+- **WHEN** a user's first thought is embedded
 - **THEN** an active index is created for them, recording the configured provider and model and the vector dimension
 
 #### Scenario: Setting changed later
@@ -37,26 +37,35 @@ Each user SHALL have their own search index, never shared with another user. Eac
 #### Scenario: Per-user indexes
 
 - **WHEN** two users have stored thoughts
-- **THEN** each has their own index, and neither index holds the other's thoughts
+- **THEN** each has their own index, and neither index holds the other's entries
 
 ### Requirement: One place chooses the embedding model
 
-Choosing the provider and model for a new index SHALL go through one decision point, which today returns the instance setting for every user. A later per-user choice SHALL be possible by changing only that decision point.
+Choosing the provider and model for a new index SHALL go through one decision point, which today returns the instance setting for every user. A later per-user choice SHALL be possible by changing only that decision point, and indexes with different models and dimensions SHALL be able to exist side by side.
 
 #### Scenario: Same model for every user
 
 - **WHEN** two users store their first thought
 - **THEN** both indexes record the instance's embedding provider and model
 
+### Requirement: Missing embeddings are filled in
+
+When a user stores a thought or searches and their index lacks embeddings for some of their thoughts, the system SHALL create a bounded number of the missing ones in the same request, oldest first, without delaying the result by more than one embedding call. A failure SHALL leave them missing for the next try and SHALL NOT fail the request.
+
+#### Scenario: Backlog cleared over requests
+
+- **WHEN** a user has 3 thoughts without embeddings and the provider is reachable again
+- **THEN** their next search creates the missing embeddings and finds those thoughts by meaning
+
 ### Requirement: Operator rebuilds indexes
 
-The operator SHALL be able to run a command-line job, not reachable over the API, that rebuilds the index of one user or of all users with the configured embedding model, from the thoughts in the database. The job SHALL build a new index version beside the active one, check that it holds one entry per thought, and only then make it active and retire the old one. Search SHALL keep working from the old index during the build. A thought stored, updated, or deleted during the build SHALL be reflected in the new index. A user whose key is missing or refused SHALL keep their old index, and the job SHALL report them and end with a failure status. Demo users SHALL be skipped.
+The operator SHALL be able to run a command-line job, not reachable over the API, that rebuilds the index of one user or of all users with the configured embedding model, from the thoughts in the database. The job SHALL build a new index version beside the active one and, in one transaction, check that every thought has its entries in it, make it active, and retire the old one, whose entries SHALL then be deleted. Search SHALL keep working from the old index during the build. A thought stored, updated, or deleted during the build SHALL be reflected in the new index. A user whose key is missing or refused SHALL keep their old index, and the job SHALL report them and end with a failure status. Demo users SHALL be skipped.
 
 #### Scenario: Rebuild one user
 
 - **WHEN** the operator rebuilds a user with 12 thoughts after changing the embedding model
-- **THEN** the user's new index records the new model and holds 12 entries
-- **AND** the old index is retired and searches use the new one
+- **THEN** the user's new index records the new model and covers all 12 thoughts
+- **AND** the old index is retired, its entries are deleted, and searches use the new one
 
 #### Scenario: Search during a rebuild
 
@@ -66,15 +75,10 @@ The operator SHALL be able to run a command-line job, not reachable over the API
 #### Scenario: Thought stored during a rebuild
 
 - **WHEN** the user stores a thought while their rebuild is running
-- **THEN** after the rebuild the thought is found by search
+- **THEN** after the rebuild the thought is found by meaning
 
 #### Scenario: User without a key
 
 - **WHEN** a rebuild of all users meets a user with no saved key for the embedding provider
 - **THEN** that user keeps their old active index
 - **AND** the job reports the user and ends with a failure status after rebuilding the others
-
-#### Scenario: Count mismatch
-
-- **WHEN** the new index does not hold one entry per thought at the end of the build
-- **THEN** the old index stays active, the new one is discarded, and the job reports the user
