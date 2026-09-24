@@ -6,10 +6,15 @@
 //   event: delta         data: {"text":"..."}
 //   event: usage         data: {"prompt_tokens":1,"completion_tokens":1,"context_length":1}
 //   event: notice        data: {"kind":"compact_suggested"|"usage_warning", ...}
+//   event: compact_draft data: {"summary":"...","through_position":3,"provider_id":"...","model":"..."}
+//   event: compact_models data: {"needed_tokens":1,"context_length":1,"models":[{"provider_id":"...","model":"...","context_length":1}]}
 //   event: error         data: {"error":{"code":"...","message":"..."}}
 //   event: done          data: {}
 
 export type Proposal = { title: string; summary: string; tags: string[] };
+
+/** A loadout model large enough to write a /compact summary. */
+export type CompactModel = { providerId: string; model: string; contextLength: number };
 
 export type SseEvent =
   | { type: "conversation"; id: string; title: string }
@@ -18,6 +23,19 @@ export type SseEvent =
   | { type: "delta"; text: string }
   | { type: "usage"; promptTokens: number; completionTokens: number; contextLength?: number }
   | { type: "notice"; kind: string; data: Record<string, unknown> }
+  | {
+      type: "compact_draft";
+      summary: string;
+      throughPosition: number;
+      providerId: string;
+      model: string;
+    }
+  | {
+      type: "compact_models";
+      neededTokens: number;
+      contextLength: number | null;
+      models: CompactModel[];
+    }
   | { type: "error"; code: string; message: string }
   | { type: "done" };
 
@@ -27,6 +45,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function toCompactModel(value: unknown): CompactModel | null {
+  return isRecord(value) &&
+    typeof value.provider_id === "string" &&
+    typeof value.model === "string" &&
+    typeof value.context_length === "number"
+    ? { providerId: value.provider_id, model: value.model, contextLength: value.context_length }
+    : null;
 }
 
 function toEvent(name: string, data: string): SseEvent | null {
@@ -83,6 +110,30 @@ function toEvent(name: string, data: string): SseEvent | null {
       return typeof payload.kind === "string"
         ? { type: "notice", kind: payload.kind, data: payload }
         : null;
+    case "compact_draft":
+      return typeof payload.summary === "string" &&
+        typeof payload.through_position === "number" &&
+        typeof payload.provider_id === "string" &&
+        typeof payload.model === "string"
+        ? {
+            type: "compact_draft",
+            summary: payload.summary,
+            throughPosition: payload.through_position,
+            providerId: payload.provider_id,
+            model: payload.model,
+          }
+        : null;
+    case "compact_models": {
+      if (typeof payload.needed_tokens !== "number" || !Array.isArray(payload.models)) return null;
+      const models = payload.models.map(toCompactModel);
+      if (models.some((model) => model === null)) return null;
+      return {
+        type: "compact_models",
+        neededTokens: payload.needed_tokens,
+        contextLength: typeof payload.context_length === "number" ? payload.context_length : null,
+        models: models as CompactModel[],
+      };
+    }
     case "error": {
       const error = payload.error;
       if (isRecord(error) && typeof error.code === "string" && typeof error.message === "string") {

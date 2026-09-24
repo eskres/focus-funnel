@@ -13,10 +13,12 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.config import ChatConfig
+from app.chat.context import compact_suggestion
 from app.chat.conversations import next_position
 from app.chat.model_call import ModelCall
 from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, TOOLS, tool_arguments
 from app.chat.sse import Event
+from app.chat.usage import record_usage, usage_warning
 from app.chat.tools import (
     PROPOSAL_SHOWN,
     ToolArgumentError,
@@ -25,6 +27,7 @@ from app.chat.tools import (
 )
 from app.errors import ApiError, output_limit_reached, tool_loop_limit
 from app.models import Conversation, Message, User
+from app.provider_config import StreamUsage
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +58,18 @@ class RoundState:
         ]
 
 
-async def read_round(chunks: AsyncIterator[Any], state: RoundState) -> AsyncIterator[Event]:
+async def read_round(
+    chunks: AsyncIterator[Any], state: RoundState, stream_usage: StreamUsage = "final_chunk"
+) -> AsyncIterator[Event]:
     """Forward text as it arrives and collect tool-call pieces.
 
     The reasoning field is ignored. A chunk may carry no choices (the final
-    usage chunk), so each field is read only when present.
+    usage chunk), so each field is read only when present. Usage is read as
+    the provider reports it: on a final chunk, or on every chunk, where the
+    last report counts. A provider that reports none is not read.
     """
     async for chunk in chunks:
-        usage = getattr(chunk, "usage", None)
+        usage = getattr(chunk, "usage", None) if stream_usage != "none" else None
         if usage is not None:
             state.prompt_tokens = usage.prompt_tokens
             state.completion_tokens = usage.completion_tokens
@@ -106,6 +113,8 @@ class Turn:
         self.context = context
         self.forced_tool = forced_tool
         self._first_chunks: AsyncIterator[Any] | None = None
+        # The count before this turn, so the soft limit is noted once per crossing.
+        self._tokens_before = conversation.last_prompt_tokens
 
     def _options(self, round_number: int) -> dict[str, Any]:
         options: dict[str, Any] = {"tools": TOOLS}
@@ -138,12 +147,15 @@ class Turn:
 
             state = RoundState()
             try:
-                async for event in read_round(chunks, state):
+                async for event in read_round(
+                    chunks, state, self.call.provider.capabilities.stream_usage
+                ):
                     yield event
             except Exception as exc:
                 await self._store_failed(state, exc)
                 raise
-            self._note_usage(state)
+            async for event in self._note_usage(state):
+                yield event
 
             calls = state.tool_calls()
             if not calls:
@@ -156,6 +168,8 @@ class Turn:
                     )
                     raise output_limit_reached(thinking_only=not state.answer.strip())
                 await self._store(role="assistant", content=state.answer, status="complete")
+                async for event in self._suggest_compact():
+                    yield event
                 return
 
             last_answer = await self._store(
@@ -173,9 +187,43 @@ class Turn:
             await self.session.commit()
         raise tool_loop_limit()
 
-    def _note_usage(self, state: RoundState) -> None:
+    async def _note_usage(self, state: RoundState) -> AsyncIterator[Event]:
+        """Store and send the round's prompt tokens for the meter, record the
+        usage, and send the usage warning when it is due."""
         if state.prompt_tokens is not None:
             self.conversation.last_prompt_tokens = state.prompt_tokens
+            info = await self.call.info()
+            usage: dict[str, Any] = {
+                "prompt_tokens": state.prompt_tokens,
+                "completion_tokens": state.completion_tokens or 0,
+            }
+            if info is not None and info.context_length:
+                usage["context_length"] = info.context_length
+            yield ("usage", usage)
+        recorded = await record_usage(
+            self.session,
+            self.call,
+            "chat",
+            state.prompt_tokens,
+            state.completion_tokens,
+            self.conversation.id,
+        )
+        if recorded is None:
+            return
+        notice = await usage_warning(self.session, self.user.id)
+        if notice is not None:
+            yield ("notice", notice)
+
+    async def _suggest_compact(self) -> AsyncIterator[Event]:
+        info = await self.call.info()
+        notice = compact_suggestion(
+            self._tokens_before,
+            self.conversation.last_prompt_tokens,
+            info.context_length if info is not None else None,
+            self.config,
+        )
+        if notice is not None:
+            yield ("notice", notice)
 
     async def _store_failed(self, state: RoundState, exc: Exception) -> None:
         try:

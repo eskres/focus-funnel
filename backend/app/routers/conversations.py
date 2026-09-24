@@ -11,7 +11,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
+from app.chat.compaction import store_compaction
 from app.chat.config import ChatConfig, get_chat_config
+from app.chat.context import meter
 from app.chat import tools
 from app.chat.conversations import (
     claim_turn,
@@ -21,11 +23,13 @@ from app.chat.conversations import (
     release_turn,
     switch_model,
 )
+from app.chat.model_info import model_info
+from app.chat.prompt import build_context
 from app.chat.proposal import offer_proposal
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.errors import ApiError, ErrorCode
-from app.models import Conversation, Message, User
+from app.models import Conversation, User
 from app.providers import get_provider_http_client
 
 router = APIRouter(prefix="/api/conversations")
@@ -55,10 +59,26 @@ class MessageOut(BaseModel):
     created_at: datetime
 
 
+class ContextMeter(BaseModel):
+    """How full the context is: the tokens in use against the model's context length."""
+
+    tokens: int
+    # True until the next answer reports the model's own count.
+    estimated: bool
+    context_length: int | None
+
+
 class ConversationDetail(ConversationSummary):
     last_prompt_tokens: int | None
     held_proposal: dict[str, Any] | None
+    context: ContextMeter
     messages: list[MessageOut]
+
+
+class CompactionIn(BaseModel):
+    summary: str = Field(min_length=1)
+    # The last message the summary replaces, from the compact_draft event.
+    through_position: int = Field(ge=0)
 
 
 class ConversationList(BaseModel):
@@ -103,11 +123,33 @@ def summary(conversation: Conversation) -> ConversationSummary:
     )
 
 
-def detail(conversation: Conversation, messages: list[Message]) -> ConversationDetail:
+async def detail(
+    session: AsyncSession,
+    user: User,
+    conversation: Conversation,
+    settings: Settings,
+    http_client: httpx2.AsyncClient | None,
+) -> ConversationDetail:
+    messages = await list_messages(session, conversation)
+    info = (
+        await model_info(
+            session, user, conversation.provider_id, conversation.model, settings, http_client
+        )
+        if conversation.model is not None
+        else None
+    )
+    gauge = meter(
+        conversation,
+        build_context(messages, conversation.held_proposal),
+        info.context_length if info is not None else None,
+    )
     return ConversationDetail(
         **summary(conversation).model_dump(),
         last_prompt_tokens=conversation.last_prompt_tokens,
         held_proposal=conversation.held_proposal,
+        context=ContextMeter(
+            tokens=gauge.tokens, estimated=gauge.estimated, context_length=gauge.context_length
+        ),
         messages=[
             MessageOut(
                 id=m.id,
@@ -149,9 +191,11 @@ async def read_conversation(
     conversation_id: uuid.UUID,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+    http_client: httpx2.AsyncClient | None = Depends(get_provider_http_client),
 ) -> ConversationDetail:
     conversation = await get_conversation(session, user, conversation_id)
-    return detail(conversation, await list_messages(session, conversation))
+    return await detail(session, user, conversation, settings, http_client)
 
 
 @router.patch("/{conversation_id}", response_model=ConversationDetail)
@@ -161,6 +205,8 @@ async def change_conversation(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     config: ChatConfig = Depends(get_chat_config),
+    settings: Settings = Depends(get_settings),
+    http_client: httpx2.AsyncClient | None = Depends(get_provider_http_client),
 ) -> ConversationDetail:
     conversation = await get_conversation(session, user, conversation_id)
     given = body.model_fields_set
@@ -202,7 +248,45 @@ async def change_conversation(
             config,
         )
     await session.commit()
-    return detail(conversation, await list_messages(session, conversation))
+    return await detail(session, user, conversation, settings, http_client)
+
+
+@router.post("/{conversation_id}/compaction", response_model=ConversationDetail)
+async def accept_compaction(
+    conversation_id: uuid.UUID,
+    body: CompactionIn,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    config: ChatConfig = Depends(get_chat_config),
+    settings: Settings = Depends(get_settings),
+    http_client: httpx2.AsyncClient | None = Depends(get_provider_http_client),
+) -> ConversationDetail:
+    """Store the summary the user accepted, as they edited it.
+
+    The messages up to through_position, and any earlier summary, are marked
+    compacted: the transcript still shows them, and the model gets the
+    summary instead.
+    """
+    conversation = await get_conversation(session, user, conversation_id)
+    text = body.summary.strip()
+    if not text:
+        raise ApiError(422, ErrorCode.VALIDATION_ERROR, "A summary must not be empty.")
+    await claim_turn(session, conversation)
+    try:
+        await store_compaction(
+            session,
+            conversation,
+            await list_messages(session, conversation),
+            text,
+            body.through_position,
+            config,
+        )
+        await session.commit()
+    finally:
+        await session.rollback()
+        await release_turn(session, conversation_id)
+    await session.refresh(conversation)
+    return await detail(session, user, conversation, settings, http_client)
 
 
 @router.delete("/{conversation_id}", status_code=204)

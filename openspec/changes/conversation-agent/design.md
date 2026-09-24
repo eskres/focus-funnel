@@ -101,6 +101,9 @@ proposal      { title, summary, tags }
 delta         { text }
 usage         { prompt_tokens, completion_tokens, context_length? }
 notice        { kind: "compact_suggested"|"usage_warning", ... }
+compact_draft { summary, through_position, provider_id, model }   /compact only
+compact_models { needed_tokens, context_length, models: [{ provider_id, model, context_length }] }
+                                                   /compact only, when the conversation's model is too small
 error         { error: { code, message } }
 done          {}
 ```
@@ -151,7 +154,7 @@ Configuration lives in `chat.yaml`, loaded and validated once at startup: an inv
 
 ### 9. Usage tracking
 
-A single helper records a `usage_events` row after every model call: chat rounds, `/compact`, forced proposals, and tests. The token counts come from the stream: every streamed call sets `stream_options.include_usage`, which Nebius honours (without it a stream reports no usage). The token counts arrive on a final chunk with no choices, so the stream reader must not assume every chunk has one. How usage arrives depends on the provider's `stream_usage` capability in `model-providers`: `final_chunk` is read as described, `incremental` takes the last reported value, and `none` records the cost as unknown. If a stream ends without usage, nothing is recorded and the reply's cost is unknown, which the spec allows.
+A single helper records a `usage_events` row after every model call: chat rounds, `/compact`, forced proposals, and tests. The token counts come from the stream: every streamed call sets `stream_options.include_usage`, which Nebius honours (without it a stream reports no usage). The token counts arrive on a final chunk with no choices, so the stream reader must not assume every chunk has one. How usage arrives depends on the provider's `stream_usage` capability in `model-providers`: `final_chunk` is read as described, `incremental` takes the last reported value, and `none` records the cost as unknown. If a stream ends without usage, nothing is recorded and the reply's cost is unknown, which the spec allows. A `none` provider is not asked for usage, and its calls are recorded with the tokens and cost null (a later migration makes the token columns nullable).
 
 The cost is `prompt_tokens × prompt_price + completion_tokens × completion_price` from the model list at the time of the call. Prices are read as USD per token, as the list reports them. The field carries no unit, and Nebius's price page needs a login, so the unit is **not verified** against a published price. Task 14.8 compares the estimate with the Nebius console for real usage, and the settings label already calls the figure an estimate.
 

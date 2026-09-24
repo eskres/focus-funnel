@@ -14,9 +14,12 @@ export type LoadoutEntry = {
   context_length?: number;
 };
 
+export type UsageWarning = { unit: "usd" | "tokens"; amount: number };
+
 export type ModelSettings = {
   models: LoadoutEntry[];
   temperature: number | null;
+  warning?: UsageWarning | null;
   temperature_default: number;
   temperature_min: number;
   temperature_max: number;
@@ -42,13 +45,15 @@ export function getModelSettings(): Promise<ModelSettings> {
   return apiFetch<ModelSettings>(MODEL_SETTINGS_ENDPOINT);
 }
 
+/** Saves exactly what is given: a missing warning threshold is cleared. */
 export function saveModelSettings(
   models: LoadoutEntryInput[],
   temperature: number | null,
+  warning: UsageWarning | null = null,
 ): Promise<ModelSettings> {
   return apiFetch<ModelSettings>(MODEL_SETTINGS_ENDPOINT, {
     method: "PUT",
-    body: JSON.stringify({ models, temperature }),
+    body: JSON.stringify({ models, temperature, warning }),
   });
 }
 

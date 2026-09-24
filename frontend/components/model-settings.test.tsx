@@ -115,6 +115,63 @@ describe("ModelSettingsSection", () => {
     expect(calls.find((c) => c.method === "PUT")?.body).toEqual({
       models: [{ provider_id: "nebius", model: NANO, reasoning_effort: "medium", is_default: true }],
       temperature: 0.5,
+      warning: null,
+    });
+  });
+
+  describe("the usage warning threshold", () => {
+    it("saves the unit and the amount", async () => {
+      const { calls } = api(loadout([loadoutEntry(NANO, { is_default: true })]), {
+        "PUT /api/settings/models": json(
+          200,
+          loadout([loadoutEntry(NANO, { is_default: true })], {
+            warning: { unit: "usd", amount: 5 },
+          }),
+        ),
+      });
+      render(<ModelSettingsSection />);
+      await waitFor(() => expect(screen.getByLabelText("Model 1 model")).toHaveDisplayValue(NANO));
+
+      fireEvent.change(screen.getByLabelText("Warning unit"), { target: { value: "usd" } });
+      fireEvent.change(screen.getByLabelText("Warning amount"), { target: { value: "5" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save models" }));
+
+      expect(await screen.findByText("Saved.")).toBeInTheDocument();
+      expect(calls.find((c) => c.method === "PUT")?.body).toMatchObject({
+        warning: { unit: "usd", amount: 5 },
+      });
+      expect(screen.getByLabelText("Warning amount")).toHaveValue(5);
+    });
+
+    it("shows a saved token threshold and can turn it off", async () => {
+      const { calls } = api(
+        loadout([], { warning: { unit: "tokens", amount: 2_000_000 } }),
+        { "PUT /api/settings/models": json(200, loadout()) },
+      );
+      render(<ModelSettingsSection />);
+
+      await waitFor(() => expect(screen.getByLabelText("Warning unit")).toHaveDisplayValue("Tokens"));
+      expect(screen.getByLabelText("Warning amount")).toHaveValue(2_000_000);
+
+      fireEvent.change(screen.getByLabelText("Warning unit"), { target: { value: "" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save models" }));
+
+      await screen.findByText("Saved.");
+      expect(calls.find((c) => c.method === "PUT")?.body).toMatchObject({ warning: null });
+    });
+
+    it("refuses a threshold without an amount, before saving", async () => {
+      const { calls } = api();
+      render(<ModelSettingsSection />);
+      await screen.findByText("Not set");
+
+      fireEvent.change(screen.getByLabelText("Warning unit"), { target: { value: "tokens" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save models" }));
+
+      expect(
+        await screen.findByText("The usage warning needs an amount above zero."),
+      ).toBeInTheDocument();
+      expect(calls.some((c) => c.method === "PUT")).toBe(false);
     });
   });
 

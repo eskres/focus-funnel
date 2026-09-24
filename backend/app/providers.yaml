@@ -6,6 +6,9 @@
 # streamed chat: final_chunk (one chunk with no choices, after
 # stream_options.include_usage), incremental (on every chunk), or none.
 #
+# console_url (optional) is the provider's page for the account balance and
+# spend. The app links to it, because no preset reports a balance to an API key.
+#
 # key_check_url (optional) is an authenticated URL that answers 401 or 403 to a
 # wrong key. A provider whose model list needs no key sets it, because listing
 # models cannot tell a wrong key from a right one. Without it, saving a key
@@ -19,6 +22,7 @@ providers:
     label: Nebius Token Factory
     base_url: https://api.tokenfactory.nebius.com/v1/
     key_url: https://tokenfactory.nebius.com/project/api-keys
+    console_url: https://tokenfactory.nebius.com/
     notice: >-
       Nebius does not use your prompts or outputs to train models. You can
       turn on Zero Data Retention in your Nebius account profile for stronger
@@ -57,6 +61,7 @@ providers:
     label: OpenRouter
     base_url: https://openrouter.ai/api/v1/
     key_url: https://openrouter.ai/keys
+    console_url: https://openrouter.ai/settings/credits
     notice: >-
       OpenRouter does not log your prompts or completions by default. Each
       model page shows a data policy for the upstream provider that actually

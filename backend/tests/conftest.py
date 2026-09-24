@@ -13,6 +13,7 @@ from sqlalchemy.pool import NullPool
 
 from app.auth import JwksCache
 from app.chat.config import get_chat_config
+from app.chat.model_info import clear_model_info_cache
 from app.config import get_settings
 from app.db import create_engine, get_engine, get_sessionmaker
 from app.models import Base, User
@@ -36,9 +37,11 @@ CACHED = (get_settings, get_engine, get_sessionmaker, get_providers_config, get_
 def clear_settings_cache():
     for cached in CACHED:
         cached.cache_clear()
+    clear_model_info_cache()
     yield
     for cached in CACHED:
         cached.cache_clear()
+    clear_model_info_cache()
 
 
 @pytest.fixture

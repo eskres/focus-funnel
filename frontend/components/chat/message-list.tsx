@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { ApiError } from "@/lib/api";
 import type { Proposal } from "@/lib/sse";
+import { cn } from "@/lib/utils";
 
 export type ToolIndication = {
   name: string;
@@ -26,9 +27,14 @@ export type AnswerMessage = {
   proposal?: Proposal;
   status: "streaming" | "done" | "failed" | "cut";
   error?: ApiError;
+  /** Replaced for the model by a /compact summary, and still shown. */
+  compacted?: boolean;
 };
 
-export type ChatMessage = { id: number; role: "user"; text: string } | AnswerMessage;
+export type ChatMessage =
+  | { id: number; role: "user"; text: string; compacted?: boolean }
+  | AnswerMessage
+  | { id: number; role: "summary"; text: string; compacted?: boolean };
 
 const runningLabels: Record<string, string> = {
   search_thoughts: "Searching your thoughts…",
@@ -67,8 +73,24 @@ export function MessageList({
     <>
       <ol className="mx-auto flex w-full max-w-3xl flex-col gap-4" aria-label="Conversation">
         {messages.map((message) =>
-          message.role === "user" ? (
-            <li key={message.id} className="flex justify-end">
+          message.role === "summary" ? (
+            <li key={message.id} className={message.compacted ? "opacity-60" : undefined}>
+              <section
+                aria-label="Summary of earlier messages"
+                className="rounded-lg border bg-muted/40 p-3 text-sm"
+              >
+                <p className="mb-1 text-xs font-medium text-muted-foreground">
+                  Summary of earlier messages{message.compacted ? " (replaced by a later summary)" : ""}
+                </p>
+                <p className="whitespace-pre-wrap">{message.text}</p>
+              </section>
+            </li>
+          ) : message.role === "user" ? (
+            <li
+              key={message.id}
+              className={cn("flex flex-col items-end gap-1", message.compacted && "opacity-60")}
+            >
+              {message.compacted && <CompactedLabel />}
               <p className="max-w-[85%] rounded-2xl bg-primary px-3 py-2 text-sm whitespace-pre-wrap text-primary-foreground">
                 {message.text}
               </p>
@@ -104,7 +126,8 @@ function Answer({
   const text = answer.text.trimStart();
   const thinking = answer.status === "streaming" && !text && answer.tools.length === 0;
   return (
-    <li className="flex flex-col items-start gap-2">
+    <li className={cn("flex flex-col items-start gap-2", answer.compacted && "opacity-60")}>
+      {answer.compacted && <CompactedLabel />}
       {answer.tools.map((tool, index) => (
         <p
           key={index}
@@ -144,5 +167,16 @@ function Answer({
         </Alert>
       )}
     </li>
+  );
+}
+
+function CompactedLabel() {
+  return (
+    <span
+      className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase"
+      title="Summarised by /compact: the model gets the summary instead of this message."
+    >
+      Compacted
+    </span>
   );
 }

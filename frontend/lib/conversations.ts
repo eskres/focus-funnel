@@ -34,9 +34,17 @@ export type StoredMessage = {
 
 export type HeldProposal = Proposal & { position: number };
 
+/** How full the context is. `estimated` is true until the next answer reports the count. */
+export type ContextMeter = {
+  tokens: number;
+  estimated: boolean;
+  context_length: number | null;
+};
+
 export type ConversationDetail = ConversationSummary & {
   last_prompt_tokens: number | null;
   held_proposal: HeldProposal | null;
+  context: ContextMeter;
   messages: StoredMessage[];
 };
 
@@ -92,4 +100,16 @@ export function offerProposal(id: string): Promise<{ held_proposal: HeldProposal
     `${BASE}/${encodeURIComponent(id)}/proposal`,
     { method: "POST" },
   );
+}
+
+/** Stores an accepted /compact summary. The messages it replaces stay, marked compacted. */
+export function acceptCompaction(
+  id: string,
+  summary: string,
+  throughPosition: number,
+): Promise<ConversationDetail> {
+  return apiFetch<ConversationDetail>(`${BASE}/${encodeURIComponent(id)}/compaction`, {
+    method: "POST",
+    body: JSON.stringify({ summary, through_position: throughPosition }),
+  });
 }

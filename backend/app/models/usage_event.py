@@ -12,7 +12,9 @@ class UsageEvent(Base):
     """Tokens and estimated cost of one model call. Holds no message text.
 
     kind is chat, compact, proposal, or test. Deleting the conversation keeps
-    the record, so the spend history stays whole.
+    the record, so the spend history stays whole. The tokens are unknown for
+    a provider whose stream reports no usage, and the cost is unknown then
+    and for a model with no listed price.
     """
 
     __tablename__ = "usage_events"
@@ -28,8 +30,8 @@ class UsageEvent(Base):
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     provider_id: Mapped[str] = mapped_column(String(64), nullable=False)
     model: Mapped[str] = mapped_column(Text, nullable=False)
-    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
-    completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 10), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

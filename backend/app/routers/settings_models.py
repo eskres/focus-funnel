@@ -1,5 +1,8 @@
 """The model settings: the loadout, the default, the temperature, and Test."""
 
+from decimal import Decimal
+from typing import Literal
+
 import httpx2
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, model_serializer
@@ -54,9 +57,22 @@ class LoadoutEntry(BaseModel):
         return data
 
 
+class UsageWarning(BaseModel):
+    """A monthly warning threshold, in estimated dollars or in tokens."""
+
+    unit: Literal["usd", "tokens"]
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=6)
+
+
+class UsageWarningOut(BaseModel):
+    unit: Literal["usd", "tokens"]
+    amount: float
+
+
 class ModelSettings(BaseModel):
     models: list[LoadoutEntry]
     temperature: float | None
+    warning: UsageWarningOut | None = None
     temperature_default: float
     temperature_min: float
     temperature_max: float
@@ -67,6 +83,8 @@ class ModelSettings(BaseModel):
 class SaveModelSettings(BaseModel):
     models: list[LoadoutEntryIn]
     temperature: float | None = None
+    # Like the rest of the body, a save without a warning clears it.
+    warning: UsageWarning | None = None
 
 
 class EffortsResponse(BaseModel):
@@ -101,16 +119,29 @@ def _entry(row: ChatModel, config: ChatConfig, listed: ModelItem | None = None) 
     return entry
 
 
+def warning_of(user_settings: UserSettings | None) -> UsageWarningOut | None:
+    if (
+        user_settings is None
+        or user_settings.warning_unit is None
+        or user_settings.warning_amount is None
+    ):
+        return None
+    return UsageWarningOut(
+        unit=user_settings.warning_unit, amount=float(user_settings.warning_amount)
+    )
+
+
 def _response(
     rows: list[ChatModel],
-    temperature: float | None,
+    user_settings: UserSettings | None,
     config: ChatConfig,
     listed: dict[tuple[str, str], ModelItem] | None = None,
 ) -> ModelSettings:
     listed = listed or {}
     return ModelSettings(
         models=[_entry(row, config, listed.get((row.provider_id, row.model))) for row in rows],
-        temperature=temperature,
+        temperature=user_settings.temperature if user_settings is not None else None,
+        warning=warning_of(user_settings),
         temperature_default=config.temperature.default,
         temperature_min=config.temperature.min,
         temperature_max=config.temperature.max,
@@ -156,8 +187,7 @@ async def get_model_settings(
     config: ChatConfig = Depends(get_chat_config),
 ) -> ModelSettings:
     user_settings = await get_user_settings(session, user)
-    temperature = user_settings.temperature if user_settings is not None else None
-    return _response(await get_loadout(session, user), temperature, config)
+    return _response(await get_loadout(session, user), user_settings, config)
 
 
 @router.put("", response_model=ModelSettings)
@@ -206,8 +236,15 @@ async def save_model_settings(
         user_settings = UserSettings(user_id=user.id)
         session.add(user_settings)
     user_settings.temperature = body.temperature
+    unit = body.warning.unit if body.warning is not None else None
+    amount = body.warning.amount if body.warning is not None else None
+    if (unit, amount) != (user_settings.warning_unit, user_settings.warning_amount):
+        # A new threshold warns again, even in a month that already had a notice.
+        user_settings.warning_notified_month = None
+    user_settings.warning_unit = unit
+    user_settings.warning_amount = amount
     await session.commit()
-    return _response(rows, body.temperature, config, listed)
+    return _response(rows, user_settings, config, listed)
 
 
 @router.get("/efforts", response_model=EffortsResponse)

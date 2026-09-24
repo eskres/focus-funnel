@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { ModelSettingsSection } from "@/components/model-settings";
 import { ProvidersSettings } from "@/components/providers-settings";
+import { UsageSection } from "@/components/usage-settings";
 import { Button } from "@/components/ui/button";
 
 export default function SettingsPage() {
@@ -19,6 +20,7 @@ export default function SettingsPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <ProvidersSettings />
         <ModelSettingsSection />
+        <UsageSection />
       </main>
     </div>
   );
