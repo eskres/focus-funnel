@@ -239,6 +239,8 @@ def test_compact_streams_a_draft_and_changes_nothing(client, alice, fake_llm, te
     transcript = request["messages"][1]["content"]
     assert "User: message 0" in transcript and "Assistant: message 3" in transcript
     assert "message 4" not in transcript
+    assert transcript.startswith("<conversation>\n")
+    assert transcript.endswith("</conversation>\n\nWrite the summary of the conversation above.")
     assert stored(client, alice, conversation_id) == before
     [row] = usage_rows(test_database_url)
     assert (row.kind, row.model, row.prompt_tokens) == ("compact", NANO, 400)

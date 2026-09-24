@@ -81,14 +81,24 @@ def _transcript_line(message: Message) -> str | None:
 
 
 def compaction_request(plan: CompactionPlan) -> list[dict[str, Any]]:
-    """The summary call's messages: no tools, the conversation as text."""
+    """The summary call's messages: no tools, the conversation as text.
+
+    The transcript is fenced and followed by the request, since a bare
+    transcript makes some models (gpt-oss) carry on the conversation and
+    answer its last message instead of summarising it.
+    """
     lines = []
     if plan.summary is not None:
         lines.append(f"Summary of the conversation before this:\n{plan.summary.content or ''}\n")
     lines += [line for line in map(_transcript_line, plan.replaced) if line]
     return [
         {"role": "system", "content": COMPACT_PROMPT},
-        {"role": "user", "content": "\n".join(lines)},
+        {
+            "role": "user",
+            "content": "<conversation>\n"
+            + "\n".join(lines)
+            + "\n</conversation>\n\nWrite the summary of the conversation above.",
+        },
     ]
 
 
