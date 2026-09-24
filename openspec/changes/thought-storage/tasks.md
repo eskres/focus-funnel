@@ -51,8 +51,8 @@
 
 ## 9. Full system check
 
-- [ ] 9.1 Run the backend suite on SQLite, and on the compose Postgres with `-m postgres` and without it, and `npm run test`, `npm run lint`, and `npm run build` in `frontend/`. Check that all pass
-  - Run here on 2026-09-24 against the local Postgres 16 with pgvector 0.8.1 instead of the compose Postgres: backend 572 passed on SQLite and on Postgres, `-m postgres` 66 passed; frontend 321 tests passed, lint clean, build succeeded (on Node 22; the README asks for 24). Still to run against the compose Postgres 18.
+- [x] 9.1 Run the backend suite on SQLite, and on the compose Postgres with `-m postgres` and without it, and `npm run test`, `npm run lint`, and `npm run build` in `frontend/`. Check that all pass
+  - Run here on 2026-09-24 against the local Postgres 16 with pgvector 0.8.1 instead of the compose Postgres: backend 572 passed on SQLite and on Postgres, `-m postgres` 66 passed; frontend 321 tests passed, lint clean, build succeeded (on Node 22; the README asks for 24). Run again on 2026-09-24 against the compose Postgres 18 (`pgvector/pgvector:0.8.1-pg18-trixie`), Python 3.14.5 and Node 24.15: backend 572 passed on SQLite and on Postgres, `-m postgres` 66 passed; frontend 321 tests passed, lint clean, build succeeded.
 - [ ] 9.2 With the compose stack and a real key for the embedding provider, store the evaluation thoughts with the store operation from a Python shell in the backend container (saving from the chat is `push-and-pull`), ask the chat five recall questions from the evaluation set, and check that each answer uses the right thoughts, that each tool result is under the budget, that the usage section shows the embedding calls, and that a user without that key gets answers by words with the note to add it
 - [ ] 9.3 Change `EMBEDDING_MODEL` to the runner-up from task 6.4, run the rebuild for all users as `docs/search.md` says, and check that search still works, that the new indexes record the new model, and that the old entries are gone
 - [ ] 9.4 Use "Delete my data" in settings and check that the user is logged out and that Postgres holds nothing for that user
