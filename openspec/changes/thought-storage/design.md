@@ -200,7 +200,9 @@ Run in this container (Postgres 16, pgvector 0.8.1, 4 cores at 2.8 GHz), the fir
 | `word_share` only for the top candidates | words part 53 → 7 ms |
 | `force_custom_plan` | statement 87 → 47 ms median |
 
-Results after them, 95th percentile: 512 dimensions 40.8 ms, 1024 dimensions 49.8 ms, 2048 dimensions 62.3 ms, 4096 dimensions 128.9 ms. So `EMBEDDING_DIMENSIONS` should be 1024 or less for a model with larger vectors, if the evaluation shows no loss. The compose run is still to come.
+Results after them, 95th percentile: 512 dimensions 40.8 ms, 1024 dimensions 49.8 ms, 2048 dimensions 62.3 ms, 4096 dimensions 128.9 ms. So `EMBEDDING_DIMENSIONS` should be 1024 or less for a model with larger vectors, if the evaluation shows no loss.
+
+**On the compose stack (task 6.6, 2026-09-24):** `pgvector/pgvector:0.8.1-pg18-trixie` (Postgres 18.2, pgvector 0.8.1) in Docker Desktop with 11 CPUs and 8 GB, on an Apple M3 Pro MacBook with 18 GB. 100 searches over 5,000 thoughts and 10,001 entries, 95th percentile: 256 dimensions (the chosen size) 13.6 ms, median 9.3 ms; 512 dimensions 11.5 ms; 1024 dimensions 15.9 ms. All pass with room to spare, so no remedy was needed. The spread between sizes is within run-to-run noise at this speed.
 
 ### 11. One resolver, used only when an index is created
 
