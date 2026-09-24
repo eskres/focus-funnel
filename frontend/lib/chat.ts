@@ -17,6 +17,10 @@ export function isDeleteCommand(text: string): boolean {
   return /^\s*\/delete\s*$/i.test(text);
 }
 
+export function isCompactCommand(text: string): boolean {
+  return /^\s*\/compact\s*$/i.test(text);
+}
+
 export type ModelChoice = {
   providerId: string;
   model: string;

@@ -158,7 +158,9 @@ async def chat(
             conversation,
             call,
             config,
-            context=build_context(await list_messages(session, conversation)),
+            context=build_context(
+                await list_messages(session, conversation), conversation.held_proposal
+            ),
             forced_tool=forced_tool(FORCED_TOOLS[parsed.command])
             if parsed.command in FORCED_TOOLS
             else None,

@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+import httpx2
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
@@ -12,10 +13,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user
 from app.chat.config import ChatConfig, get_chat_config
 from app.chat import tools
-from app.chat.conversations import get_conversation, list_messages, now, switch_model
+from app.chat.conversations import (
+    claim_turn,
+    get_conversation,
+    list_messages,
+    now,
+    release_turn,
+    switch_model,
+)
+from app.chat.proposal import offer_proposal
+from app.config import Settings, get_settings
 from app.db import get_session
 from app.errors import ApiError, ErrorCode
 from app.models import Conversation, Message, User
+from app.providers import get_provider_http_client
 
 router = APIRouter(prefix="/api/conversations")
 
@@ -65,6 +76,10 @@ class ConfirmOutcome(BaseModel):
     saved: bool
     message: str
     proposal: ProposalIn
+
+
+class OfferedProposal(BaseModel):
+    held_proposal: dict[str, Any] | None
 
 
 class ConversationPatch(BaseModel):
@@ -201,6 +216,33 @@ async def delete_conversation(
     await session.execute(delete(Conversation).where(Conversation.id == conversation.id))
     await session.commit()
     return Response(status_code=204)
+
+
+@router.post("/{conversation_id}/proposal", response_model=OfferedProposal)
+async def offer_held_proposal(
+    conversation_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    config: ChatConfig = Depends(get_chat_config),
+    settings: Settings = Depends(get_settings),
+    http_client: httpx2.AsyncClient | None = Depends(get_provider_http_client),
+) -> OfferedProposal:
+    """The proposal to show before archive or /compact.
+
+    A held proposal comes back as it is. Without one, the model is asked for
+    one (a forced call), and it is held from then on. None means there is
+    nothing to propose, and the action goes ahead.
+    """
+    conversation = await get_conversation(session, user, conversation_id)
+    if conversation.held_proposal is not None:
+        return OfferedProposal(held_proposal=conversation.held_proposal)
+    await claim_turn(session, conversation)
+    try:
+        held = await offer_proposal(session, user, conversation, config, settings, http_client)
+    finally:
+        await session.rollback()
+        await release_turn(session, conversation_id)
+    return OfferedProposal(held_proposal=held)
 
 
 @router.post("/{conversation_id}/proposal/confirm", response_model=ConfirmOutcome)

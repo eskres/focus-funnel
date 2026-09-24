@@ -72,6 +72,26 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 
+HELD_PROPOSAL_NOTE = """\
+The user was already shown this proposal to file, and it is held until they \
+confirm it:
+Title: {title}
+Summary: {summary}
+Tags: {tags}
+
+Do not propose it again. If the user's latest message is about an unrelated \
+topic, first call propose_thought with a summary of everything discussed so \
+far, then answer the new message."""
+
+
+def held_proposal_note(held_proposal: dict[str, Any]) -> str:
+    return HELD_PROPOSAL_NOTE.format(
+        title=held_proposal.get("title", ""),
+        summary=held_proposal.get("summary", ""),
+        tags=", ".join(held_proposal.get("tags") or []) or "none",
+    )
+
+
 def forced_tool(name: str) -> dict[str, Any]:
     """A tool_choice that makes the model call this tool."""
     return {"type": "function", "function": {"name": name}}
@@ -101,8 +121,11 @@ def _as_model_message(message: Message) -> dict[str, Any] | None:
     return None
 
 
-def build_context(messages: list[Message]) -> list[dict[str, Any]]:
-    """The system prompt, the latest summary if any, then every message not compacted."""
+def build_context(
+    messages: list[Message], held_proposal: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """The system prompt, the latest summary if any, the held-proposal note if
+    a proposal is held, then every message not compacted."""
     context: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     summaries = [m for m in messages if m.role == "summary" and not m.compacted]
     if summaries:
@@ -112,6 +135,8 @@ def build_context(messages: list[Message]) -> list[dict[str, Any]]:
                 "content": "Summary of the earlier conversation:\n" + (summaries[-1].content or ""),
             }
         )
+    if held_proposal is not None:
+        context.append({"role": "system", "content": held_proposal_note(held_proposal)})
     for message in messages:
         if message.compacted or message.role == "summary":
             continue

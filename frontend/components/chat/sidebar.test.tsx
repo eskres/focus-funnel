@@ -106,6 +106,7 @@ describe("Sidebar", () => {
         json(200, { conversations: [rent, milk], archived: [] }),
         json(200, { conversations: [milk], archived: [{ ...rent, archived: true }] }),
       ],
+      "POST /api/conversations/c1/proposal": json(200, { held_proposal: null }),
       "PATCH /api/conversations/c1": json(200, { ...rent, archived: true, messages: [] }),
     });
     renderSidebar();
@@ -114,9 +115,55 @@ describe("Sidebar", () => {
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Archive" }));
 
     await waitFor(() => expect(rowTitles("Recent conversations")).toEqual(["Oat milk"]));
+    expect(screen.queryByRole("region", { name: "Proposal to file" })).not.toBeInTheDocument();
     expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ archived: true });
     fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
     expect(rowTitles("Archived conversations")).toEqual(["Rent"]);
+  });
+
+  it("shows the held proposal before archiving, then archives", async () => {
+    const held = { title: "Rent plan", summary: "Pay rent on the 1st.", tags: ["money"], position: 3 };
+    const { calls } = fakeApi({
+      "GET /api/conversations": [
+        json(200, { conversations: [rent, milk], archived: [] }),
+        json(200, { conversations: [milk], archived: [{ ...rent, archived: true }] }),
+      ],
+      "POST /api/conversations/c1/proposal": json(200, { held_proposal: held }),
+      "PATCH /api/conversations/c1": json(200, { ...rent, archived: true, messages: [] }),
+    });
+    renderSidebar();
+
+    const menu = await openMenu("Rent");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Archive" }));
+
+    const card = await screen.findByRole("region", { name: "Proposal to file" });
+    expect(within(card).getByLabelText("Title")).toHaveValue("Rent plan");
+    expect(calls.filter((c) => c.method === "PATCH")).toEqual([]);
+    expect(screen.getByRole("dialog").textContent?.toLowerCase()).not.toContain("delete");
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive now" }));
+
+    await waitFor(() => expect(rowTitles("Recent conversations")).toEqual(["Oat milk"]));
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ archived: true });
+  });
+
+  it("does not archive when the proposal is cancelled", async () => {
+    const held = { title: "Rent plan", summary: "Pay rent on the 1st.", tags: [], position: 3 };
+    const { calls } = fakeApi({
+      "GET /api/conversations": json(200, { conversations: [rent], archived: [] }),
+      "POST /api/conversations/c1/proposal": json(200, { held_proposal: held }),
+    });
+    renderSidebar();
+
+    const menu = await openMenu("Rent");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Archive" }));
+    await screen.findByRole("region", { name: "Proposal to file" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Proposal to file" })).not.toBeInTheDocument(),
+    );
+    expect(calls.filter((c) => c.method === "PATCH")).toEqual([]);
   });
 
   it("restores an archived conversation", async () => {

@@ -14,9 +14,14 @@ import {
   type ToolIndication,
 } from "@/components/chat/message-list";
 import { ModelPicker, type ModelOption } from "@/components/chat/model-picker";
+import {
+  ProposalDialog,
+  heldProposalFor,
+  type HeldOffer,
+} from "@/components/chat/proposal-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ApiError, UnauthenticatedError, createApiError } from "@/lib/api";
-import { isDeleteCommand, streamChat, type ModelChoice } from "@/lib/chat";
+import { isCompactCommand, isDeleteCommand, streamChat, type ModelChoice } from "@/lib/chat";
 import {
   deleteConversation,
   getConversation,
@@ -117,6 +122,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
   const [choice, setChoice] = useState<ModelChoice | null>(null);
   const [choiceChanged, setChoiceChanged] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [offer, setOffer] = useState<HeldOffer | null>(null);
   const nextId = useRef(1);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -192,11 +198,26 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
     window.history.replaceState(null, "", `/app/${id}`);
   }
 
-  async function send(text: string) {
+  async function send(text: string, offered = false) {
     if (answering || text.trim() === "") return;
     if (isDeleteCommand(text)) {
       if (conversationId) setDeleteOpen(true);
       return;
+    }
+    if (isCompactCommand(text) && conversationId && !offered) {
+      // The held proposal is offered before compacting.
+      setAnswering(true);
+      const proposal = await heldProposalFor(conversationId);
+      setAnswering(false);
+      if (proposal) {
+        setOffer({
+          conversationId,
+          proposal,
+          continueLabel: "Compact now",
+          onContinue: () => send(text, true),
+        });
+        return;
+      }
     }
     const answerId = nextId.current++;
     setMessages((current) => [
@@ -213,6 +234,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
       ...a,
       text: "",
       tools: [],
+      proposal: undefined,
       error: undefined,
       status: "streaming",
     }));
@@ -244,6 +266,11 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
           case "tool":
             updateAnswer(answerId, (a) => ({ ...a, tools: withTool(a.tools, event) }));
             break;
+          case "proposal": {
+            const { title, summary, tags } = event;
+            updateAnswer(answerId, (a) => ({ ...a, proposal: { title, summary, tags } }));
+            break;
+          }
           case "delta":
             updateAnswer(answerId, (a) => ({ ...a, text: a.text + event.text }));
             break;
@@ -314,7 +341,9 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
             <CommandList />
           </div>
         ) : (
-          <MessageList messages={messages} canAct={!answering} onRetry={retry} />
+          <MessageList
+            conversationId={conversationId}
+            messages={messages} canAct={!answering} onRetry={retry} />
         )}
       </div>
       <div className="border-t p-4">
@@ -332,6 +361,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
           </Composer>
         </div>
       </div>
+      <ProposalDialog offer={offer} onClose={() => setOffer(null)} />
       <DeleteDialog
         open={deleteOpen}
         title={title}

@@ -3,9 +3,11 @@
 import { useEffect, useRef } from "react";
 
 import { ChatError } from "@/components/chat/chat-error";
+import { ProposalCard } from "@/components/chat/proposal-card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { ApiError } from "@/lib/api";
+import type { Proposal } from "@/lib/sse";
 
 export type ToolIndication = {
   name: string;
@@ -20,6 +22,8 @@ export type AnswerMessage = {
   prompt: string;
   text: string;
   tools: ToolIndication[];
+  /** A proposal the model made in this answer. Stored answers have none. */
+  proposal?: Proposal;
   status: "streaming" | "done" | "failed" | "cut";
   error?: ApiError;
 };
@@ -42,10 +46,12 @@ function toolLabel(tool: ToolIndication): string {
 }
 
 export function MessageList({
+  conversationId,
   messages,
   canAct,
   onRetry,
 }: {
+  conversationId: string | undefined;
   messages: ChatMessage[];
   /** False while an answer is arriving, so no second answer can start. */
   canAct: boolean;
@@ -68,7 +74,13 @@ export function MessageList({
               </p>
             </li>
           ) : (
-            <Answer key={message.id} answer={message} canAct={canAct} onRetry={onRetry} />
+            <Answer
+              key={message.id}
+              conversationId={conversationId}
+              answer={message}
+              canAct={canAct}
+              onRetry={onRetry}
+            />
           ),
         )}
       </ol>
@@ -78,10 +90,12 @@ export function MessageList({
 }
 
 function Answer({
+  conversationId,
   answer,
   canAct,
   onRetry,
 }: {
+  conversationId: string | undefined;
   answer: AnswerMessage;
   canAct: boolean;
   onRetry: (answer: AnswerMessage) => void;
@@ -100,6 +114,9 @@ function Answer({
           {toolLabel(tool)}
         </p>
       ))}
+      {answer.proposal && (
+        <ProposalCard conversationId={conversationId} proposal={answer.proposal} />
+      )}
       {text && <p className="max-w-[85%] text-sm whitespace-pre-wrap">{text}</p>}
       {thinking && (
         <p role="status" className="text-xs text-muted-foreground">
