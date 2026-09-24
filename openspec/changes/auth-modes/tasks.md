@@ -1,7 +1,7 @@
 ## 1. Probes
 
-- [ ] 1.1 Run Pocket ID locally from its current release, register a client, and log in once with a passkey on `localhost`. Check by recording in `design.md` decisions 5 and 12 the pinned version, whether the ID token carries `email` and `email_verified`, its signing algorithm, whether `offline_access` gives a refresh token, and whether discovery works through `OIDC_INTERNAL_URL` from a container
-- [ ] 1.2 Create a Firebase test project with Google and email-and-password sign-in, sign in from a scratch page with `inMemoryPersistence`, and renew the token through the securetoken endpoint with only the web API key. Check by recording in `design.md` decision 6 that renewal works without a service account and the ID token's `iss`, `aud`, and algorithm
+- [x] 1.1 Run Pocket ID locally from its current release, register a client, and log in once with a passkey on `localhost`. Check by recording in `design.md` decisions 5 and 12 the pinned version, whether the ID token carries `email` and `email_verified`, its signing algorithm, whether `offline_access` gives a refresh token, and whether discovery works through `OIDC_INTERNAL_URL` from a container
+- [x] 1.2 Create a Firebase test project with Google and email-and-password sign-in, sign in from a scratch page with `inMemoryPersistence`, and renew the token through the securetoken endpoint with only the web API key. Check by recording in `design.md` decision 6 that renewal works without a service account and the ID token's `iss`, `aud`, and algorithm
 
 ## 2. Settings and startup checks
 

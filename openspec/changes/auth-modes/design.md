@@ -70,11 +70,27 @@ Scopes default to `openid email profile offline_access`. With a refresh token, r
 
 **Discovery from inside compose.** The issuer is a public URL such as `http://localhost:1411`, which the containers cannot reach. `OIDC_INTERNAL_URL` (optional) replaces the issuer's origin for server-to-server calls (discovery, JWKS, token) while `iss` is still checked against `OIDC_ISSUER`. Both the backend and the frontend server use it.
 
+**Probe (task 1.1, 2026-09-24, Pocket ID `v2.16.0`, confidential client, scopes `openid email profile offline_access`):**
+
+- The ID token has `alg` `RS256` (the only value in `id_token_signing_alg_values_supported`) and lives 3,600 seconds. `aud` is an array holding the client id, so the audience check must accept a list.
+- The ID token carries `email` and `email_verified`. A new Pocket ID user has `email_verified: false` until an admin marks the address verified, so an allow-list refuses that user (decision 10). The docs must say this.
+- `offline_access` gives a refresh token. The refresh grant returns a new ID token and a new refresh token.
+- The callback carries `iss` (RFC 9207, `authorization_response_iss_parameter_supported: true`), which `openid-client` v6 checks.
+- The access token is a JWT, but the backend still verifies the ID token (decision 1).
+- Discovery through the compose address (`http://pocket-id:1411`) works from a container, and `http://localhost:1411` does not. The discovery document lists the public origin (`http://localhost:1411/...`) for `jwks_uri`, `token_endpoint`, and every other endpoint. So `OIDC_INTERNAL_URL` must replace the origin of every endpoint URL read from discovery, not only the discovery URL.
+
 ### 6. Firebase flow and renewal
 
 The login page loads the Firebase web SDK with the project's public config (`FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`, served by a server component). It uses `inMemoryPersistence`, offers Google and email-and-password sign-in, then posts the ID token and refresh token to `/auth/firebase/session` and calls `signOut()`. The server verifies the ID token as the backend does, then starts the session. Renewal calls `https://securetoken.googleapis.com/v1/token?key=<API_KEY>` with the refresh token.
 
 The Firebase web API key is public by design and identifies the project. It is not a secret.
+
+**Probe (task 1.2, 2026-09-24, project `focus-funnel`, web SDK 12.3.0, email-and-password):**
+
+- The ID token has `alg` `RS256`, `iss` `https://securetoken.google.com/focus-funnel`, and `aud` `focus-funnel`. Its `kid` is in Google's key set at the URL in decision 1. It lives 3,600 seconds.
+- Renewal through `securetoken.googleapis.com/v1/token?key=<API_KEY>` works with only the web API key and no service account. The response holds `id_token`, `refresh_token`, `expires_in`, `user_id`, and `project_id`. The renewed token has the same `sub`, `iss`, and `aud`.
+- After `signOut()` with `inMemoryPersistence`, local storage and session storage are empty. IndexedDB holds only `firebase-heartbeat-database`, which holds no token.
+- An email-and-password user has `email_verified: false` until they confirm their address. With `AUTH_ALLOWED_EMAILS` set, the allow-list refuses that user (decision 10). The docs must say this. Google sign-in gives verified addresses.
 
 ### 7. Demo sessions
 
@@ -129,6 +145,8 @@ The proposal asks for keys held by the browser, not the server. They are held in
 
 `docker-compose.pocket-id.yml` adds a pinned Pocket ID service with its data under `.data/pocket-id`, and sets `OIDC_INTERNAL_URL` to its compose address. Pocket ID logs in with passkeys only, and browsers allow passkeys only in a secure context: `localhost` works, a plain-HTTP LAN address does not. The docs say to put an HTTPS reverse proxy in front for LAN use, with a Caddy example.
 
+The overlay pins `ghcr.io/pocket-id/pocket-id:v2.16.0` (task 1.1) with `APP_URL` set to the public URL and an `ENCRYPTION_KEY`. A Pocket ID client with "restrict to user groups" on and no group allowed refuses every user with `access_denied` ("You are not allowed to access this service"). The docs must say to turn it off or to allow a group. This is the provider's own access rule from the proposal.
+
 ### 13. New error codes
 
 `not_allowed` (403), `demo_session_expired` (401), `demo_full` (503), and `rate_limited` (429, with `Retry-After`). `unauthenticated` and `service_unavailable` keep their meaning. The frontend adds the codes to `ApiErrorCode` with a page or message for each.
@@ -154,4 +172,4 @@ The proposal asks for keys held by the browser, not the server. They are held in
 
 ## Open Questions
 
-- Which Pocket ID version to pin. Decided when the overlay is written, from its current release.
+- ~~Which Pocket ID version to pin.~~ Decided by task 1.1: `v2.16.0` (decision 12).
