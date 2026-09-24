@@ -68,7 +68,8 @@
 
 - [x] 11.1 Run the backend suite on SQLite and on the compose Postgres, and `npm run test`, `npm run lint`, and `npm run build` in `frontend/`. Check that all pass
   - Passed on 2026-09-24 at `1cb62f3`. Backend on SQLite: 577 passed (70 `postgres` tests deselected). Backend on Postgres 18.2 with pgvector 0.8.1 (compose image): 577 passed with `TEST_DATABASE_URL`, and `-m postgres` 70 passed. Frontend: `npm run test` 326 passed in 25 files, `npm run lint` and `npm run build` exit 0.
-- [ ] 11.2 With the Pocket ID overlay, log in, chat, log out, and log in again. Check that the same user and data come back, that a token past its expiry is renewed without a login, and that an address off the allow-list sees the refusal page
+- [x] 11.2 With the Pocket ID overlay, log in, chat, log out, and log in again. Check that the same user and data come back, that a token past its expiry is renewed without a login, and that an address off the allow-list sees the refusal page
+  - Done by the user with the Pocket ID overlay by 2026-09-24.
 - [ ] 11.3 With the Firebase test project, log in with Google and with email and password. Check that it works and that the browser's storage holds no Firebase token afterwards
 - [ ] 11.4 With the demo overlay, open the app in two browsers. Check that each gets its own session, that one cannot open the other's conversation URL, that a saved key is forgotten after the idle time, that "End demo" deletes the data, and that a restart leaves no data
 - [ ] 11.5 Start the server with each wrong configuration from task 2.1. Check that it refuses to start and names the setting
