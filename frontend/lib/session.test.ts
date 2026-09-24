@@ -94,7 +94,12 @@ describe("the session cookie", () => {
   it("refuses a tampered cookie", async () => {
     const [header] = await sessionCookies(empty(), session(), SECRET);
     const value = header.split(";")[0].split("=")[1];
-    const tampered = `${value.slice(0, -2)}${value.endsWith("A") ? "B" : "A"}${value.slice(-1)}`;
+    // Change one character of the ciphertext (the fourth part).
+    const parts = value.split(".");
+    const flipped = parts[3][0] === "A" ? "B" : "A";
+    parts[3] = flipped + parts[3].slice(1);
+    const tampered = parts.join(".");
+    expect(tampered).not.toBe(value);
     const request = new Request("http://localhost:3000/", {
       headers: { cookie: `${SESSION_COOKIE}=${tampered}` },
     });

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { getAuthConfig, type AuthConfig } from "@/lib/auth-mode";
+import { getAuthConfig, type AuthConfig, type DemoConfig } from "@/lib/auth-mode";
+import { RateLimiter, clientAddress } from "@/lib/rate-limit";
 import { DEMO_SESSION_COOKIE, readCookies, readSession, serializeCookie } from "@/lib/session";
 
 // Where logged-in users (and demo visitors) go instead of the landing page.
@@ -30,14 +31,14 @@ export async function proxy(request: NextRequest) {
 
   const { pathname, search } = request.nextUrl;
 
+  if (config.mode === "demo") return noStore(await demoRequest(request, config.demo!));
+
   // Login routes and pages run on their own. API routes answer 401
   // `unauthenticated` themselves instead of redirecting, so fetch calls get
   // the shared error format.
   if (pathname.startsWith("/auth/") || pathname.startsWith("/api/")) {
     return NextResponse.next();
   }
-
-  if (config.mode === "demo") return demoPage(request);
 
   const session = await readSession(request, config.sessionSecret);
   const loggedIn = session !== null && session.mode === config.mode;
@@ -55,8 +56,60 @@ export async function proxy(request: NextRequest) {
 
 // --- Demo mode ------------------------------------------------------------------
 
-/** Demo mode has no login: a page request without a session starts one. */
-async function demoPage(request: NextRequest): Promise<NextResponse> {
+const HOUR_MS = 3_600_000;
+const MINUTE_MS = 60_000;
+let limits: { key: string; requests: RateLimiter; sessions: RateLimiter } | null = null;
+
+/** The limiters for these settings, kept for the life of the process. */
+function demoLimits(demo: DemoConfig) {
+  const key = `${demo.rateLimit}/${demo.newSessionsPerHour}`;
+  if (limits?.key !== key) {
+    limits = {
+      key,
+      requests: new RateLimiter(demo.rateLimit, MINUTE_MS),
+      sessions: new RateLimiter(demo.newSessionsPerHour, HOUR_MS),
+    };
+  }
+  return limits;
+}
+
+/** Forgets every limiter's state (tests start each case fresh). */
+export function resetDemoLimits() {
+  limits = null;
+}
+
+/** Nothing from a demo instance may be kept by a browser or proxy cache. */
+function noStore(response: NextResponse): NextResponse {
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+}
+
+function rateLimited(request: NextRequest, retryAfterSeconds: number): NextResponse {
+  const message = `Too many requests. Try again in ${retryAfterSeconds} seconds.`;
+  const headers = { "Retry-After": String(retryAfterSeconds) };
+  if (request.nextUrl.pathname.startsWith("/api/")) {
+    return NextResponse.json({ error: { code: "rate_limited", message } }, { status: 429, headers });
+  }
+  return new NextResponse(message, { status: 429, headers: { ...headers, "Content-Type": "text/plain" } });
+}
+
+/** Demo mode: a per-address rate limit on every request, and no login. */
+async function demoRequest(request: NextRequest, demo: DemoConfig): Promise<NextResponse> {
+  const address = clientAddress(request, demo.trustedProxy);
+  const { requests, sessions } = demoLimits(demo);
+  const take = requests.take(address);
+  if (!take.allowed) return rateLimited(request, take.retryAfterSeconds);
+
+  const { pathname } = request.nextUrl;
+  if (pathname.startsWith("/auth/") || pathname.startsWith("/api/")) return NextResponse.next();
+  return demoPage(request, () => sessions.take(address));
+}
+
+/** A page request without a session starts one. */
+async function demoPage(
+  request: NextRequest,
+  takeSession: () => ReturnType<RateLimiter["take"]>,
+): Promise<NextResponse> {
   const { pathname, origin } = request.nextUrl;
   if (pathname.startsWith("/demo/")) return NextResponse.next();
 
@@ -64,6 +117,15 @@ async function demoPage(request: NextRequest): Promise<NextResponse> {
     return pathname === "/"
       ? NextResponse.redirect(new URL(LOGGED_IN_HOME, origin))
       : NextResponse.next();
+  }
+
+  const allowed = takeSession();
+  if (!allowed.allowed) {
+    const url = new URL("/demo/unavailable", origin);
+    url.searchParams.set("reason", "limit");
+    const refused = NextResponse.rewrite(url, { status: 429 });
+    refused.headers.set("Retry-After", String(allowed.retryAfterSeconds));
+    return refused;
   }
 
   const started = await startDemoSession();

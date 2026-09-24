@@ -1,4 +1,6 @@
-import { getBackendCredential, type BackendCredential } from "@/lib/auth-mode";
+import { getAuthConfig, getBackendCredential, type BackendCredential } from "@/lib/auth-mode";
+import { PROVIDER_KEYS_HEADER } from "@/lib/demo-keys";
+import { prepareDemoCall } from "@/lib/demo-proxy";
 
 // Forwards every /api/... call to the private FastAPI backend with the user's
 // credential for the auth mode: the ID token, renewed when it is about to
@@ -114,11 +116,17 @@ async function forward(request: Request, context: ProxyContext): Promise<Respons
   const auth = await getCredential(request);
   if ("response" in auth) return auth.response;
 
+  // Demo mode: held provider keys, and the end of a demo session.
+  const config = getAuthConfig();
+  const demoCall = config.mode === "demo" ? await prepareDemoCall(request, path, config) : null;
+  if (demoCall?.response) return demoCall.response;
+
   const headers = new Headers({ Authorization: `Bearer ${auth.credential}` });
   for (const name of FORWARDED_REQUEST_HEADERS) {
     const value = request.headers.get(name);
     if (value !== null) headers.set(name, value);
   }
+  if (demoCall?.providerKeys) headers.set(PROVIDER_KEYS_HEADER, demoCall.providerKeys);
 
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
   const init: RequestInit & { duplex?: "half" } = {
@@ -128,7 +136,9 @@ async function forward(request: Request, context: ProxyContext): Promise<Respons
     cache: "no-store",
     signal: request.signal,
   };
-  if (hasBody) {
+  if (demoCall?.body !== undefined) {
+    init.body = demoCall.body;
+  } else if (hasBody) {
     init.body = request.body;
     // Required by Node's fetch to send a streamed request body.
     init.duplex = "half";
@@ -175,6 +185,12 @@ async function forward(request: Request, context: ProxyContext): Promise<Respons
   responseHeaders.set("X-Accel-Buffering", "no");
   // A renewed session.
   for (const cookie of auth.setCookies) responseHeaders.append("set-cookie", cookie);
+
+  if (demoCall) {
+    // Nothing from a demo instance may be kept by a cache.
+    responseHeaders.set("Cache-Control", "no-store");
+    return demoCall.finish(upstream, responseHeaders);
+  }
 
   return new Response(upstream.body, {
     status: upstream.status,

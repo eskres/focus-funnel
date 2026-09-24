@@ -9,6 +9,8 @@ import { CompactDialog, type CompactState } from "@/components/chat/compact-dial
 import { Composer } from "@/components/chat/composer";
 import { ContextMeter, type Meter } from "@/components/chat/context-meter";
 import { useConversations } from "@/components/chat/conversations-context";
+import { useDemo } from "@/components/demo/demo-context";
+import { DemoNoticeDialog } from "@/components/demo/demo-notice";
 import { DeleteDialog } from "@/components/chat/delete-dialog";
 import {
   MessageList,
@@ -147,7 +149,10 @@ function storedChoice(conversation: ConversationDetail): ModelChoice | null {
 
 export function Chat({ conversationId: initialId }: { conversationId?: string }) {
   const router = useRouter();
+  const demo = useDemo();
   const { refresh, startNewChat } = useConversations();
+  // Demo mode: a message held until the visitor accepts the demo notice.
+  const [heldForNotice, setHeldForNotice] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string | undefined>(initialId);
   const [title, setTitle] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -244,8 +249,12 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
     window.history.replaceState(null, "", `/app/${id}`);
   }
 
-  async function send(text: string, offered = false) {
+  async function send(text: string, offered = false, noticeAccepted = false) {
     if (answering || text.trim() === "") return;
+    if (demo && !demo.noticeAccepted && !noticeAccepted) {
+      setHeldForNotice(text);
+      return;
+    }
     if (isDeleteCommand(text)) {
       if (conversationId) setDeleteOpen(true);
       return;
@@ -546,6 +555,17 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         </div>
       </div>
       <ProposalDialog offer={offer} onClose={() => setOffer(null)} />
+      <DemoNoticeDialog
+        open={heldForNotice !== null}
+        providerId={choice?.providerId ?? null}
+        onClose={() => setHeldForNotice(null)}
+        onAccept={async () => {
+          await demo?.acceptNotice();
+          const text = heldForNotice;
+          setHeldForNotice(null);
+          if (text !== null) void send(text, false, true);
+        }}
+      />
       <CompactDialog
         state={compactState}
         onCancel={() => {

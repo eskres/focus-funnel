@@ -50,10 +50,10 @@
 
 ## 9. Frontend demo mode
 
-- [ ] 9.1 Add the demo key cookie to the proxy as design decision 8 describes. Check with Vitest that a successful key save adds the key, that idle and maximum age drop it, that `DELETE` removes one key without calling the backend, and that no key appears in a response body or a readable cookie
-- [ ] 9.2 Add `Cache-Control: no-store` and the rate limits in demo mode. Check with Vitest that every response carries `no-store`, that requests past `DEMO_RATE_LIMIT` get `429 rate_limited` with `Retry-After`, that session starts past the hourly limit are refused, and that `X-Forwarded-For` is used only with `TRUSTED_PROXY=true`
-- [ ] 9.3 Add the demo notice, the expiry display, the "End demo" button, and the expired-session page. Check with Vitest that the composer is blocked until the notice is accepted, that the notice includes the provider's notice, that "End demo" asks before deleting, and that `demo_session_expired` shows the page with a "Start again" button
-- [ ] 9.4 Show a held key's expiry and a "Forget key" button on the provider cards in demo mode, and hide the custom card. Check with Vitest against mocked responses
+- [x] 9.1 Add the demo key cookie to the proxy as design decision 8 describes. Check with Vitest that a successful key save adds the key, that idle and maximum age drop it, that `DELETE` removes one key without calling the backend, and that no key appears in a response body or a readable cookie
+- [x] 9.2 Add `Cache-Control: no-store` and the rate limits in demo mode. Check with Vitest that every response carries `no-store`, that requests past `DEMO_RATE_LIMIT` get `429 rate_limited` with `Retry-After`, that session starts past the hourly limit are refused, and that `X-Forwarded-For` is used only with `TRUSTED_PROXY=true`
+- [x] 9.3 Add the demo notice, the expiry display, the "End demo" button, and the expired-session page. Check with Vitest that the composer is blocked until the notice is accepted, that the notice includes the provider's notice, that "End demo" asks before deleting, and that `demo_session_expired` shows the page with a "Start again" button
+- [x] 9.4 Show a held key's expiry and a "Forget key" button on the provider cards in demo mode, and hide the custom card. Check with Vitest against mocked responses
 
 ## 10. Deployment and cleanup
 

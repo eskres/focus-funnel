@@ -4,7 +4,11 @@ import {
   ApiError,
   apiFetch,
   BackendUnreachableError,
+  DemoFullError,
+  DemoSessionExpiredError,
   InternalError,
+  NotAllowedError,
+  RateLimitedError,
   ProviderKeyMissingError,
   UnauthenticatedError,
 } from "./api";
@@ -71,6 +75,10 @@ describe("apiFetch", () => {
   it.each([
     ["backend_unreachable", 502, BackendUnreachableError],
     ["internal_error", 500, InternalError],
+    ["not_allowed", 403, NotAllowedError],
+    ["demo_session_expired", 401, DemoSessionExpiredError],
+    ["demo_full", 503, DemoFullError],
+    ["rate_limited", 429, RateLimitedError],
   ])("turns %s into its error class", async (code, status, ErrorClass) => {
     mockFetch(jsonResponse(status, { error: { code, message: "Try again." } }));
 

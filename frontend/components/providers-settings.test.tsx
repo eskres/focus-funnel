@@ -263,4 +263,63 @@ describe("ProvidersSettings", () => {
     await screen.findByText("Nebius Token Factory");
     expect(screen.queryByText("Custom provider")).toBeNull();
   });
+
+  describe("in demo mode", () => {
+    const EXPIRES = "2026-09-25T14:30:00Z";
+    const heldNebius = {
+      ...nebius,
+      key_saved: true,
+      key_held: true,
+      key_last4: "wxyz",
+      key_expires_at: EXPIRES,
+    };
+    const time = new Date(EXPIRES).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+    it("shows a held key's last 4 characters and when it is forgotten", async () => {
+      mockApi(listResponse([heldNebius], false));
+      render(<ProvidersSettings />);
+
+      expect(await screen.findByText("wxyz")).toBeInTheDocument();
+      expect(screen.getByText(new RegExp(`held in this browser until ${time}`))).toBeInTheDocument();
+      expect(screen.getByText(/not stored on the server/)).toBeInTheDocument();
+      expect(screen.queryByText(/saved on/)).toBeNull();
+      expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    });
+
+    it("shows the expiry of a key just saved", async () => {
+      mockApi(listResponse([nebius], false), { status: 200, body: heldNebius });
+      render(<ProvidersSettings />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Read data-handling notice" }));
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.change(screen.getByPlaceholderText("Paste your Nebius Token Factory API key"), {
+        target: { value: "nb-secret-wxyz" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(await screen.findByText(new RegExp(`held in this browser until ${time}`))).toBeInTheDocument();
+    });
+
+    it("Forget key removes the key at once", async () => {
+      const fetchMock = mockApi(listResponse([heldNebius], false), { status: 204 });
+      render(<ProvidersSettings />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Forget key" }));
+
+      expect(await screen.findByText("No API key saved.")).toBeInTheDocument();
+      expect(fetchMock).toHaveBeenLastCalledWith(
+        "/api/providers/nebius/key",
+        expect.objectContaining({ method: "DELETE" }),
+      );
+      expect(screen.queryByText("wxyz")).toBeNull();
+    });
+
+    it("hides the custom card", async () => {
+      mockApi(listResponse([heldNebius, custom], false));
+      render(<ProvidersSettings />);
+
+      await screen.findByText("Nebius Token Factory");
+      expect(screen.queryByText("Custom provider")).toBeNull();
+    });
+  });
 });

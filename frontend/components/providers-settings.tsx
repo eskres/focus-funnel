@@ -25,6 +25,9 @@ export interface ProviderStatus {
   key_saved: boolean;
   key_last4?: string;
   key_saved_at?: string;
+  /** Demo mode: the browser holds the key, which is forgotten at key_expires_at. */
+  key_held?: boolean;
+  key_expires_at?: string;
 }
 
 interface ProvidersResponse {
@@ -54,6 +57,14 @@ function formatDate(iso: string | undefined): string {
     : date.toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
+function formatTime(iso: string | undefined): string {
+  if (!iso) return "an unknown time";
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? "an unknown time"
+    : date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
 function redirectToLogin() {
   // /auth/login is a route handler, not a page, so it needs a full browser
   // navigation rather than a client-side route change. It sends the user to
@@ -69,7 +80,11 @@ export function ProvidersSettings() {
     let cancelled = false;
     apiFetch<ProvidersResponse>(LIST_ENDPOINT)
       .then((result) => {
-        if (!cancelled) setProviders(result.providers);
+        // No custom card where the server turns the custom provider off (demo mode).
+        const shown = result.custom_provider_allowed
+          ? result.providers
+          : result.providers.filter((p) => !p.is_custom);
+        if (!cancelled) setProviders(shown);
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -177,8 +192,10 @@ function ProviderCard({
       onUpdated({
         ...provider,
         key_saved: false,
+        key_held: false,
         key_last4: undefined,
         key_saved_at: undefined,
+        key_expires_at: undefined,
         base_url: provider.is_custom ? undefined : provider.base_url,
       });
       setBaseUrl("");
@@ -261,7 +278,14 @@ function ProviderCard({
             {provider.key_required ? "No API key saved." : "No API key needed for this provider."}
           </p>
         )}
-        {provider.key_saved && (
+        {provider.key_saved && provider.key_held && (
+          <p className="text-sm">
+            Key ending in <span className="font-mono font-medium">{provider.key_last4}</span>,
+            held in this browser until {formatTime(provider.key_expires_at)} unless you use it
+            before then. It is not stored on the server.
+          </p>
+        )}
+        {provider.key_saved && !provider.key_held && (
           <p className="text-sm">
             Key ending in <span className="font-mono font-medium">{provider.key_last4}</span>,
             saved on {formatDate(provider.key_saved_at)}.
@@ -276,7 +300,7 @@ function ProviderCard({
               {provider.key_saved ? "Replace" : "Edit"}
             </Button>
             <Button variant="destructive" onClick={remove} disabled={busy}>
-              Delete
+              {provider.key_held ? "Forget key" : "Delete"}
             </Button>
           </div>
         )}

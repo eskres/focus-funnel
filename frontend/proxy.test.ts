@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DEMO_SESSION_COOKIE, sessionCookies, type Session } from "@/lib/session";
 
-import { proxy } from "./proxy";
+import { proxy, resetDemoLimits } from "./proxy";
 
 const SECRET = "0123456789abcdef0123456789abcdef";
 const BASE = { SESSION_SECRET: SECRET, APP_BASE_URL: "http://localhost:3000" };
@@ -38,8 +38,10 @@ async function sessionCookie(mode: Session["mode"]): Promise<string> {
   return headers.map((header) => header.split(";")[0]).join("; ");
 }
 
-const request = (path: string, cookie?: string) =>
-  new NextRequest(`http://localhost:3000${path}`, cookie ? { headers: { cookie } } : undefined);
+const request = (path: string, cookie?: string, headers: Record<string, string> = {}) =>
+  new NextRequest(`http://localhost:3000${path}`, {
+    headers: { ...(cookie ? { cookie } : {}), ...headers },
+  });
 
 const location = (response: Response) => {
   const value = response.headers.get("location");
@@ -116,6 +118,7 @@ describe("proxy in demo mode", () => {
 
   beforeEach(() => {
     useMode("demo");
+    resetDemoLimits();
     backend.mockReset();
     vi.stubGlobal("fetch", backend);
   });
@@ -174,5 +177,98 @@ describe("proxy in demo mode", () => {
   it("does not start a session for API calls", async () => {
     await proxy(request("/api/me"));
     expect(backend).not.toHaveBeenCalled();
+  });
+});
+
+describe("demo mode guards", () => {
+  const backend = vi.fn();
+  const withSession = `${DEMO_SESSION_COOKIE}=existing`;
+
+  beforeEach(() => {
+    useMode("demo");
+    resetDemoLimits();
+    backend.mockReset();
+    backend.mockImplementation(async () =>
+      Response.json(
+        { session: "value", expires_at: new Date(Date.now() + 3600_000).toISOString() },
+        { status: 201 },
+      ),
+    );
+    vi.stubGlobal("fetch", backend);
+  });
+
+  it("marks every response no-store", async () => {
+    vi.stubEnv("DEMO_RATE_LIMIT", "2");
+    const responses = [
+      await proxy(request("/app", withSession)),
+      await proxy(request("/", withSession)),
+      await proxy(request("/app")),
+      await proxy(request("/api/me", withSession)),
+      await proxy(request("/demo/ended")),
+    ];
+    for (const response of responses) expect(response.headers.get("cache-control")).toBe("no-store");
+    // Also the refusals.
+    expect(responses[2].status).toBe(429);
+    expect(responses[2].headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("answers requests past DEMO_RATE_LIMIT with 429 rate_limited and Retry-After", async () => {
+    vi.stubEnv("DEMO_RATE_LIMIT", "3");
+    for (let i = 0; i < 3; i++) {
+      expect((await proxy(request("/api/me", withSession))).status).not.toBe(429);
+    }
+
+    const refused = await proxy(request("/api/me", withSession));
+
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toMatchObject({ error: { code: "rate_limited" } });
+    const retryAfter = Number(refused.headers.get("retry-after"));
+    expect(retryAfter).toBeGreaterThanOrEqual(1);
+    expect(retryAfter).toBeLessThanOrEqual(20);
+
+    const page = await proxy(request("/app", withSession));
+    expect(page.status).toBe(429);
+    expect(page.headers.get("retry-after")).toBeTruthy();
+  });
+
+  it("refuses session starts past the hourly limit without calling the backend", async () => {
+    vi.stubEnv("DEMO_NEW_SESSIONS_PER_HOUR", "2");
+    await proxy(request("/app"));
+    await proxy(request("/app"));
+    expect(backend).toHaveBeenCalledTimes(2);
+
+    const refused = await proxy(request("/app"));
+
+    expect(backend).toHaveBeenCalledTimes(2);
+    expect(refused.headers.get("x-middleware-rewrite")).toContain("/demo/unavailable?reason=limit");
+    expect(refused.headers.get("retry-after")).toBeTruthy();
+    expect(refused.headers.getSetCookie()).toEqual([]);
+    // A visitor who already has a session is not affected.
+    expect((await proxy(request("/app", withSession))).headers.get("x-middleware-rewrite")).toBeNull();
+  });
+
+  it("ignores X-Forwarded-For without TRUSTED_PROXY: every request shares one limit", async () => {
+    vi.stubEnv("DEMO_RATE_LIMIT", "2");
+    const from = (address: string) =>
+      proxy(request("/api/me", withSession, { "x-forwarded-for": address }));
+
+    expect((await from("198.51.100.1")).status).not.toBe(429);
+    expect((await from("198.51.100.2")).status).not.toBe(429);
+    expect((await from("198.51.100.3")).status).toBe(429);
+  });
+
+  it("uses the last X-Forwarded-For hop with TRUSTED_PROXY=true", async () => {
+    vi.stubEnv("DEMO_RATE_LIMIT", "2");
+    vi.stubEnv("TRUSTED_PROXY", "true");
+    const from = (header: string) =>
+      proxy(request("/api/me", withSession, { "x-forwarded-for": header }));
+
+    expect((await from("203.0.113.9")).status).not.toBe(429);
+    expect((await from("203.0.113.9")).status).not.toBe(429);
+    expect((await from("203.0.113.9")).status).toBe(429);
+    // A spoofed first hop does not help: the proxy's hop is last.
+    expect((await from("10.0.0.1, 203.0.113.9")).status).toBe(429);
+    // Another client has its own limit.
+    expect((await from("10.0.0.1, 203.0.113.10")).status).not.toBe(429);
   });
 });

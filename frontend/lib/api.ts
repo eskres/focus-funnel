@@ -21,7 +21,11 @@ export type ApiErrorCode =
   | "output_limit_reached"
   | "tool_loop_limit"
   | "backend_unreachable"
-  | "internal_error";
+  | "internal_error"
+  | "not_allowed"
+  | "demo_session_expired"
+  | "demo_full"
+  | "rate_limited";
 
 export class ApiError extends Error {
   readonly code: string;
@@ -54,6 +58,13 @@ export class OutputLimitReachedError extends ApiError {}
 export class ToolLoopLimitError extends ApiError {}
 export class BackendUnreachableError extends ApiError {}
 export class InternalError extends ApiError {}
+export class NotAllowedError extends ApiError {}
+export class DemoSessionExpiredError extends ApiError {}
+export class DemoFullError extends ApiError {}
+export class RateLimitedError extends ApiError {}
+
+/** Sent on window when a call finds that the demo session has ended. */
+export const DEMO_EXPIRED_EVENT = "ff:demo-session-expired";
 
 const errorClasses: Record<ApiErrorCode, typeof ApiError> = {
   unauthenticated: UnauthenticatedError,
@@ -75,6 +86,10 @@ const errorClasses: Record<ApiErrorCode, typeof ApiError> = {
   tool_loop_limit: ToolLoopLimitError,
   backend_unreachable: BackendUnreachableError,
   internal_error: InternalError,
+  not_allowed: NotAllowedError,
+  demo_session_expired: DemoSessionExpiredError,
+  demo_full: DemoFullError,
+  rate_limited: RateLimitedError,
 };
 
 function isKnownCode(code: string): code is ApiErrorCode {
@@ -95,6 +110,10 @@ function readErrorBody(body: unknown): { code?: string; message?: string } {
 /** Builds the error class for a code, for example from an `error` event in a stream. */
 export function createApiError(code: string, message: string, status: number): ApiError {
   const ErrorClass = isKnownCode(code) ? errorClasses[code] : ApiError;
+  if (code === "demo_session_expired" && typeof window !== "undefined") {
+    // Whichever call finds it first, the page shows that the session ended.
+    window.dispatchEvent(new Event(DEMO_EXPIRED_EVENT));
+  }
   return new ErrorClass(code, message, status);
 }
 
