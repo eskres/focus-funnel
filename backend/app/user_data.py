@@ -10,9 +10,8 @@ async def delete_user_data(session: AsyncSession, user: User) -> None:
     """Delete the user and every row that cascades from it, and commit.
 
     Every user-owned table references users.id with ON DELETE CASCADE, so one
-    delete removes conversations, messages, usage, provider keys, and
-    settings. Stores outside the database (Chroma, from thought-storage) are
-    to be cleared here too.
+    delete removes conversations, messages, usage, provider keys, settings,
+    thoughts, and their search indexes.
     """
     await session.execute(delete(User).where(User.id == user.id))
     await session.commit()

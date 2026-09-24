@@ -14,7 +14,7 @@ node_modules/
 __pycache__/
 .pytest_cache/
 
-# Local Postgres and Chroma data (compose bind mounts) and SQLite files
+# Local Postgres data (compose bind mounts) and SQLite files
 .data/
 *.sqlite3
 *.db

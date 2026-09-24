@@ -27,8 +27,7 @@ Not built yet: saving and searching thoughts, `/compact`, the context meter, and
 |---|---|
 | Frontend | Next.js (App Router), shadcn/ui with Base UI, Tailwind |
 | Backend | FastAPI (async), SQLAlchemy, Alembic |
-| Database | Postgres (SQLite in tests) |
-| Vector store | ChromaDB (not used yet) |
+| Database | Postgres with pgvector for thought search (SQLite in tests) |
 | Login | Any OpenID Connect provider (such as Pocket ID), Firebase, or an anonymous demo mode |
 | Models | Any OpenAI-compatible API, through the `openai` SDK |
 
@@ -50,7 +49,7 @@ Without the Pocket ID overlay, start everything with:
 docker compose up --build
 ```
 
-The backend applies database migrations each time it starts. Postgres and Chroma keep their data in `.data/`.
+The backend applies database migrations each time it starts. Postgres keeps its data in `.data/`.
 
 To expose the backend on port 8000 and Postgres on port 55432 for debugging, run:
 
@@ -75,6 +74,14 @@ The tests use SQLite by default. To run them against Postgres, set `TEST_DATABAS
 ```sh
 TEST_DATABASE_URL=postgresql+asyncpg://focus_funnel:focus_funnel@localhost:55432/focus_funnel uv run pytest
 ```
+
+Thought storage and search need Postgres with pgvector, so their tests are marked `postgres` and left out of the runs above. Run them on their own, against a Postgres that has the `vector` extension, such as the compose one:
+
+```sh
+TEST_DATABASE_URL=postgresql+asyncpg://focus_funnel:focus_funnel@localhost:55432/focus_funnel uv run pytest -m postgres
+```
+
+Without `TEST_DATABASE_URL` they fail instead of being skipped.
 
 To create a migration after you change a model:
 

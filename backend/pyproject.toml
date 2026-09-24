@@ -15,6 +15,7 @@ dependencies = [
     "httpx>=0.28.1",
     "httpx2>=2.13.0",
     "openai>=3.14.0",
+    "pgvector>=0.5.0",
     "pydantic-settings>=2.15.0",
     "pyjwt[crypto]>=2.14.0",
     "pyyaml>=6.0.2",
@@ -36,3 +37,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["."]
+# Thought storage and search need Postgres with pgvector. They run with
+# `pytest -m postgres` and TEST_DATABASE_URL; the default run leaves them out.
+addopts = ["-m", "not postgres"]
+markers = ["postgres: needs TEST_DATABASE_URL pointing at a Postgres with pgvector"]

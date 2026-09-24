@@ -207,7 +207,7 @@ thoughts:
 
   - id: t22
     created: 2026-09-16
-    title: "Decision: pgvector over Chroma"
+    title: "Decision: pgvector over a separate vector store"
     tags: [work, decision, engineering]
     summary: >-
       Thought search moves to pgvector in the existing Postgres: one

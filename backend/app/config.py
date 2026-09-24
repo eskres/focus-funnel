@@ -28,7 +28,6 @@ class Settings(BaseSettings):
 
     database_url: str = Field(min_length=1)
     key_encryption_key: bytes
-    chroma_url: str = "http://chroma:8000"
     # Lets an operator turn off the custom provider (an arbitrary base URL).
     # Demo mode forces it off.
     allow_custom_provider: bool = True

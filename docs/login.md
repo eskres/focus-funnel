@@ -166,7 +166,7 @@ Demo mode is for a public instance where strangers try the app. There is no logi
 - API keys are not stored on the server. The visitor's browser holds a key in an encrypted, HttpOnly cookie. It is forgotten after `DEMO_KEY_TTL_MINUTES` without use (30) or `DEMO_KEY_MAX_HOURS` after it was saved (4), whichever comes first. **Forget key** removes it at once.
 - Before the first message, a notice says what is stored, when it is deleted, that the operator can read stored conversations, and what the chosen provider does with prompts.
 
-Run it with the demo overlay, which sets `AUTH_MODE=demo` and keeps Postgres and Chroma data in memory, so a restart deletes everything:
+Run it with the demo overlay, which sets `AUTH_MODE=demo` and keeps Postgres data in memory, so a restart deletes everything:
 
 ```sh
 docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build

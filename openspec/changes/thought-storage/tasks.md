@@ -6,7 +6,8 @@
 ## 2. Postgres with pgvector
 
 - [ ] 2.1 Switch the compose Postgres to the pgvector image for Postgres 18 pinned to a 0.8 release, remove the Chroma service, `CHROMA_URL`, the `chroma_url` setting, the demo overlay's Chroma `tmpfs`, and the Chroma lines in `.env.example`, `.gitignore`, the README, and `docs/login.md`, and add the `pgvector` Python package. Check that `docker compose config` accepts the base file and both overlays, that a search of the repo outside `openspec/` finds no `chroma`, and that the backend starts against the new image
-- [ ] 2.2 Add the `postgres` pytest marker from design decision 14, deselected by default and failing when `TEST_DATABASE_URL` is missing, and the README commands for both runs. Check that the default run passes and ignores `postgres` tests, that `pytest -m postgres` without the variable fails naming it, and that it passes against the local Postgres with pgvector
+  - Done here: the Chroma service, settings, and docs lines are gone, a search outside `openspec/` finds no `chroma`, the compose files parse as YAML, and `pgvector` 0.5.0 is added (it needs no numpy). Not run: `docker compose config` and starting the backend on the new image, since this container has no Docker. The image tag `pgvector/pgvector:0.8.1-pg18` should be checked when pulling.
+- [x] 2.2 Add the `postgres` pytest marker from design decision 14, deselected by default and failing when `TEST_DATABASE_URL` is missing, and the README commands for both runs. Check that the default run passes and ignores `postgres` tests, that `pytest -m postgres` without the variable fails naming it, and that it passes against the local Postgres with pgvector
 
 ## 3. Settings and data
 
