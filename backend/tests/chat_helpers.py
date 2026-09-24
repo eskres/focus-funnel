@@ -27,6 +27,7 @@ PROVIDERS_FIXTURE = Path(__file__).parent / "fixtures" / "providers" / "valid.ya
 NANO = "vendor/nano-model"
 BIG = "vendor/big-model"
 NO_TOOLS = "vendor/no-tools-model"
+UNPRICED = "vendor/unpriced-model"
 
 MODEL_LIST = {
     "object": "list",
@@ -44,6 +45,7 @@ MODEL_LIST = {
             "supported_features": ["tools"],
         },
         {"id": NO_TOOLS, "context_length": 8192, "supported_features": ["json_mode"]},
+        {"id": UNPRICED, "context_length": 131072, "supported_features": ["tools"]},
     ],
 }
 

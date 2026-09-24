@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.chat.model_info import cached_model
-from app.errors import ApiError, model_unsupported
+from app.errors import ApiError, context_full, model_unsupported
 from app.models import User
 from app.provider_config import ProviderPreset
 from app.provider_models import ModelItem
@@ -29,6 +29,16 @@ MODEL_CALL_TIMEOUT_SECONDS = 120.0
 MODEL_CALL_RETRIES = 2
 
 Messages = list[dict[str, Any]]
+
+# How OpenAI-compatible servers word a prompt that does not fit the context.
+CONTEXT_ERROR_PHRASES = (
+    "context length",
+    "context_length",
+    "context window",
+    "maximum context",
+    "prompt is too long",
+    "too many tokens",
+)
 
 
 def _refusal_mentions(exc: openai.OpenAIError, *words: str) -> bool:
@@ -76,7 +86,9 @@ class ModelCall:
             yield
         except openai.OpenAIError as exc:
             mapped: ApiError | None = None
-            if self.reasoning_effort is not None and _refusal_mentions(exc, "effort", "reasoning"):
+            if _refusal_mentions(exc, *CONTEXT_ERROR_PHRASES):
+                mapped = context_full()
+            elif self.reasoning_effort is not None and _refusal_mentions(exc, "effort", "reasoning"):
                 mapped = model_unsupported(
                     self.model, f"reasoning effort '{self.reasoning_effort}'"
                 )

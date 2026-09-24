@@ -1,6 +1,7 @@
 """The system prompt, the two tools, and the context sent to the model."""
 
 import json
+import math
 from typing import Any
 
 from app.chat.commands import parse_message
@@ -152,3 +153,21 @@ def tool_arguments(raw: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("arguments must be a JSON object")
     return value
+
+
+# No provider offers a tokenizer, so sizes are estimated from characters.
+CHARS_PER_TOKEN = 3.5
+
+
+def estimate_text_tokens(text: str) -> int:
+    return math.ceil(len(text) / CHARS_PER_TOKEN)
+
+
+def estimate_tokens(context: list[dict[str, Any]]) -> int:
+    """An estimate of a request's prompt tokens: its text, and its tool calls as JSON."""
+    chars = 0
+    for message in context:
+        chars += len(message.get("content") or "")
+        if message.get("tool_calls"):
+            chars += len(json.dumps(message["tool_calls"]))
+    return math.ceil(chars / CHARS_PER_TOKEN)

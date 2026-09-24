@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.config import ChatConfig
+from app.chat.context import compact_suggestion
 from app.chat.conversations import next_position
 from app.chat.model_call import ModelCall
 from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, TOOLS, tool_arguments
@@ -112,6 +113,8 @@ class Turn:
         self.context = context
         self.forced_tool = forced_tool
         self._first_chunks: AsyncIterator[Any] | None = None
+        # The count before this turn, so the soft limit is noted once per crossing.
+        self._tokens_before = conversation.last_prompt_tokens
 
     def _options(self, round_number: int) -> dict[str, Any]:
         options: dict[str, Any] = {"tools": TOOLS}
@@ -165,6 +168,8 @@ class Turn:
                     )
                     raise output_limit_reached(thinking_only=not state.answer.strip())
                 await self._store(role="assistant", content=state.answer, status="complete")
+                async for event in self._suggest_compact():
+                    yield event
                 return
 
             last_answer = await self._store(
@@ -183,9 +188,18 @@ class Turn:
         raise tool_loop_limit()
 
     async def _note_usage(self, state: RoundState) -> AsyncIterator[Event]:
-        """Record the round's usage, and send the usage warning when it is due."""
+        """Store and send the round's prompt tokens for the meter, record the
+        usage, and send the usage warning when it is due."""
         if state.prompt_tokens is not None:
             self.conversation.last_prompt_tokens = state.prompt_tokens
+            info = await self.call.info()
+            usage: dict[str, Any] = {
+                "prompt_tokens": state.prompt_tokens,
+                "completion_tokens": state.completion_tokens or 0,
+            }
+            if info is not None and info.context_length:
+                usage["context_length"] = info.context_length
+            yield ("usage", usage)
         recorded = await record_usage(
             self.session,
             self.call,
@@ -197,6 +211,17 @@ class Turn:
         if recorded is None:
             return
         notice = await usage_warning(self.session, self.user.id)
+        if notice is not None:
+            yield ("notice", notice)
+
+    async def _suggest_compact(self) -> AsyncIterator[Event]:
+        info = await self.call.info()
+        notice = compact_suggestion(
+            self._tokens_before,
+            self.conversation.last_prompt_tokens,
+            info.context_length if info is not None else None,
+            self.config,
+        )
         if notice is not None:
             yield ("notice", notice)
 

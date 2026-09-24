@@ -16,6 +16,7 @@ from tests.chat_helpers import (
     BIG,
     NANO,
     NO_TOOLS,
+    UNPRICED,
     _chunk,
     chat,
     completion,
@@ -49,7 +50,12 @@ def usage_rows(url: str) -> list[UsageEvent]:
 
 
 def notices(response) -> list[dict]:
-    return [data for name, data in parse_events(response.text) if name == "notice"]
+    """The usage warnings a chat response sent."""
+    return [
+        data
+        for name, data in parse_events(response.text)
+        if name == "notice" and data["kind"] == "usage_warning"
+    ]
 
 
 def set_warning(client, headers, unit, amount, *entries):
@@ -191,7 +197,7 @@ def test_a_priced_model_records_its_estimated_cost(client, alice, fake_llm, test
 def test_an_unpriced_model_records_its_tokens_and_an_unknown_cost(
     client, alice, fake_llm, test_database_url
 ):
-    ready_user(client, alice, entry(NO_TOOLS, default=True))
+    ready_user(client, alice, entry(UNPRICED, default=True))
     fake_llm.queue(text_chunks("Hi") + [usage_chunk(50, 5)])
 
     chat(client, alice, "hello")
@@ -392,8 +398,8 @@ def test_a_dollar_threshold_sends_one_notice(client, alice, fake_llm, test_datab
 
 
 def test_a_token_threshold_compares_tokens(client, alice, fake_llm):
-    ready_user(client, alice, entry(NO_TOOLS, default=True))
-    set_warning(client, alice, "tokens", 100, entry(NO_TOOLS, default=True))
+    ready_user(client, alice, entry(UNPRICED, default=True))
+    set_warning(client, alice, "tokens", 100, entry(UNPRICED, default=True))
     fake_llm.queue(text_chunks("Hi") + [usage_chunk(60, 30)], text_chunks("Hi") + [usage_chunk(60, 30)])
 
     first = chat(client, alice, "hello")

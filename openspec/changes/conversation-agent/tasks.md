@@ -60,14 +60,14 @@
 
 ## 8. Context management
 
-- [ ] 8.1 Store the provider's prompt token count after each answer and emit it in a `usage` event with the model's context length from a five-minute per-user cache. Check with pytest that the count is stored and emitted, that switching model changes the context length, and that a missing context length is emitted as absent
-- [ ] 8.2 Add the soft limit: a `compact_suggested` notice once per crossing. Check with pytest that the notice appears when the count passes the configured share, not before, and not again on the next turn
-- [ ] 8.3 Add the pre-call estimate and refuse with `context_full` when it cannot fit, mapping a provider context error to the same code. Check with pytest that no model is called for an estimate over the limit, that the user's message is kept, and that a provider context error maps to `context_full`
-- [ ] 8.4 Add `/compact` as a chat command that streams a summary draft of all but the recent messages as a `compact_draft` event, with no tools. Check with pytest that the draft is produced, that nothing changes in the stored conversation, and that the call is recorded with `kind` compact
-- [ ] 8.5 Add `POST /api/conversations/{id}/compaction` that stores the accepted summary and marks the replaced messages as compacted. Check with pytest that the next call sends the summary and the recent messages only, that the transcript endpoint still returns every message, and that a second compaction includes the first summary
-- [ ] 8.6 Check with a pytest test that a failed summary call leaves the conversation unchanged and reports the error
-- [ ] 8.7 Add the choice of a larger model for `/compact` when the conversation does not fit its own model. Check with pytest that the response lists the loadout models with a large enough context and their context lengths, that no model is called until one is chosen, and that the chosen model writes the summary and is recorded in usage
-- [ ] 8.8 Check that switching model changes the meter's limit and marks the figure as an estimate until the next answer, and that a switch to a smaller context gives `context_full` for the next message. Check with pytest for both
+- [x] 8.1 Store the provider's prompt token count after each answer and emit it in a `usage` event with the model's context length from a five-minute per-user cache. Check with pytest that the count is stored and emitted, that switching model changes the context length, and that a missing context length is emitted as absent
+- [x] 8.2 Add the soft limit: a `compact_suggested` notice once per crossing. Check with pytest that the notice appears when the count passes the configured share, not before, and not again on the next turn
+- [x] 8.3 Add the pre-call estimate and refuse with `context_full` when it cannot fit, mapping a provider context error to the same code. Check with pytest that no model is called for an estimate over the limit, that the user's message is kept, and that a provider context error maps to `context_full`
+- [x] 8.4 Add `/compact` as a chat command that streams a summary draft of all but the recent messages as a `compact_draft` event, with no tools. Check with pytest that the draft is produced, that nothing changes in the stored conversation, and that the call is recorded with `kind` compact
+- [x] 8.5 Add `POST /api/conversations/{id}/compaction` that stores the accepted summary and marks the replaced messages as compacted. Check with pytest that the next call sends the summary and the recent messages only, that the transcript endpoint still returns every message, and that a second compaction includes the first summary
+- [x] 8.6 Check with a pytest test that a failed summary call leaves the conversation unchanged and reports the error
+- [x] 8.7 Add the choice of a larger model for `/compact` when the conversation does not fit its own model. Check with pytest that the response lists the loadout models with a large enough context and their context lengths, that no model is called until one is chosen, and that the chosen model writes the summary and is recorded in usage
+- [x] 8.8 Check that switching model changes the meter's limit and marks the figure as an estimate until the next answer, and that a switch to a smaller context gives `context_full` for the next message. Check with pytest for both
 
 ## 9. Usage tracking
 
