@@ -147,7 +147,7 @@ function storedChoice(conversation: ConversationDetail): ModelChoice | null {
 
 export function Chat({ conversationId: initialId }: { conversationId?: string }) {
   const router = useRouter();
-  const { refresh } = useConversations();
+  const { refresh, startNewChat } = useConversations();
   const [conversationId, setConversationId] = useState<string | undefined>(initialId);
   const [title, setTitle] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -179,7 +179,8 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
       .then((loaded) => {
         if (cancelled) return;
         setSettings(loaded);
-        if (!initialId) setChoice(defaultChoice(loaded));
+        // A conversation with no stored model yet gets the default, like a new one.
+        setChoice((current) => current ?? defaultChoice(loaded));
       })
       .catch((error: unknown) => {
         if (error instanceof UnauthenticatedError) redirectToLogin("/app");
@@ -266,6 +267,23 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         }
       }
       await runCompact();
+      return;
+    }
+    // Sending the same text after an unanswered message resends it, as the
+    // server does, rather than showing it twice.
+    const last = messages.at(-1);
+    const unfinished = last?.role === "assistant" && (last.status === "failed" || last.status === "cut");
+    if (unfinished && last.prompt === text) {
+      await retry(last);
+      return;
+    }
+    if (last?.role === "user" && last.text === text) {
+      const answerId = nextId.current++;
+      setMessages((current) => [
+        ...current,
+        { id: answerId, role: "assistant", prompt: text, text: "", tools: [], status: "streaming" },
+      ]);
+      await runAnswer(answerId, text);
       return;
     }
     const answerId = nextId.current++;
@@ -467,6 +485,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
     await deleteConversation(conversationId);
     setDeleteOpen(false);
     await refresh();
+    startNewChat();
     router.push("/app");
   }
 

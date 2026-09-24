@@ -115,11 +115,11 @@
 
 ## 14. Full system check
 
-- [ ] 14.1 Run the backend suite on SQLite and on the compose Postgres, and `npm run test`, `npm run lint`, and `npm run build` in `frontend/`. Check that all pass
-- [ ] 14.2 On a fresh `docker compose up --build` with a real Nebius key, check that a new user's first message gives `model_not_set` with a link, that choosing a model in settings makes the chat work, and that the stopped message can be sent again in the same conversation
-- [ ] 14.3 In the chat, send a greeting, a to-do, a recall question, and `/explore` text. Check that each behaves as specified, that tool use and thinking show, and that answers stream
-- [ ] 14.4 Have a discussion that reaches a decision. Check that a proposal appears, that carrying on holds it, that a topic change offers it, that archiving offers it, and that editing and confirming reports that saving is not available yet
-- [ ] 14.5 Reload and use the sidebar. Check that resume shows every message, that archive and restore work, that `/delete` asks and deletes, and that no text suggests deleting
+- [x] 14.1 Run the backend suite on SQLite and on the compose Postgres, and `npm run test`, `npm run lint`, and `npm run build` in `frontend/`. Check that all pass
+- [x] 14.2 On a fresh `docker compose up --build` with a real Nebius key, check that a new user's first message gives `model_not_set` with a link, that choosing a model in settings makes the chat work, and that the stopped message can be sent again in the same conversation
+- [x] 14.3 In the chat, send a greeting, a to-do, a recall question, and `/explore` text. Check that each behaves as specified, that tool use and thinking show, and that answers stream
+- [x] 14.4 Have a discussion that reaches a decision. Check that a proposal appears, that carrying on holds it, that a topic change offers it, that archiving offers it, and that editing and confirming reports that saving is not available yet
+- [x] 14.5 Reload and use the sidebar. Check that resume shows every message, that archive and restore work, that `/delete` asks and deletes, and that no text suggests deleting
 - [ ] 14.6 Switch model and effort in the input box mid-conversation. Check that the next answer uses the new model and that the context meter changes with its context length
 - [ ] 14.7 Fill a conversation past the soft limit and use `/compact`. Check that the suggestion appears, that the draft can be edited, that accepting lowers the meter, and that the transcript still shows everything
 - [ ] 14.8 Check the usage section against a few calls. Check that the estimate matches the tokens shown for one call at the listed prices, that a day's estimate is within a few percent of the same day in the Nebius console (this verifies the price unit), that the graph and month total update, and that a low warning threshold gives one notice

@@ -299,6 +299,19 @@ describe("Chat", () => {
       ]);
     });
 
+    it("shows the default model for a conversation that has no model yet", async () => {
+      fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "GET /api/conversations/c1": json(
+          200,
+          conversation({ provider_id: null, model: null, messages: [storedMessage(0, "user", "hi")] }),
+        ),
+      });
+      render(<Chat conversationId="c1" />);
+
+      await waitFor(() => expect(screen.getByLabelText("Model")).toHaveDisplayValue(NANO));
+    });
+
     it("offers only the efforts the table allows", async () => {
       fakeApi({
         "GET /api/settings/models": json(
@@ -519,6 +532,30 @@ describe("Chat", () => {
       await screen.findByText("Hi");
 
       expect(chatBodies(calls)[1]).toEqual({ message: "hello", conversation_id: "c5" });
+      // The server keeps one copy of a resent message, and so does the chat.
+      const list = screen.getByRole("list", { name: "Conversation" });
+      expect(within(list).getAllByText("hello")).toHaveLength(1);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("shows a resent message once after resuming a conversation where it got no answer", async () => {
+      const { calls } = fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "GET /api/conversations/c1": json(
+          200,
+          conversation({ messages: [storedMessage(0, "user", "hello")] }),
+        ),
+        "POST /api/chat": () => streamOf(delta("Hi"), done),
+      });
+      render(<Chat conversationId="c1" />);
+      await screen.findByText("hello");
+
+      send("hello");
+      await screen.findByText("Hi");
+
+      const list = screen.getByRole("list", { name: "Conversation" });
+      expect(within(list).getAllByText("hello")).toHaveLength(1);
+      expect(chatBodies(calls)).toEqual([{ message: "hello", conversation_id: "c1" }]);
     });
 
     it("shows a message when the server cannot be reached", async () => {

@@ -29,7 +29,7 @@ import {
 
 /** The conversation list on the left of the chat. */
 export function Sidebar() {
-  const { lists, loadError, refresh } = useConversations();
+  const { lists, loadError, refresh, startNewChat } = useConversations();
   const pathname = usePathname();
   const router = useRouter();
   const [showArchived, setShowArchived] = useState(false);
@@ -43,12 +43,15 @@ export function Sidebar() {
     const wasOpen = deleting.id === activeId;
     setDeleting(null);
     await refresh();
-    if (wasOpen) router.push("/app");
+    if (wasOpen) {
+      startNewChat();
+      router.push("/app");
+    }
   }
 
   return (
     <nav aria-label="Conversations" className="flex w-64 shrink-0 flex-col gap-2 border-r p-3">
-      <Button variant="outline" nativeButton={false} render={<Link href="/app" />}>
+      <Button variant="outline" nativeButton={false} render={<Link href="/app" onClick={startNewChat} />}>
         <PlusIcon /> New conversation
       </Button>
       {loadError && <p className="px-2 text-sm text-destructive">{loadError}</p>}
