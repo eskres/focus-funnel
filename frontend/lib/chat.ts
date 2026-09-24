@@ -32,6 +32,8 @@ export type ChatRequest = {
   conversationId?: string;
   /** The model and effort chosen in the composer, applied from this message on. */
   choice?: ModelChoice;
+  /** For /compact only: the loadout model the user chose to write the summary. */
+  compactModel?: { providerId: string; model: string };
 };
 
 /**
@@ -54,6 +56,12 @@ export async function* streamChat(
     body.provider_id = request.choice.providerId;
     body.model = request.choice.model;
     body.reasoning_effort = request.choice.reasoningEffort;
+  }
+  if (request.compactModel) {
+    body.compact_model = {
+      provider_id: request.compactModel.providerId,
+      model: request.compactModel.model,
+    };
   }
   let response: Response;
   try {

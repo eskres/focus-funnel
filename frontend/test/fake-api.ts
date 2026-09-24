@@ -27,6 +27,30 @@ export const toolEvent = (name: string, phase: "start" | "end", summary?: string
   `event: tool\ndata: ${JSON.stringify({ name, phase, ...(summary ? { summary } : {}) })}\n\n`;
 export const proposalEvent = (proposal: { title: string; summary: string; tags: string[] }) =>
   `event: proposal\ndata: ${JSON.stringify(proposal)}\n\n`;
+export const usageEvent = (promptTokens: number, contextLength?: number, completionTokens = 20) =>
+  `event: usage\ndata: ${JSON.stringify({
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    ...(contextLength === undefined ? {} : { context_length: contextLength }),
+  })}\n\n`;
+export const noticeEvent = (data: Record<string, unknown>) =>
+  `event: notice\ndata: ${JSON.stringify(data)}\n\n`;
+export const compactDraftEvent = (summary: string, throughPosition: number, model = "vendor/nano") =>
+  `event: compact_draft\ndata: ${JSON.stringify({
+    summary,
+    through_position: throughPosition,
+    provider_id: "nebius",
+    model,
+  })}\n\n`;
+export const compactModelsEvent = (
+  contextLength: number | null,
+  models: { model: string; context_length: number }[],
+) =>
+  `event: compact_models\ndata: ${JSON.stringify({
+    needed_tokens: 9000,
+    context_length: contextLength,
+    models: models.map((m) => ({ provider_id: "nebius", ...m })),
+  })}\n\n`;
 export const errorEvent = (code: string, message: string) =>
   `event: error\ndata: ${JSON.stringify({ error: { code, message } })}\n\n`;
 

@@ -49,6 +49,42 @@ describe("parseSse", () => {
     expect(await collect(streamOf(wire))).toEqual(expected);
   });
 
+  it("parses the /compact draft and the larger-model choice", async () => {
+    const events = await collect(
+      streamOf(
+        'event: compact_draft\ndata: {"summary":"Rent is 900.","through_position":3,"provider_id":"nebius","model":"vendor/nano"}\n\n' +
+          'event: compact_models\ndata: {"needed_tokens":9000,"context_length":8192,"models":[{"provider_id":"nebius","model":"vendor/big","context_length":262144}]}\n\n' +
+          'event: compact_models\ndata: {"needed_tokens":9000,"context_length":null,"models":[]}\n\n',
+      ),
+    );
+    expect(events).toEqual([
+      {
+        type: "compact_draft",
+        summary: "Rent is 900.",
+        throughPosition: 3,
+        providerId: "nebius",
+        model: "vendor/nano",
+      },
+      {
+        type: "compact_models",
+        neededTokens: 9000,
+        contextLength: 8192,
+        models: [{ providerId: "nebius", model: "vendor/big", contextLength: 262144 }],
+      },
+      { type: "compact_models", neededTokens: 9000, contextLength: null, models: [] },
+    ]);
+  });
+
+  it("skips a compact event with a malformed payload", async () => {
+    const events = await collect(
+      streamOf(
+        'event: compact_draft\ndata: {"summary":"No position"}\n\n' +
+          'event: compact_models\ndata: {"needed_tokens":1,"models":[{"model":"x"}]}\n\n',
+      ),
+    );
+    expect(events).toEqual([]);
+  });
+
   it("parses an error event into its code and message", async () => {
     const events = await collect(
       streamOf('event: error\ndata: {"error":{"code":"provider_key_rejected","message":"No."}}\n\n'),

@@ -14,9 +14,12 @@ export type LoadoutEntry = {
   context_length?: number;
 };
 
+export type UsageWarning = { unit: "usd" | "tokens"; amount: number };
+
 export type ModelSettings = {
   models: LoadoutEntry[];
   temperature: number | null;
+  warning?: UsageWarning | null;
   temperature_default: number;
   temperature_min: number;
   temperature_max: number;
