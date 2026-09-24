@@ -1,31 +1,29 @@
-> **Planning status:** Proposal only. Write the specs, design, and tasks when this change is picked up. Depends on `push-and-pull-gates`.
+> **Planning status:** Proposal only. Write the specs, design, and tasks when this change is picked up. Depends on `conversation-agent`, `thought-storage`, and `push-and-pull-gates`.
 
 ## Why
 
-A raw brain dump is often not ready to file. /explore lets the user talk a thought through with a model, pull in related past thoughts, and save a refined version when it is ready. Sessions persist, so a half-developed idea can be picked up later.
+Most of what this change first planned is now in `conversation-agent`. There, `/explore` is the default mode of a stored conversation: the user talks a thought through with one model, the model can call `search_thoughts`, and a discussion ends in a proposal card that the user edits and confirms. Conversations persist, so a half-developed idea can be picked up later from the sidebar, and account deletion in `thought-storage` covers them.
+
+Two parts are left. The user should see which past thoughts informed an answer while exploring, and a thought saved from a conversation should say where it came from.
 
 ## What Changes
 
-- Store /explore conversations as sessions in Postgres, with every message.
-- Let users list, reopen, rename, and delete sessions.
-- Stream /explore answers from the explore gate model, which sees the session's message history.
-- Give the explore model a search tool over past thoughts, using the same search as /pull. The model decides when to call it. Each time the tool runs, show the related thoughts it returned so the user sees what informed the answer.
-- When the user presses "Save", the model drafts a refined thought from the session. The draft goes into the /push preview flow, including the split suggestion, before anything is stored.
-- Link a thought saved from a session back to that session, so the user can see where the thought came from.
+- Each time `search_thoughts` runs during a discussion, show the related thoughts it returned next to the answer, using the sources list from `push-and-pull-gates`, so the user sees what informed the answer.
+- Link a thought saved from a conversation back to that conversation and the message position of its proposal. The thought detail view opens the conversation at that point.
+- If the conversation is deleted, the thought keeps its content and loses only the link.
 
 ## Capabilities
 
 ### New Capabilities
-- `explore-gate`: Discussion, use of related thoughts, and the save-to-/push flow.
-- `explore-sessions`: Storing, listing, reopening, renaming, and deleting sessions.
+- `thought-origin`: The link from a saved thought to the conversation it came from.
 
 ### Modified Capabilities
-- `message-routing`: Replaces the explore placeholder handler with the real one.
-- `thought-store`: Adds an optional link from a thought to the explore session it came from.
-- `account-data-deletion`: Also deletes the user's explore sessions.
+- `chat-interface`: Shows related thoughts when the search tool runs during a discussion.
+- `thought-store`: Adds an optional link from a thought to its conversation.
+- `thought-detail-view`: Shows and opens the source conversation.
 
 ## Impact
 
-- **Backend:** `explore_sessions` and `explore_messages` tables, the explore gate handler with a tool-calling loop, a thought search tool, a save-draft endpoint that feeds the /push preview.
-- **Frontend:** session list, session view, related-thoughts panel shown when the tool runs, Save action.
-- **Model constraint:** The explore gate's model must support tool calling on Nebius. This depends on the required-features check in `gate-framework`. Confirm which Nebius models support tool calling when choosing the default model.
+- **Backend:** a nullable `conversation_id` and message position on `thoughts`, set on delete to null, filled when a proposal is confirmed.
+- **Frontend:** the related-thoughts display during a discussion, and the source-conversation link on the thought detail page.
+- **Naming:** the folder name is historical. `/explore` is a mode of the one chat model.

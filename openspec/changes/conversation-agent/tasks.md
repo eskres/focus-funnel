@@ -16,7 +16,7 @@
 - [x] 3.1 Add the `Conversation` and `Message` models from design decision 3, with cascade on user delete and the unique position per conversation. Check with pytest that a duplicate position is rejected, that deleting the user deletes both, and that deleting a conversation deletes its messages
 - [x] 3.2 Add the `UsageEvent`, `ChatModel`, and `UserSettings` models. Check with pytest that a duplicate model per user is rejected, that deleting a conversation sets the usage event's conversation to null and keeps the row, and that deleting the user deletes all three
 - [x] 3.3 Add one Alembic revision that creates the new tables, with `down_revision` `bf3f5a046190` and no data migration, and reset the local database (it ran the prototype's overrides migration). Check that `alembic upgrade head` then `downgrade -1` runs cleanly on an empty SQLite database and on a fresh compose Postgres, that there is a single Alembic head, and that the app starts on the upgraded database
-- [ ] 3.4 Check with a pytest test that one user's conversations, messages, usage, and loadout are never visible to or changed by another user, on each table
+- [x] 3.4 Check with a pytest test that one user's conversations, messages, usage, and loadout are never visible to or changed by another user, on each table
 
 ## 4. Model settings API
 
@@ -109,9 +109,9 @@
 
 ## 13. Realign the planned changes
 
-- [ ] 13.1 Update the project context in `openspec/config.yaml` to describe one model with two tools, stored conversations, and no router. Check by reading it against this change's proposal
-- [ ] 13.2 Update the proposals for `explore-gate`, `push-and-pull-gates`, and `thought-storage`: sessions become conversations, the tools replace the placeholder handlers, the proposal card replaces the push preview trigger, and account deletion covers conversations and usage. Check that each proposal names this change as a dependency and no longer mentions the router or gates
-- [ ] 13.3 After this change is archived, check with `openspec validate --specs` that no spec mentions the router or per-gate models
+- [x] 13.1 Update the project context in `openspec/config.yaml` to describe one model with two tools, stored conversations, and no router. Check by reading it against this change's proposal
+- [x] 13.2 Update the proposals for `explore-gate`, `push-and-pull-gates`, and `thought-storage`: sessions become conversations, the tools replace the placeholder handlers, the proposal card replaces the push preview trigger, and account deletion covers conversations and usage. Check that each proposal names this change as a dependency and no longer mentions the router or gates
+- [x] 13.3 Check the delta specs of this change and `model-providers` for any mention of the router or per-gate models. Done 2026-09-24: a search for `router`, `routing`, and `gate` found only "There is no separate routing step" and the OpenRouter provider name. `openspec validate --specs` runs as part of archiving
 
 ## 14. Full system check
 
