@@ -85,7 +85,13 @@ export function ProposalGroup({
     : proposal.parts
         .map((part, index) => ({ ...cardOf(part, index), thoughtId: saved[index] }))
         .filter((card) => !onlyUnsaved || !card.thoughtId);
-  const canMerge = !merged && proposal.parts.length >= 2 && saved.every((id) => id === null);
+  // A replaced proposal keeps its unsaved cards folded away until the user asks.
+  const [unfolded, setUnfolded] = useState(false);
+  const folded = Boolean(proposal.replacedBy) && !unfolded;
+  const waiting = cards.filter((card) => !card.thoughtId).length;
+  const shown = folded ? cards.filter((card) => card.thoughtId) : cards;
+  const canMerge =
+    !folded && !merged && proposal.parts.length >= 2 && saved.every((id) => id === null);
 
   function onSaved(parts: number[], thoughtId: string) {
     setSaved((current) => current.map((id, index) => (parts.includes(index) ? thoughtId : id)));
@@ -96,7 +102,7 @@ export function ProposalGroup({
       aria-label={cards.length > 1 ? "Proposals to file" : "Proposal to file"}
       className="flex w-full max-w-[85%] flex-col gap-2"
     >
-      {cards.map((card) => (
+      {shown.map((card) => (
         <ProposalCard
           key={`${merged ? "merged" : "part"}-${card.parts.join(",")}`}
           conversationId={conversationId}
@@ -105,6 +111,17 @@ export function ProposalGroup({
           onSaved={onSaved}
         />
       ))}
+      {folded && waiting > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed p-2 text-xs text-muted-foreground">
+          <span>
+            {waiting === 1 ? "A thought to file was" : `${waiting} thoughts to file were`} replaced by a
+            newer proposal.
+          </span>
+          <Button variant="ghost" size="xs" onClick={() => setUnfolded(true)}>
+            Show
+          </Button>
+        </div>
+      )}
       {canMerge && (
         <Button variant="outline" size="sm" className="self-start" onClick={() => setMerged(true)}>
           Merge into one

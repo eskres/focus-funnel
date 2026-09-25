@@ -82,6 +82,8 @@ class ProposalOut(BaseModel):
     # The position of the tool message the card belongs after.
     position: int
     parts: list[ProposalPart]
+    # The later proposal that replaced this one while it was held.
+    replaced_by: uuid.UUID | None
 
 
 class ContextMeter(BaseModel):

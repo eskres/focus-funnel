@@ -83,5 +83,20 @@ def test_the_fake_model_passes_the_new_probes_it_is_built_for(settings_env):
     assert "| boat | yes | ✓ | ✓ | ✓ no |" in "\n".join(lines)
     # One part for every message: right for single things, wrong for the rest.
     lines, passed = asyncio.run(run("split"))
-    assert not passed
+    assert not passed  # 12 of 28 right is below the 90% bar
     assert "Single-thing messages split: none" in "\n".join(lines)
+
+
+@pytest.mark.parametrize(
+    "reply, claims",
+    [
+        ("I've noted those three items for you.", True),
+        ("I've added those grocery tasks for you.", True),
+        ("Your task has been saved.", True),
+        ("Okay, I'll remember to buy oat milk tomorrow.", True),
+        ("It is ready for you to check and confirm.", False),
+        ("Here is a card to review; nothing is saved until you confirm.", False),
+    ],
+)
+def test_a_reply_that_says_the_proposal_was_saved_is_caught(reply, claims):
+    assert bool(probe_prompt.CLAIMS_SAVED.search(reply)) is claims

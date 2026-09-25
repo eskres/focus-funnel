@@ -136,8 +136,9 @@ async def write_proposal(
     position: int,
     *,
     push: bool = False,
-) -> Proposal:
-    """Write a proposal and hold it. The caller commits."""
+) -> tuple[Proposal, uuid.UUID | None]:
+    """Write a proposal and hold it. Returns it, and the id of the held
+    proposal it replaced, if any. The caller commits."""
     raw = await raw_text_for(
         session, conversation, await list_messages(session, conversation), push=push
     )
@@ -151,16 +152,27 @@ async def write_proposal(
         raw_text=raw.text,
         parts=parts,
     )
+    held = await held_proposal(session, conversation)
     session.add(proposal)
     # The conversation points at the row, so the row goes in first.
     await session.flush()
+    replaced = None
+    if held_parts(held) is not None:
+        # The card of the proposal it replaces shows as replaced, and can still be confirmed.
+        held.replaced_by_id = proposal.id
+        replaced = held.id
     conversation.held_proposal_id = proposal.id
-    return proposal
+    return proposal, replaced
 
 
 def proposal_payload(proposal: Proposal) -> dict[str, Any]:
     """A proposal as the chat receives it, in the event and in the conversation."""
-    return {"id": str(proposal.id), "position": proposal.position, "parts": proposal.parts}
+    return {
+        "id": str(proposal.id),
+        "position": proposal.position,
+        "parts": proposal.parts,
+        "replaced_by": str(proposal.replaced_by_id) if proposal.replaced_by_id else None,
+    }
 
 
 async def forced_proposal(
@@ -237,6 +249,6 @@ async def offer_proposal(
         await call.aclose()
     if parts is None:
         return None
-    proposal = await write_proposal(session, conversation, parts, messages[-1].position)
+    proposal, _ = await write_proposal(session, conversation, parts, messages[-1].position)
     await session.commit()
     return proposal

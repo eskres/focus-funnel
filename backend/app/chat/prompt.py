@@ -81,6 +81,12 @@ SEARCH_TOOL_SCHEMA: dict[str, Any] = {
 }
 
 MAX_PARTS = 8
+CATEGORY_DESCRIPTION = (
+    "The kind of thought. task: something to do. idea: something to try, make, or "
+    "change. decision: a choice made. note: something that happened or someone said. "
+    "reference: facts to look up later, such as numbers, codes, names, or a "
+    "recommendation. The user's own categories are for their own kinds."
+)
 TAGS_DESCRIPTION = "A few short tags."
 
 
@@ -110,7 +116,7 @@ def propose_tool_schema(categories: list[str], known_tags: list[str]) -> dict[st
             "category": {
                 "type": "string",
                 "enum": categories,
-                "description": "The kind of thought.",
+                "description": CATEGORY_DESCRIPTION,
             },
         },
         "required": ["title", "summary", "tags", "category"],

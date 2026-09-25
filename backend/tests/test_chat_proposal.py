@@ -121,8 +121,12 @@ def test_a_new_topic_replaces_the_held_proposal(client, alice, fake_llm, test_da
 
     [event] = proposal_events(response)
     assert event["parts"][0]["title"] == "Groceries"
+    assert event["replaces"] == old_id
     body = stored(client, alice, conversation_id)
     assert body["held_proposal_id"] == event["id"] != old_id
+    # The replaced card is kept, marked with what replaced it.
+    replaced = {p["id"]: p["replaced_by"] for p in body["proposals"]}
+    assert replaced == {old_id: event["id"], event["id"]: None}
     # The note has done its job: the next round answers without it.
     first, second = fake_llm.chat_requests
     assert held_proposal_note(PARTS) in system_notes(first)
@@ -400,3 +404,19 @@ def test_a_single_message_over_the_limit_is_cut_at_its_end(
 
     [row] = proposals(test_database_url, conversation_id)
     assert row.raw_text == "y" * 20_000
+
+
+def test_a_proposal_with_every_part_saved_is_not_marked_replaced(
+    client, alice, fake_llm, test_database_url
+):
+    ready_user(client, alice)
+    conversation_id = seed_conversation(test_database_url, client, alice)
+    old_id = seed_proposal(test_database_url, conversation_id, [part(thought_id=str(uuid.uuid4()))])
+    propose(fake_llm, "Next")
+
+    response = chat(client, alice, "something new", conversation_id)
+
+    [event] = proposal_events(response)
+    assert event["replaces"] is None
+    replaced = {p["id"]: p["replaced_by"] for p in stored(client, alice, conversation_id)["proposals"]}
+    assert replaced[old_id] is None

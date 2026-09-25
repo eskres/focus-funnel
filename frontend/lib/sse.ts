@@ -2,7 +2,7 @@
 // The backend sends named events, each with a JSON payload:
 //   event: conversation  data: {"id":"...","title":"..."}    first, for a new conversation
 //   event: tool          data: {"name":"...","phase":"start"|"end","summary":"...","sources":[...]}
-//   event: proposal      data: {"id":"...","position":2,"parts":[{"title","summary","tags","category","thought_id"}]}
+//   event: proposal      data: {"id":"...","position":2,"parts":[{"title","summary","tags","category","thought_id"}],"replaced_by":null,"replaces":"..."|null}
 //   event: delta         data: {"text":"..."}
 //   event: usage         data: {"prompt_tokens":1,"completion_tokens":1,"context_length":1}
 //   event: notice        data: {"kind":"compact_suggested"|"usage_warning", ...}
@@ -20,8 +20,16 @@ export type ProposalPart = {
   thoughtId: string | null;
 };
 
-/** What one propose_thought call proposed. `position` is its tool message's. */
-export type Proposal = { id: string; position: number; parts: ProposalPart[] };
+/**
+ * What one propose_thought call proposed. `position` is its tool message's.
+ * `replacedBy` is the later proposal that replaced it while it was held.
+ */
+export type Proposal = {
+  id: string;
+  position: number;
+  parts: ProposalPart[];
+  replacedBy: string | null;
+};
 
 /** A thought a search showed the model, listed under the answer. */
 export type Source = { id: string; title: string; createdAt: string; tags: string[] };
@@ -32,7 +40,8 @@ export type CompactModel = { providerId: string; model: string; contextLength: n
 export type SseEvent =
   | { type: "conversation"; id: string; title: string }
   | { type: "tool"; name: string; phase: "start" | "end"; summary?: string; sources?: Source[] }
-  | ({ type: "proposal" } & Proposal)
+  /** `replaces`: the earlier proposal whose cards now show as replaced. */
+  | ({ type: "proposal"; replaces: string | null } & Proposal)
   | { type: "delta"; text: string }
   | { type: "usage"; promptTokens: number; completionTokens: number; contextLength?: number }
   | { type: "notice"; kind: string; data: Record<string, unknown> }
@@ -87,7 +96,12 @@ export function toProposal(value: unknown): Proposal | null {
   }
   const parts = value.parts.map(toPart);
   if (parts.length === 0 || parts.some((part) => part === null)) return null;
-  return { id: value.id, position: value.position, parts: parts as ProposalPart[] };
+  return {
+    id: value.id,
+    position: value.position,
+    parts: parts as ProposalPart[],
+    replacedBy: typeof value.replaced_by === "string" ? value.replaced_by : null,
+  };
 }
 
 function toSource(value: unknown): Source | null {
@@ -145,7 +159,13 @@ function toEvent(name: string, data: string): SseEvent | null {
       return null;
     case "proposal": {
       const proposal = toProposal(payload);
-      return proposal ? { type: "proposal", ...proposal } : null;
+      return proposal
+        ? {
+            type: "proposal",
+            ...proposal,
+            replaces: typeof payload.replaces === "string" ? payload.replaces : null,
+          }
+        : null;
     }
     case "delta":
       return typeof payload.text === "string" ? { type: "delta", text: payload.text } : null;

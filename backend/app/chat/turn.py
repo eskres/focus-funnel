@@ -277,7 +277,7 @@ class Turn:
                 parts = parse_proposal(arguments, self.filing.categories)
                 drop_held_note(self.context, self.held_parts)
                 self.held_parts = None
-                proposal = await write_proposal(
+                proposal, replaced = await write_proposal(
                     self.session,
                     self.conversation,
                     [part.as_dict() for part in parts],
@@ -285,7 +285,14 @@ class Turn:
                     push=self.command == "push",
                 )
                 details = {"proposal_id": str(proposal.id)}
-                yield ("proposal", proposal_payload(proposal))
+                yield (
+                    "proposal",
+                    {
+                        **proposal_payload(proposal),
+                        # The earlier proposal whose card now shows as replaced.
+                        "replaces": str(replaced) if replaced else None,
+                    },
+                )
                 result = PROPOSAL_SHOWN
                 summary = "Proposed a thought to file"
             else:

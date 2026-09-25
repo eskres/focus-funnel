@@ -101,7 +101,8 @@ class Proposal(Base):
     thought_id is null until the user saves that part. raw_text is fixed when
     the proposal is made, from the user messages from_position to
     to_position, and every part is saved with it. position is the tool
-    message's position.
+    message's position. replaced_by_id is the later proposal that replaced
+    this one while it was held.
     """
 
     __tablename__ = "proposals"
@@ -118,6 +119,9 @@ class Proposal(Base):
     to_position: Mapped[int] = mapped_column(Integer, nullable=False)
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
     parts: Mapped[list[dict[str, Any]]] = mapped_column(JsonType, nullable=False)
+    replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("proposals.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

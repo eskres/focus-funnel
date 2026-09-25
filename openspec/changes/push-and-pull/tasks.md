@@ -33,7 +33,7 @@
 
 ## 7. Prompt probes
 
-- [ ] 7.1 Add the `split`, `filing`, and `nomatch` probes from design decision 10 with their data in `probe_data/`, and update the system prompt and tool descriptions for splitting, categories, tag reuse, agreed points in a summary, and no invented answers. Check with a fake model that each probe runs, then run them and `tools` and `discussions` twice with Nemotron 3 Nano on Nebius, and record the results in design decision 10. Pass: the bars in that decision, and `tools` and `discussions` no worse than the thought-storage results
+- [x] 7.1 Add the `split`, `filing`, and `nomatch` probes from design decision 10 with their data in `probe_data/`, and update the system prompt and tool descriptions for splitting, categories, tag reuse, agreed points in a summary, and no invented answers. Check with a fake model that each probe runs, then run them and `tools` and `discussions` twice with Nemotron 3 Nano on Nebius, and record the results in design decision 10. Pass: the bars in that decision, and `tools` and `discussions` no worse than the thought-storage results
 - [x] 7.2 Add split thoughts to the search evaluation set and rerun `scripts/search_eval.py` with the chosen model. Check by recording in design decision 10 whether recall at 5 and the "nothing" queries hold when several thoughts share one raw text, and that `tests/test_search_quality.py` still passes
 
 ## 8. End to end

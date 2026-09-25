@@ -748,7 +748,8 @@ def test_a_valid_proposal_is_emitted_and_held_and_nothing_is_saved(
     assert body["held_proposal_id"] == event["id"]
     assert [m["role"] for m in body["messages"]] == ["user", "assistant", "tool", "assistant"]
     assert body["messages"][2]["details"] == {"proposal_id": event["id"]}
-    assert body["proposals"] == [event]
+    assert event["replaces"] is None
+    assert body["proposals"] == [{k: v for k, v in event.items() if k != "replaces"}]
 
 
 @pytest.mark.parametrize(

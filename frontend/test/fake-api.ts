@@ -45,14 +45,25 @@ export type WirePart = {
   thought_id?: string | null;
 };
 
-export const wireProposal = (id: string, parts: WirePart[], position = 2) => ({
+export const wireProposal = (
+  id: string,
+  parts: WirePart[],
+  position = 2,
+  replacedBy: string | null = null,
+) => ({
   id,
   position,
   parts: parts.map((part) => ({ category: null, thought_id: null, ...part })),
+  replaced_by: replacedBy,
 });
 
-export const proposalEvent = (id: string, parts: WirePart[], position = 2) =>
-  `event: proposal\ndata: ${JSON.stringify(wireProposal(id, parts, position))}\n\n`;
+export const proposalEvent = (
+  id: string,
+  parts: WirePart[],
+  position = 2,
+  replaces: string | null = null,
+) =>
+  `event: proposal\ndata: ${JSON.stringify({ ...wireProposal(id, parts, position), replaces })}\n\n`;
 
 /** A source as the server sends it, in the tool event and on a stored tool message. */
 export type WireSource = { id: string; title: string; created_at: string; tags: string[] };

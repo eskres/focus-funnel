@@ -33,6 +33,10 @@ Filing thoughts away (`/push`) and finding them again (`/pull`) are the core val
 - `chat-interface`: The proposal card shows the saved outcome and a link; answers show their sources.
 - `account-data-deletion`: Deleting content keeps the user's categories; deleting the account removes them.
 
+## Later
+
+- **A second opinion on a split.** A small model sometimes splits one thing with a detail into two parts (the `split` probe in design decision 10: 1 in 28). A later change can explore asking a different model to check the split before the cards show, for example only when the first model proposes two or more parts. Open questions: which model (the user's loadout, or a server-chosen one), the added time and cost per proposal, and what to show when the two models disagree.
+
 ## Impact
 
 - **Backend:** a `proposals` table that replaces `conversations.held_proposal`, the real `save_thought` function, the category field in the proposal tool, a `user_categories` table and its endpoints, existing tags in the turn context, sources in the `tool` event and on the stored tool message, and a thought detail endpoint.

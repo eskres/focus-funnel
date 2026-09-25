@@ -24,9 +24,11 @@ NO_MATCH = (
 )
 PROPOSAL_SHOWN = (
     "The proposal is now shown to the user as a card they can edit and confirm. "
-    "Nothing is saved until they confirm. Do not call propose_thought again in this "
-    "turn. Now reply to the user's latest message. If it held only what you "
-    "proposed, reply in one short sentence."
+    "Nothing is saved until they confirm, so do not say it is saved, noted, added, "
+    "or recorded, or that you will remember it: say it is ready for them to check "
+    "and confirm. Do not call "
+    "propose_thought again in this turn. Now reply to the user's latest message. "
+    "If it held only what you proposed, reply in one short sentence."
 )
 
 

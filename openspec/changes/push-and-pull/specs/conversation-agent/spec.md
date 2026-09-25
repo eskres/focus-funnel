@@ -27,7 +27,7 @@ The system SHALL steer the model to propose a thought when a discussion reaches 
 
 ### Requirement: A proposal is held while the conversation carries on
 
-When the user carries on the conversation after a proposal was made, the proposal SHALL be held until every part of it is saved or a later proposal replaces it: the system SHALL NOT propose the same conclusion again on each turn. Only the parts not yet saved SHALL be held. A held proposal SHALL be offered again, with a summary that covers what was added, in three cases: the conversation veers onto a different topic, the user archives the conversation or leaves it, and the user sends `/compact`. Time SHALL NOT bring it back: opening an old conversation SHALL NOT show the proposal again by itself. On a change of topic the system SHALL offer the earlier summary before the new topic continues. A card of a proposal that is no longer held SHALL still be confirmable.
+When the user carries on the conversation after a proposal was made, the proposal SHALL be held until every part of it is saved or a later proposal replaces it: the system SHALL NOT propose the same conclusion again on each turn. Only the parts not yet saved SHALL be held. A held proposal SHALL be offered again, with a summary that covers what was added, in three cases: the conversation veers onto a different topic, the user archives the conversation or leaves it, and the user sends `/compact`. Time SHALL NOT bring it back: opening an old conversation SHALL NOT show the proposal again by itself. On a change of topic the system SHALL offer the earlier summary before the new topic continues. A card of a proposal that is no longer held SHALL still be confirmable. When a later proposal replaces a held one, the earlier proposal's unsaved cards SHALL be folded away with a note that a newer proposal replaced them, and the user SHALL be able to show them again.
 
 #### Scenario: User carries on
 
@@ -70,6 +70,12 @@ When the user carries on the conversation after a proposal was made, the proposa
 - **WHEN** a user saves one part of a two-part proposal and then sends `/compact`
 - **THEN** the chat offers only the part not saved
 
+#### Scenario: Replaced card folded
+
+- **WHEN** the chat offers a held proposal again on a change of topic, as a new proposal
+- **THEN** the earlier card is folded away with a note that a newer proposal replaced it
+- **AND** the user can show it and confirm it
+
 #### Scenario: Older card confirmed
 
 - **WHEN** a user confirms a card from a proposal that a later proposal replaced
@@ -79,7 +85,7 @@ When the user carries on the conversation after a proposal was made, the proposa
 
 ### Requirement: Tools to file and find thoughts
 
-The model SHALL be offered two tools: one that searches the user's thoughts, and one that proposes thoughts to file. A proposal SHALL hold one or more parts, each with a title, a summary, tags, and a category. A tool call SHALL NOT store or change anything by itself: a part is stored only when the user confirms it. The result of a tool SHALL be passed back to the model so it can finish its answer, for a bounded number of rounds. The search tool SHALL take a query and, optionally, tags and a start date, and SHALL return the user's matching thoughts in the compact form of thought search, or say that none matched. The thoughts a search returns SHALL be passed to the chat as the answer's sources, and SHALL NOT be shown to the model by id. When the search could match only by words, the tool result SHALL say why in plain words and the model SHALL tell the user; the turn SHALL NOT end with an error.
+The model SHALL be offered two tools: one that searches the user's thoughts, and one that proposes thoughts to file. A proposal SHALL hold one or more parts, each with a title, a summary, tags, and a category. A tool call SHALL NOT store or change anything by itself: a part is stored only when the user confirms it. The result of a tool SHALL be passed back to the model so it can finish its answer, for a bounded number of rounds. After a proposal, the model's reply SHALL NOT say that anything was saved. The search tool SHALL take a query and, optionally, tags and a start date, and SHALL return the user's matching thoughts in the compact form of thought search, or say that none matched. The thoughts a search returns SHALL be passed to the chat as the answer's sources, and SHALL NOT be shown to the model by id. When the search could match only by words, the tool result SHALL say why in plain words and the model SHALL tell the user; the turn SHALL NOT end with an error.
 
 #### Scenario: Recall question
 
@@ -92,6 +98,7 @@ The model SHALL be offered two tools: one that searches the user's thoughts, and
 - **WHEN** a user sends a message that is clearly a to-do or an idea
 - **THEN** the model uses the proposal tool
 - **AND** the user sees a proposal to review, and nothing is stored yet
+- **AND** the model's reply does not say the thought was saved or noted
 
 #### Scenario: Several things to keep
 

@@ -376,3 +376,63 @@ describe("the held proposal before an action", () => {
     expect(calls.filter((c) => c.path.includes("/proposal"))).toEqual([]);
   });
 });
+
+describe("a replaced proposal", () => {
+  it("folds a replaced card away when a later proposal replaces it, and it can still be confirmed", async () => {
+    const { calls } = api({
+      "POST /api/chat": [
+        proposing(OAT),
+        () =>
+          streamOf(
+            toolEvent("propose_thought", "start"),
+            proposalEvent("p2", [{ ...OAT, title: "Oat and soy milk" }], 5, "p1"),
+            toolEvent("propose_thought", "end", "Proposed a thought to file"),
+            delta("Now, taxes."),
+            done,
+          ),
+      ],
+      [CONFIRM]: saved("t1"),
+    });
+    await openChat();
+    send("I need oat milk");
+    await screen.findByRole("group", { name: "Thought to file: Oat milk" });
+    await waitFor(() => expect(screen.getByLabelText("Message")).toBeEnabled());
+
+    send("unrelated: how do taxes work?");
+
+    expect(await screen.findByRole("group", { name: "Thought to file: Oat and soy milk" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Thought to file: Oat milk" })).not.toBeInTheDocument();
+    expect(screen.getByText(/A thought to file was replaced by a\s+newer proposal/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    fireEvent.click(within(card("Oat milk")).getByRole("button", { name: "Confirm" }));
+
+    await screen.findByRole("group", { name: "Saved: Oat milk" });
+    expect(calls.filter((c) => c.path.endsWith("/proposals/p1/confirm"))).toHaveLength(1);
+  });
+
+  it("shows a replaced proposal folded when the conversation is reopened, with its saved parts in view", async () => {
+    api({
+      "GET /api/conversations/c1": json(
+        200,
+        detail({
+          messages: [
+            storedMessage(0, "user", "/push oat milk and eggs"),
+            storedMessage(1, "assistant", null, {
+              tool_calls: [{ id: "c", type: "function", function: { name: "propose_thought", arguments: "{}" } }],
+            }),
+            storedMessage(2, "tool", "shown", { tool_call_id: "c", details: { proposal_id: "p1" } }),
+            storedMessage(3, "assistant", "Ready to check."),
+          ],
+          proposals: [wireProposal("p1", [{ ...OAT, thought_id: "t1" }, EGGS], 2, "p2")],
+        }),
+      ),
+    });
+    await openChat();
+
+    expect(await screen.findByRole("group", { name: "Saved: Oat milk" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Thought to file: Eggs" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    expect(card("Eggs")).toBeInTheDocument();
+  });
+});

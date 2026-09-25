@@ -35,9 +35,11 @@ def upgrade() -> None:
     sa.Column('to_position', sa.Integer(), nullable=False),
     sa.Column('raw_text', sa.Text(), nullable=False),
     sa.Column('parts', JSON, nullable=False),
+    sa.Column('replaced_by_id', sa.Uuid(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], name=op.f('fk_proposals_conversation_id_conversations'), ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('fk_proposals_user_id_users'), ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['replaced_by_id'], ['proposals.id'], name=op.f('fk_proposals_replaced_by_id_proposals'), ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_proposals'))
     )
     op.create_index(op.f('ix_proposals_conversation_id'), 'proposals', ['conversation_id'], unique=False)

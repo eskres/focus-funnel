@@ -472,11 +472,19 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
             break;
           }
           case "proposal": {
-            const { id, position, parts } = event;
-            updateAnswer(answerId, (a) => ({
-              ...a,
-              proposals: [...(a.proposals ?? []), { id, position, parts }],
-            }));
+            const { id, position, parts, replacedBy, replaces } = event;
+            setMessages((current) =>
+              current.map((m) => {
+                if (m.role !== "assistant") return m;
+                // The replaced proposal's cards collapse, wherever they are.
+                const proposals = m.proposals?.map((p) =>
+                  p.id === replaces ? { ...p, replacedBy: id } : p,
+                );
+                return m.id === answerId
+                  ? { ...m, proposals: [...(proposals ?? []), { id, position, parts, replacedBy }] }
+                  : { ...m, proposals };
+              }),
+            );
             break;
           }
           case "delta":

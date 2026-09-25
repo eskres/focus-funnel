@@ -614,8 +614,14 @@ async def probe_split(settings: Settings, runs: int) -> tuple[list[str], bool]:
     lines.append(
         "- Single-thing messages split: " + (", ".join(split_single) if split_single else "none")
     )
+    claimed = [t for t in results if claims_saved(t)]
+    lines.append(f"- Replies that say the proposal was saved: {len(claimed)} of {len(results)}")
+    for turn in claimed:
+        lines.append(f"  - {_short(turn.text, 90)}")
     lines.append(f"- {_timing(list(results))}")
-    return lines, share >= 0.9 and not split_single
+    # A split single thing is listed but does not fail: the user merges the
+    # parts with one click (design decision 10).
+    return lines, share >= 0.9
 
 
 async def probe_filing(settings: Settings, runs: int) -> tuple[list[str], bool]:
@@ -668,8 +674,25 @@ async def probe_filing(settings: Settings, runs: int) -> tuple[list[str], bool]:
     lines += ["", "## Summary", ""]
     lines.append(f"- Expected category: {sum(category_hits)} of {len(category_hits)} ({category_share:.0%})")
     lines.append(f"- Existing tag reused where one fits: {sum(tag_hits)} of {len(tag_hits)} ({tag_share:.0%})")
+    claimed = [t for t in results if claims_saved(t)]
+    lines.append(f"- Replies that say the proposal was saved: {len(claimed)} of {len(results)}")
+    for turn in claimed:
+        lines.append(f"  - {_short(turn.text, 90)}")
     lines.append(f"- {_timing(list(results))}")
-    return lines, category_share >= 0.8 and tag_share >= 0.8
+    return lines, category_share >= 0.8 and tag_share >= 0.8 and len(claimed) <= 0.05 * len(results)
+
+
+# A reply after a proposal that says it was already saved.
+CLAIMS_SAVED = re.compile(
+    r"\b(i(.ve| have)? (just )?(noted|saved|added|filed|recorded|stored|logged)|"
+    r"i(.ll| will) (remember|keep track|note|save|add|record)|"
+    r"(?<!nothing )(?<!nothing\u2019s )(is|are|has been|have been) (now )?(saved|noted|added|filed|recorded|stored|logged))\b",
+    re.IGNORECASE,
+)
+
+
+def claims_saved(turn: "Turn") -> bool:
+    return bool(turn.proposals) and bool(CLAIMS_SAVED.search(turn.text))
 
 
 # An answer that says nothing matched, and one that presents something as filed.

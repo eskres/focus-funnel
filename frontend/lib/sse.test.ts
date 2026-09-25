@@ -25,7 +25,7 @@ const wire =
   'event: conversation\ndata: {"id":"c1","title":"buy oat milk"}\n\n' +
   'event: tool\ndata: {"name":"search_thoughts","phase":"start"}\n\n' +
   'event: tool\ndata: {"name":"search_thoughts","phase":"end","summary":"Searched","sources":[{"id":"t1","title":"Oat milk","created_at":"2026-09-20T08:00:00+00:00","tags":["groceries"]}]}\n\n' +
-  'event: proposal\ndata: {"id":"p1","position":2,"parts":[{"title":"Oat milk","summary":"Buy it.","tags":["shopping"],"category":"task","thought_id":null}]}\n\n' +
+  'event: proposal\ndata: {"id":"p1","position":2,"parts":[{"title":"Oat milk","summary":"Buy it.","tags":["shopping"],"category":"task","thought_id":null}],"replaced_by":null,"replaces":"p0"}\n\n' +
   'event: delta\ndata: {"text":"Hel"}\n\n' +
   'event: delta\ndata: {"text":"lo"}\n\n' +
   'event: usage\ndata: {"prompt_tokens":550,"completion_tokens":36,"context_length":131072}\n\n' +
@@ -47,6 +47,8 @@ const expected: SseEvent[] = [
     id: "p1",
     position: 2,
     parts: [{ title: "Oat milk", summary: "Buy it.", tags: ["shopping"], category: "task", thoughtId: null }],
+    replacedBy: null,
+    replaces: "p0",
   },
   { type: "delta", text: "Hel" },
   { type: "delta", text: "lo" },
