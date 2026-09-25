@@ -1,4 +1,4 @@
-> **Planning status:** Proposal only. Write the specs, design, and tasks when this change is picked up. Depends on `conversation-agent` (the tool loop) and `auth-modes` (demo mode).
+> **Planning status:** Planned. Specs, design, and tasks are written. Depends on `conversation-agent` (the tool loop, landed) and `auth-modes` (demo mode).
 
 ## Why
 
@@ -41,4 +41,4 @@ What is useful to connect differs for each user: one wants a calendar, another a
 - **Frontend:** the Connectors settings section, the per-conversation toggle, the confirmation card for connector actions, and the tool token count in the meter.
 - **Deployment:** a compose example for a command-based MCP server in a sidecar container.
 - **Dependencies:** an MCP client library, likely the official Python SDK, to be checked when picked up.
-- **Open questions for when it is picked up:** the current MCP transport name and tool annotation fields, the choice of client library, and how a connector's timeouts count against the tool-loop round limit.
+- **Open questions:** resolved in `design.md` (decisions 1 and 9); the exact SDK version and annotation field names are confirmed by task 1.1.
