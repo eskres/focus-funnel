@@ -438,6 +438,7 @@ async def confirm_proposal(
         category=category,
         settings=settings,
         conversation_id=conversation.id,
+        proposal_id=proposal.id,
         http_client=http_client,
     )
     thought_id = str(outcome.thought.id)

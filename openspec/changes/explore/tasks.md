@@ -1,12 +1,12 @@
 ## 1. Data
 
-- [ ] 1.1 Add `thoughts.proposal_id` from design decision 1 in one migration after `push-and-pull`'s (`3f9d1b7e5a28`), with the backfill from design decision 4. Check that `alembic upgrade head` then `downgrade -1` runs cleanly on SQLite and on Postgres with pgvector, that there is a single Alembic head, that `alembic check` is clean, and with pytest that the backfill links each saved part's thought and skips a `thought_id` whose thought is gone
-- [ ] 1.2 Check the deletions with pytest on Postgres: deleting a conversation with `/delete` keeps its thoughts with every field and a null `proposal_id`, and search still finds them by title; "Delete content" and account deletion both run cleanly for a user with linked thoughts; another user's thoughts keep their `proposal_id`
+- [x] 1.1 Add `thoughts.proposal_id` from design decision 1 in one migration after `push-and-pull`'s (`3f9d1b7e5a28`), with the backfill from design decision 4. Check that `alembic upgrade head` then `downgrade -1` runs cleanly on SQLite and on Postgres with pgvector, that there is a single Alembic head, that `alembic check` is clean, and with pytest that the backfill links each saved part's thought and skips a `thought_id` whose thought is gone
+- [x] 1.2 Check the deletions with pytest on Postgres: deleting a conversation with `/delete` keeps its thoughts with every field and a null `proposal_id`, and search still finds them by title; "Delete content" and account deletion both run cleanly for a user with linked thoughts; another user's thoughts keep their `proposal_id`
 
 ## 2. Backend
 
-- [ ] 2.1 Give `add_thought()` an optional `proposal_id` and set it from the confirm endpoint. Check with pytest that a confirmed `/push` part, a confirmed discussion part, and a merged confirm each store the proposal's id, that two parts saved from one proposal share it, and that `store_thought()` without it stores null
-- [ ] 2.2 Add `origin` to `GET /api/thoughts/{id}` from design decision 2. Check with pytest that it holds the conversation's current title after a rename, `archived` true after an archive, the proposal id and date, that it is null for a thought with no proposal and after the conversation is deleted, and that the query count for the endpoint does not grow
+- [x] 2.1 Give `add_thought()` an optional `proposal_id` and set it from the confirm endpoint. Check with pytest that a confirmed `/push` part, a confirmed discussion part, and a merged confirm each store the proposal's id, that two parts saved from one proposal share it, and that `store_thought()` without it stores null
+- [x] 2.2 Add `origin` to `GET /api/thoughts/{id}` from design decision 2. Check with pytest that it holds the conversation's current title after a rename, `archived` true after an archive, the proposal id and date, that it is null for a thought with no proposal and after the conversation is deleted, and that the query count for the endpoint does not grow
 
 ## 3. Frontend
 
