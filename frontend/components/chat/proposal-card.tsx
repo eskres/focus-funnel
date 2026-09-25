@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { confirmProposal } from "@/lib/conversations";
 import type { Proposal, ProposalPart } from "@/lib/sse";
+import { cn } from "@/lib/utils";
 
 function parseTags(text: string): string[] {
   return text
@@ -67,11 +68,17 @@ export function ProposalGroup({
   conversationId,
   proposal,
   onlyUnsaved = false,
+  anchor = false,
+  marked = false,
 }: {
   conversationId: string | undefined;
   proposal: Proposal;
   /** Leave out the parts already saved, as when a held proposal is offered again. */
   onlyUnsaved?: boolean;
+  /** In the message list, so a thought's origin can scroll to it. The held-proposal dialog's copy is not. */
+  anchor?: boolean;
+  /** Ringed for a moment after an origin opened it. */
+  marked?: boolean;
 }) {
   const [saved, setSaved] = useState<(string | null)[]>(() =>
     proposal.parts.map((part) => part.thoughtId),
@@ -100,7 +107,12 @@ export function ProposalGroup({
   return (
     <section
       aria-label={cards.length > 1 ? "Proposals to file" : "Proposal to file"}
-      className="flex w-full max-w-[85%] flex-col gap-2"
+      data-proposal-id={anchor ? proposal.id : undefined}
+      data-marked={marked || undefined}
+      className={cn(
+        "flex w-full max-w-[85%] flex-col gap-2 rounded-xl transition-shadow duration-500",
+        marked && "ring-2 ring-primary ring-offset-4 ring-offset-background",
+      )}
     >
       {shown.map((card) => (
         <ProposalCard
