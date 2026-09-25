@@ -276,6 +276,27 @@ def propose(fake_llm, *titles):
     )
 
 
+def test_a_second_proposal_in_one_turn_is_refused(client, alice, fake_llm, test_database_url):
+    ready_user(client, alice)
+    lisbon = json.dumps({"thoughts": [{"title": "Lisbon", "summary": "Trip.", "tags": [], "category": "decision"}]})
+    fake_llm.queue(
+        tool_call_chunks("propose_thought", lisbon),
+        tool_call_chunks("propose_thought", lisbon),
+        text_chunks("Ready to confirm."),
+    )
+
+    response = chat(client, alice, "3 nights in Lisbon, decided")
+
+    conversation_id = first_conversation(client, alice)
+    assert len(proposals(test_database_url, conversation_id)) == 1
+    assert len(proposal_events(response)) == 1
+    tool_results = [m for m in fake_llm.chat_requests[-1]["messages"] if m["role"] == "tool"]
+    assert [r["content"].startswith("Error: a proposal is already shown") for r in tool_results] == [
+        False,
+        True,
+    ]
+
+
 def first_conversation(client, headers) -> str:
     return client.get("/api/conversations", headers=headers).json()["conversations"][0]["id"]
 
