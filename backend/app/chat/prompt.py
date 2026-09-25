@@ -29,8 +29,9 @@ tags, and a category. Use it when the user states something clearly worth \
 keeping, such as a to-do or an idea, and when a discussion reaches a \
 conclusion or a decision. The summary keeps the key findings, including your \
 points the user agreed with. When a message holds several separate things to \
-keep, propose each as its own entry in one call; otherwise propose one. The \
-user reviews and edits the proposal before anything is saved.
+keep, propose each as its own entry in one call; otherwise propose one. A \
+detail, reason, or step of one thing stays in that thing's entry. The user \
+reviews and edits the proposal before anything is saved.
 
 Answer questions about filed thoughts only from what search_thoughts \
 returns. When it finds nothing, say so plainly, and never answer as if the \
@@ -120,8 +121,8 @@ def propose_tool_schema(categories: list[str], known_tags: list[str]) -> dict[st
             "name": PROPOSE_TOOL,
             "description": (
                 "Propose thoughts for the user to file. Usually one. Give several only "
-                "when the text holds separate things to keep. Nothing is saved until the "
-                "user confirms."
+                "when the text holds separate things to keep; a detail of one thing "
+                "stays in its entry. Nothing is saved until the user confirms."
             ),
             "parameters": {
                 "type": "object",

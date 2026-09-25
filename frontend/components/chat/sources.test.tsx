@@ -100,10 +100,13 @@ describe("sources under an answer", () => {
     const list = await ask();
     const before = calls.length;
 
-    fireEvent.click(within(list).getByRole("button", { name: "Most relevant first" }));
+    const toggle = within(list).getByRole("button", { name: "Newest first" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
     expect(titles(list)).toEqual(["Shopping list", "Lisbon trip", "Oat milk"]);
 
-    fireEvent.click(within(list).getByRole("button", { name: "Newest first" }));
+    fireEvent.click(toggle);
     expect(titles(list)).toEqual(["Oat milk", "Shopping list", "Lisbon trip"]);
     expect(calls).toHaveLength(before);
   });

@@ -1,6 +1,6 @@
 """Probe the chat's system prompt and tools against a real model.
 
-Five probes, each with its data set in scripts/probe_data/:
+Eight probes, each with its data set in scripts/probe_data/:
 
   tools    labelled messages: does the model pick the tool the label names?
   topic    a held proposal, then an unrelated or a related message: does the
@@ -11,6 +11,14 @@ Five probes, each with its data set in scripts/probe_data/:
            items survive in the summary?
   search   recall questions: does the model search with key words rather than
            the question, and pass a tag or a start date when the user names one?
+  split    /push messages with one, two, or three things to keep: does the
+           proposal have one part per thing?
+  filing   /push messages for a user with known tags: does the part get the
+           expected category, and reuse an existing tag where one fits?
+  nomatch  recall questions whose search finds nothing: does the answer say
+           so plainly, without claiming anything was filed?
+
+`topic` and `repeat` together are the discussion probes.
 
 The probes build the context with the app's own code (build_context,
 plan_compaction, compaction_request), so they test what the chat sends.
@@ -44,10 +52,19 @@ from app.chat.prompt import (
     TOOLS,
     build_context,
     drop_held_note,
+    forced_tool,
     tool_arguments,
+    tools_for,
 )
-from app.chat.tools import PROPOSAL_SHOWN, ToolArgumentError, parse_proposal, parse_search
+from app.chat.tools import (
+    NO_MATCH,
+    PROPOSAL_SHOWN,
+    ToolArgumentError,
+    parse_proposal,
+    parse_search,
+)
 from app.models import Message
+from app.thoughts.categories import FIXED_CATEGORIES
 
 DATA = Path(__file__).parent / "probe_data"
 BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
@@ -79,7 +96,7 @@ class Turn:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     error: str | None = None
-    held: dict[str, Any] | None = None
+    held: list[dict[str, Any]] | None = None
 
     @property
     def first_tool(self) -> str | None:
@@ -88,6 +105,27 @@ class Turn:
     @property
     def proposals(self) -> list[dict[str, Any]]:
         return [c for c in self.calls if c["name"] == PROPOSE_TOOL]
+
+    def first_parts(self, categories: list[str] | None = None) -> list[dict[str, Any]]:
+        """The parts of the first valid proposal, as the chat stores them."""
+        for call in self.proposals:
+            parts = parts_of(call["arguments"], categories)
+            if parts:
+                return parts
+        return []
+
+
+def parts_of(raw: str, categories: list[str] | None = None) -> list[dict[str, Any]]:
+    """A propose_thought call's parts, or none when its arguments do not fit."""
+    try:
+        parts = parse_proposal(tool_arguments(raw), categories or list(FIXED_CATEGORIES))
+    except (ValueError, ToolArgumentError):
+        return []
+    return [part.as_dict() for part in parts]
+
+
+def titles_of(turn: "Turn") -> list[str]:
+    return [part["title"] for call in turn.proposals for part in parts_of(call["arguments"])]
 
 
 # ---------------------------------------------------------------- transcript
@@ -102,9 +140,10 @@ def _message(position: int, role: str, content: str | None = None, **extra: Any)
 def transcript(turns: list[dict[str, Any]]) -> list[Message]:
     """Stored messages from a data set's turns.
 
-    A turn is {user: text}, {assistant: text}, or {proposal: {title, summary,
-    tags}, reply: text}, which is stored as the chat stores a proposal: a tool
-    call, its result, and the model's short reply.
+    A turn is {user: text}, {assistant: text}, or {proposal: arguments,
+    reply: text}, which is stored as the chat stores a proposal: a tool call,
+    its result, and the model's short reply. The arguments are one part
+    ({title, summary, tags}) or {thoughts: [...]}.
     """
     messages: list[Message] = []
     for turn in turns:
@@ -128,11 +167,12 @@ def transcript(turns: list[dict[str, Any]]) -> list[Message]:
     return messages
 
 
-def held_from(turns: list[dict[str, Any]]) -> dict[str, Any] | None:
+def held_from(turns: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """The parts of the latest proposal in the turns, held as the chat holds them."""
     held = None
     for turn in turns:
         if "proposal" in turn:
-            held = turn["proposal"]
+            held = parts_of(json.dumps(turn["proposal"])) or None
     return held
 
 
@@ -143,7 +183,7 @@ def _valid(name: str, raw: str) -> bool:
     try:
         arguments = tool_arguments(raw)
         if name == PROPOSE_TOOL:
-            parse_proposal(arguments)
+            parse_proposal(arguments, list(FIXED_CATEGORIES))
             return True
         if name == SEARCH_TOOL:
             parse_search(arguments)
@@ -157,7 +197,7 @@ def _tool_result(name: str, valid: bool) -> str:
     if not valid:
         return "Error: the arguments do not fit the tool. Call the tool again with valid arguments."
     if name == SEARCH_TOOL:
-        return "No filed thoughts match."
+        return NO_MATCH
     return PROPOSAL_SHOWN
 
 
@@ -175,18 +215,27 @@ async def _create(settings: Settings, messages: list[dict[str, Any]], **extra: A
 
 
 async def run_turn(
-    settings: Settings, messages: list[Message], held: dict[str, Any] | None
+    settings: Settings,
+    messages: list[Message],
+    held: list[dict[str, Any]] | None,
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    forced: str | None = None,
 ) -> Turn:
     """Run one user turn the way the chat does: with tools, running each call
     and calling the model again, up to the round limit. The search tool finds
-    nothing and a proposal is shown."""
+    nothing and a proposal is shown. `forced` names the tool the first round
+    must call, as /push and /pull do."""
     turn = Turn(held=held)
     context = build_context(messages, held)
     async with settings.limit:
         for round_number in range(settings.tool_rounds):
             started = time.monotonic()
+            extra: dict[str, Any] = {"tools": tools or TOOLS}
+            if forced and round_number == 0:
+                extra["tool_choice"] = forced_tool(forced)
             try:
-                completion = await _create(settings, context, tools=TOOLS)
+                completion = await _create(settings, context, **extra)
             except Exception as exc:  # a probe reports failures, it does not stop on them
                 turn.error = f"{type(exc).__name__}: {exc}"
                 return turn
@@ -352,7 +401,7 @@ async def probe_topic(settings: Settings, runs: int) -> tuple[list[str], bool]:
         right = proposed if kind == "unrelated" else not proposed
         score[kind][0] += right
         score[kind][1] += 1
-        title = json.loads(turn.proposals[0]["arguments"]).get("title", "") if proposed else ""
+        title = "; ".join(titles_of(turn)) if proposed else ""
         lines.append(
             f"| {run + 1} | {item['id']} | {kind} | {'✓ ' if right else '✗ '}"
             f"{'yes' if proposed else 'no'} | {_tool_cell(turn)} | {_short(str(title), 40)} | "
@@ -398,14 +447,9 @@ async def probe_repeat(settings: Settings, runs: int) -> tuple[list[str], bool]:
     lines += ["|---|---|---|---|---|---|"]
     repeats: dict[int, set[str]] = {}
     for (run, item), played in zip(jobs, results):
-        held_title = held_from(item["turns"])["title"]
+        held_title = held_from(item["turns"])[0]["title"]
         for index, turn in enumerate(played, start=1):
-            titles = []
-            for call in turn.proposals:
-                try:
-                    titles.append(json.loads(call["arguments"]).get("title", ""))
-                except ValueError:
-                    titles.append("(invalid)")
+            titles = titles_of(turn) or (["(invalid)"] if turn.proposals else [])
             if turn.proposals:
                 repeats.setdefault(run, set()).add(item["id"])
             lines.append(
@@ -538,12 +582,160 @@ async def probe_search(settings: Settings, runs: int) -> tuple[list[str], bool]:
     return lines, share >= 0.9
 
 
+async def probe_split(settings: Settings, runs: int) -> tuple[list[str], bool]:
+    cases = yaml.safe_load((DATA / "split.yaml").read_text())["cases"]
+    jobs = [
+        (run, case, run_turn(settings, transcript([{"user": case["message"]}]), None, forced=PROPOSE_TOOL))
+        for run in range(runs)
+        for case in cases
+    ]
+    results = await asyncio.gather(*(job for _, _, job in jobs))
+
+    lines = _header("Split probe", settings, runs)
+    lines += ["Each message is sent as /push, so the proposal tool is forced.", ""]
+    lines += ["| Run | Case | Expected | Parts | Titles | Message |"]
+    lines += ["|---|---|---|---|---|---|"]
+    right: list[bool] = []
+    split_single = []
+    for (run, case, _), turn in zip(jobs, results):
+        parts = turn.first_parts()
+        ok = not turn.error and len(parts) == case["parts"]
+        right.append(ok)
+        if case["parts"] == 1 and len(parts) > 1:
+            split_single.append(f"run {run + 1} {case['id']}")
+        lines.append(
+            f"| {run + 1} | {case['id']} | {case['parts']} | {'✓ ' if ok else '✗ '}"
+            f"{len(parts) if parts else _tool_cell(turn)} | "
+            f"{_short('; '.join(p['title'] for p in parts), 60)} | {_short(case['message'], 50)} |"
+        )
+    share = sum(right) / len(right)
+    lines += ["", "## Summary", ""]
+    lines.append(f"- Right number of parts: {sum(right)} of {len(right)} ({share:.0%})")
+    lines.append(
+        "- Single-thing messages split: " + (", ".join(split_single) if split_single else "none")
+    )
+    lines.append(f"- {_timing(list(results))}")
+    return lines, share >= 0.9 and not split_single
+
+
+async def probe_filing(settings: Settings, runs: int) -> tuple[list[str], bool]:
+    data = yaml.safe_load((DATA / "filing.yaml").read_text())
+    categories = list(FIXED_CATEGORIES)
+    tools = tools_for(categories, data["known_tags"])
+    cases = data["cases"]
+    jobs = [
+        (
+            run,
+            case,
+            run_turn(
+                settings,
+                transcript([{"user": case["message"]}]),
+                None,
+                tools=tools,
+                forced=PROPOSE_TOOL,
+            ),
+        )
+        for run in range(runs)
+        for case in cases
+    ]
+    results = await asyncio.gather(*(job for _, _, job in jobs))
+
+    lines = _header("Filing probe", settings, runs)
+    lines += [f"Known tags: {', '.join(data['known_tags'])}. Each message is sent as /push.", ""]
+    lines += ["| Run | Case | Expected category | Category | Expected tag | Tags |"]
+    lines += ["|---|---|---|---|---|---|"]
+    category_hits: list[bool] = []
+    tag_hits: list[bool] = []
+    for (run, case, _), turn in zip(jobs, results):
+        parts = turn.first_parts(categories)
+        part = parts[0] if parts else None
+        category = part["category"] if part else None
+        tags = [tag.lower().lstrip("#") for tag in part["tags"]] if part else []
+        category_ok = category == case["category"]
+        category_hits.append(category_ok)
+        tag_cell = "–"
+        if case["tag"] is not None:
+            tag_ok = case["tag"] in tags
+            tag_hits.append(tag_ok)
+            tag_cell = f"{'✓' if tag_ok else '✗'} {case['tag']}"
+        lines.append(
+            f"| {run + 1} | {case['id']} | {case['category']} | {'✓' if category_ok else '✗'} "
+            f"{category or (_tool_cell(turn) if not part else 'none')} | {tag_cell} | "
+            f"{_short(', '.join(tags), 40)} |"
+        )
+    category_share = sum(category_hits) / len(category_hits)
+    tag_share = sum(tag_hits) / len(tag_hits) if tag_hits else 1.0
+    lines += ["", "## Summary", ""]
+    lines.append(f"- Expected category: {sum(category_hits)} of {len(category_hits)} ({category_share:.0%})")
+    lines.append(f"- Existing tag reused where one fits: {sum(tag_hits)} of {len(tag_hits)} ({tag_share:.0%})")
+    lines.append(f"- {_timing(list(results))}")
+    return lines, category_share >= 0.8 and tag_share >= 0.8
+
+
+# An answer that says nothing matched, and one that presents something as filed.
+SAYS_NOTHING = re.compile(
+    r"\b(no|none of your|nothing|not find|couldn.t find|could not find|didn.t find|did not find|"
+    r"don.t see|do not see|don.t have|do not have|haven.t (filed|noted|saved)|no record|no match)",
+    re.IGNORECASE,
+)
+CLAIMS_FILED = re.compile(
+    r"\b(you (decided|noted|filed|wrote|saved|planned|chose)( down)? (that|to|on)|"
+    r"according to your (notes?|thoughts?)|your notes? (say|says|mention))",
+    re.IGNORECASE,
+)
+
+
+async def probe_nomatch(settings: Settings, runs: int) -> tuple[list[str], bool]:
+    cases = yaml.safe_load((DATA / "nomatch.yaml").read_text())["cases"]
+    jobs = [
+        (
+            run,
+            case,
+            run_turn(
+                settings,
+                transcript([{"user": case["message"]}]),
+                None,
+                forced=SEARCH_TOOL if case["pull"] else None,
+            ),
+        )
+        for run in range(runs)
+        for case in cases
+    ]
+    results = await asyncio.gather(*(job for _, _, job in jobs))
+
+    lines = _header("No-match probe", settings, runs)
+    lines += [f"Every search answers: {NO_MATCH}", ""]
+    lines += ["| Run | Case | /pull | Searched | Says nothing matched | Claims filed content | Answer |"]
+    lines += ["|---|---|---|---|---|---|---|"]
+    passes: list[bool] = []
+    for (run, case, _), turn in zip(jobs, results):
+        searched = any(c["name"] == SEARCH_TOOL for c in turn.calls)
+        says = bool(SAYS_NOTHING.search(turn.text))
+        claims = bool(CLAIMS_FILED.search(turn.text))
+        ok = not turn.error and searched and says and not claims
+        passes.append(ok)
+        lines.append(
+            f"| {run + 1} | {case['id']} | {'yes' if case['pull'] else 'no'} | "
+            f"{'✓' if searched else '✗'} | {'✓' if says else '✗'} | {'✗ yes' if claims else '✓ no'} | "
+            f"{'✓ ' if ok else '✗ '}{_short(turn.error or turn.text, 90)} |"
+        )
+    share = sum(passes) / len(passes)
+    lines += ["", "## Summary", ""]
+    lines.append(f"- Searched, said nothing matched, and claimed nothing: {sum(passes)} of {len(passes)} ({share:.0%})")
+    lines.append("- The checks are word patterns: read the answers above to confirm.")
+    lines.append(f"- {_timing(list(results))}")
+    return lines, share >= 0.95
+
+
 PROBES = {
     "tools": probe_tools,
     "topic": probe_topic,
     "repeat": probe_repeat,
     "compact": probe_compact,
     "search": probe_search,
+    "split": probe_split,
+    "filing": probe_filing,
+    "nomatch": probe_nomatch,
 }
 
 

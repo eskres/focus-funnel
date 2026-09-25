@@ -1,0 +1,18 @@
+# /push messages for the split probe (push-and-pull task 7.1). `parts` is the
+# number of separate things to keep. A single thing with details is one part.
+
+cases:
+  - {id: one-1, parts: 1, message: "buy oat milk on the way home"}
+  - {id: one-2, parts: 1, message: "call the plumber about the kitchen sink on Monday"}
+  - {id: one-3, parts: 1, message: "idea: a podcast about old maps and the stories behind them"}
+  - {id: one-4, parts: 1, message: "Decided to take the train to Bergen instead of flying, it's cheaper and I can work on the way"}
+  - {id: one-5, parts: 1, message: "I need to renew my passport before March, and the photo booth at the station does the pictures"}
+  - {id: one-6, parts: 1, message: "remember Sara's birthday is on the 14th, she wants the blue scarf from the market"}
+  - {id: two-1, parts: 2, message: "buy oat milk and book the dentist"}
+  - {id: two-2, parts: 2, message: "call the bank about the card fee, and idea: a newsletter section with reader questions"}
+  - {id: two-3, parts: 2, message: "Send Jonas the invoice by Friday. Also, I decided we'll skip the team offsite this year"}
+  - {id: two-4, parts: 2, message: "renew the car insurance before the 1st, and look up flights to Porto for October"}
+  - {id: three-1, parts: 3, message: "buy oat milk, book the dentist, and idea: a podcast about maps"}
+  - {id: three-2, parts: 3, message: "Three things: fix the bike light, pay the electricity bill, and ask Anna about the weekend"}
+  - {id: three-3, parts: 3, message: "todo: water the plants. idea: a board game night with the neighbours. decision: no more meetings on Fridays"}
+  - {id: three-4, parts: 3, message: "email the landlord about the heater; book a table for Saturday; I want to try learning Portuguese"}

@@ -48,12 +48,12 @@ export function SourcesList({ sources }: { sources: Source[] }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-medium text-muted-foreground">Sources</p>
         <Button
-          variant="ghost"
+          variant={newestFirst ? "secondary" : "ghost"}
           size="xs"
           aria-pressed={newestFirst}
           onClick={() => setNewestFirst((current) => !current)}
         >
-          {newestFirst ? "Newest first" : "Most relevant first"}
+          Newest first
         </Button>
       </div>
       {tags.length > 0 && (

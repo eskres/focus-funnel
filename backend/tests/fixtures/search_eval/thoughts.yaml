@@ -522,3 +522,43 @@ thoughts:
     summary: >-
       Move all passwords from the browser to a proper password manager and turn
       on two-factor authentication for email and the bank.
+
+  # Split thoughts (push-and-pull task 7.2): parts of one /push message, each
+  # filed with the whole message as its raw text.
+  - id: t61
+    created: 2026-09-22
+    title: Car registration
+    tags: [car, errands]
+    summary: Renew the car registration by the 15th.
+    raw_text: &split_errands >-
+      renew the car registration by the 15th, order a new bike helmet from the
+      shop on Storgata, and idea: a family photo book for grandma, she turns 80
+      in December
+
+  - id: t62
+    created: 2026-09-22
+    title: New bike helmet
+    tags: [shopping, cycling]
+    summary: Order a new bike helmet.
+    raw_text: *split_errands
+
+  - id: t63
+    created: 2026-09-22
+    title: Photo book for grandma
+    tags: [family, idea]
+    summary: Make a family photo book for grandma, who turns 80 in December.
+    raw_text: *split_errands
+
+  - id: t64
+    created: 2026-09-23
+    title: Kindergarten fee
+    tags: [family, finance]
+    summary: Pay the kindergarten fee.
+    raw_text: &split_fees pay the kindergarten fee and renew the library card before Friday
+
+  - id: t65
+    created: 2026-09-23
+    title: Library card
+    tags: [errands, reading]
+    summary: Renew the library card before Friday.
+    raw_text: *split_fees

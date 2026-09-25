@@ -1,0 +1,19 @@
+# /push messages for the filing probe (push-and-pull task 7.1), for a user
+# who already has the tags below. `category` is the expected category; `tag`
+# is an existing tag that fits, or null when none does.
+
+known_tags: [groceries, work, health, travel, family, finance, home, reading, podcast, car]
+
+cases:
+  - {id: groceries, category: task, tag: groceries, message: "buy eggs"}
+  - {id: gp, category: task, tag: health, message: "book a check-up with the GP next week"}
+  - {id: podcast, category: idea, tag: podcast, message: "idea: a short weekly episode answering listener questions"}
+  - {id: porto, category: decision, tag: travel, message: "decided: we fly to Porto on the 3rd of October and back on the 7th"}
+  - {id: tyres, category: reference, tag: car, message: "the tyre pressure for the car is 2.4 bar front and 2.2 rear"}
+  - {id: mum, category: note, tag: family, message: "Mum mentioned she'd love to visit in November, maybe the second weekend"}
+  - {id: bill, category: task, tag: finance, message: "pay the electricity bill before the 20th"}
+  - {id: bookshelf, category: idea, tag: home, message: "idea for the living room: move the bookshelf under the window"}
+  - {id: phone-plan, category: decision, tag: finance, message: "decided to switch to the cheaper phone plan from next month"}
+  - {id: report, category: task, tag: work, message: "finish the quarterly report draft by Thursday"}
+  - {id: book, category: reference, tag: reading, message: "book recommendation from Tom: The Overstory by Richard Powers"}
+  - {id: chess, category: idea, tag: null, message: "idea: learn chess openings with a short puzzle every morning"}

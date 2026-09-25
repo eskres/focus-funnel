@@ -117,7 +117,7 @@ The sources list is a client component under the answer: a relevance / newest-fi
 
 `GET /api/thoughts/{id}` answers `{id, title, summary, tags, category, raw_text, created_at, updated_at}` through `get_thought()`, so another user's thought is 404 `not_found`. The Next.js proxy already forwards `/api/*`.
 
-The chat page reads `?thought=<id>`. When it is set, a shadcn `Sheet` opens on the right over the chat, fetches the thought, and shows its fields. Links use `router.push`, so Back closes the sheet; closing the sheet also pushes the address without the parameter. The chat stays mounted, so the scroll position and the composer's text stay. A 404 shows "This thought no longer exists." The raw text section is hidden when it is empty or the same as the summary.
+The chat page reads `?thought=<id>`. When it is set, a shadcn `Sheet` opens on the right over the chat, fetches the thought, and shows its fields. Links change the address with `window.history.pushState`, which Next.js keeps in step with its router, so Back closes the sheet; closing the sheet also pushes the address without the parameter. `router.push` is not used: in a new conversation the page is still the `/app` route, and a push to `/app/<id>?thought=…` would mount the conversation page again and lose the scroll position and the composer's text. The chat stays mounted, so the scroll position and the composer's text stay. A 404 shows "This thought no longer exists." The raw text section is hidden when it is empty or the same as the summary.
 
 **Alternatives:** a page at `/app/thoughts/[id]` (rejected by the user: leaves the chat); a modal dialog (rejected: covers the chat the user is checking against).
 
@@ -134,6 +134,24 @@ The chat page reads `?thought=<id>`. When it is set, a shadcn `Sheet` opens on t
 - `nomatch`: recall questions whose search returns nothing. Pass: the answer says nothing matched and claims no filed content, in 95%.
 
 The results go in this design, as for the earlier changes, with `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` on Nebius as the reference model.
+
+**Probe results (task 7.1, 2026-09-25),** `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` on Nebius, temperature 0.3, two runs each, with the prompt as shipped. One sentence was added after the first split run: "A detail, reason, or step of one thing stays in that thing's entry."
+
+- `split`: **fail on the strict bar.** 27 of 28 right (96%, bar 90%), but one single-thing message was split in one run: "renew my passport before March, and the photo booth at the station does the pictures" became two parts. The first run, before the added sentence, gave the same numbers on the same case. An added example ("book the dentist, the clinic opens at 8" is one entry) also gave 27 of 28, with "Sara's birthday … she wants the blue scarf" split once, so it was taken out again.
+- `filing`: pass. Expected category 21 of 24 (88%); an existing tag reused where one fits 22 of 22 (100%). The misses are `note` versus `task` or `reference`, which the user changes on the card.
+- `nomatch`: pass. 20 of 20 searched, said nothing matched, and claimed nothing filed; every answer was also read by hand.
+- `tools`: pass, 42 and 41 of 43 (98%, 95%), against 40 and 41 after thought-storage. Recall, to-do, idea, greeting, and unfinished messages were all right; the misses are 2 discussions and 1 multi-turn case.
+- `topic`: pass, the held proposal offered on 18 of 20 unrelated messages and wrongly on 1 of 20 related ones, against 19 of 20 and 0 of 20 in conversation-agent.
+- `repeat`: pass, no proposal repeated in 20 continuations.
+
+**Search evaluation (task 7.2, 2026-09-25),** `Qwen/Qwen3-Embedding-8B` at 256 dimensions, with two split raw texts added to the set (thoughts t61 to t65, queries q45 to q50):
+
+| Set | recall@5 | MRR | empty on "nothing" | noise |
+|---|---|---|---|---|
+| thought-storage set | 1.000 | 0.919 | 1.00 | 0.62 |
+| with split thoughts | 0.978 | 0.893 | 1.00 | 1.18 |
+
+The "nothing" queries hold. Recall at 5 holds for every split query but one: `borrowing books` misses t65 (`Library card`), a paraphrase the thought's own words do not carry, while the three parts of the other split rank above it through "photo book" in their shared raw text. Shared raw text adds noise as Risks expected: each part's raw-text chunk has the same vector, so a query that matches it returns every part (`Storgata` returns t61, t62, and t63; `birthday` now also returns t61 to t63). `tests/test_search_quality.py` passes with the new fixture as its baseline.
 
 ## Risks / Trade-offs
 

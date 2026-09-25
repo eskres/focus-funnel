@@ -55,3 +55,10 @@ queries:
   - {id: q42, kind: nothing, query: snowboard wax, expect: []}
   - {id: q43, kind: nothing, query: Tokyo restaurant recommendations, expect: []}
   - {id: q44, kind: filter, query: plans, tags: [astronomy], expect: []}
+  # Split thoughts share one raw text (push-and-pull task 7.2).
+  - {id: q45, kind: exact, query: bike helmet, expect: [t62]}
+  - {id: q46, kind: paraphrase, query: gift for my grandmother, expect: [t63]}
+  - {id: q47, kind: exact, query: car registration, expect: [t61]}
+  - {id: q48, kind: exact, query: kindergarten fee, expect: [t64]}
+  - {id: q49, kind: paraphrase, query: borrowing books, expect: [t65]}
+  - {id: q50, kind: raw, query: Storgata, expect: [t62]}

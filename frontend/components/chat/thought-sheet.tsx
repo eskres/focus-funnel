@@ -60,8 +60,9 @@ export function ThoughtSheet() {
   const showRaw = Boolean(rawText) && rawText !== thought?.summary.trim();
 
   return (
-    <Sheet open={id !== null} onOpenChange={(open) => !open && closeThought()}>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
+    // Not modal and with no overlay: the chat stays readable and usable beside it.
+    <Sheet open={id !== null} modal={false} onOpenChange={(open) => !open && closeThought()}>
+      <SheetContent side="right" showOverlay={false} className="w-full overflow-y-auto sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>{thought?.title ?? "Thought"}</SheetTitle>
           <SheetDescription>
