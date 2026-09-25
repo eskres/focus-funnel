@@ -20,10 +20,12 @@ import {
 import { Chat } from "./chat";
 
 const push = vi.hoisted(() => vi.fn());
+// The pathname Next renders, when a test holds it apart from the address.
+const router = vi.hoisted(() => ({ pathname: null as string | null }));
 vi.mock("@/lib/redirect-to-login", () => ({ redirectToLogin: vi.fn() }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push }),
-  usePathname: () => window.location.pathname,
+  usePathname: () => router.pathname ?? window.location.pathname,
 }));
 
 const OAT: WirePart = { title: "Oat milk", summary: "Buy oat milk.", tags: [], category: "task", thought_id: "t1" };
@@ -113,6 +115,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   scroll.mockReset();
+  router.pathname = null;
   at("/");
 });
 
@@ -161,6 +164,17 @@ describe("the origin in the thought sheet", () => {
     fireEvent.click(within((await originSection())!).getByRole("link", { name: "Summer trip" }));
 
     expect(push).toHaveBeenCalledWith("/app/c2?proposal=p1");
+  });
+
+  it("does not open the old thought in the conversation the router renders before the address changes", async () => {
+    at("/app/c1?thought=t1");
+    router.pathname = "/app/c2";
+    api({ "GET /api/conversations/c2": json(200, detail({ id: "c2" })) });
+
+    render(<Chat conversationId="c2" />);
+    await screen.findByLabelText("Message");
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("in the open conversation, closes the sheet, keeps the text, and scrolls to the card", async () => {

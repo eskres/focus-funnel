@@ -6,6 +6,7 @@
 // A thought's origin opens its conversation at the proposal card, as
 // `/app/<conversation>?proposal=<id>`. In the conversation already open, the
 // address changes the same way, for the same reason.
+import { usePathname } from "next/navigation";
 import { useMemo, useSyncExternalStore } from "react";
 
 export const THOUGHT_PARAM = "thought";
@@ -65,13 +66,26 @@ function subscribe(onChange: () => void) {
   };
 }
 
-/** The id of the open thought, or null. */
-export function useOpenThought(): string | null {
+/**
+ * A parameter of the address, once it belongs to the page being rendered. A
+ * `router.push` to another conversation renders the new page before it
+ * changes the address, so until then the address is the old page's.
+ */
+function useAddressParam(name: string): string | null {
+  const pathname = usePathname();
   return useSyncExternalStore(
     subscribe,
-    () => new URLSearchParams(window.location.search).get(THOUGHT_PARAM),
+    () =>
+      window.location.pathname === pathname
+        ? new URLSearchParams(window.location.search).get(name)
+        : null,
     () => null,
   );
+}
+
+/** The id of the open thought, or null. */
+export function useOpenThought(): string | null {
+  return useAddressParam(THOUGHT_PARAM);
 }
 
 export type ProposalAnchor = {
@@ -83,13 +97,7 @@ export type ProposalAnchor = {
 
 /** The proposal card the address names (`?proposal=<id>`). */
 export function useProposalAnchor(): ProposalAnchor {
-  const snapshot = useSyncExternalStore(
-    subscribe,
-    () => `${anchorRequests}:${new URLSearchParams(window.location.search).get(PROPOSAL_PARAM) ?? ""}`,
-    () => "0:",
-  );
-  return useMemo(() => {
-    const colon = snapshot.indexOf(":");
-    return { id: snapshot.slice(colon + 1) || null, request: Number(snapshot.slice(0, colon)) };
-  }, [snapshot]);
+  const id = useAddressParam(PROPOSAL_PARAM);
+  const request = useSyncExternalStore(subscribe, () => anchorRequests, () => 0);
+  return useMemo(() => ({ id, request }), [id, request]);
 }

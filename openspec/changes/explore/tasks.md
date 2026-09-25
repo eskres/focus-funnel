@@ -15,4 +15,4 @@
 
 ## 4. End to end
 
-- [ ] 4.1 In the running app with a real key: discuss something and confirm the card, `/push` a thought, archive the first conversation, ask `/pull` about both, open each source, click its origin, press Back, copy an origin address into a new tab, then `/delete` one conversation and open its thought again. Check that every step matches the `thought-origin` spec, that the archived conversation stays archived, and save screenshots of the origin section and the marked card under `.context/`
+- [x] 4.1 In the running app with a real key: discuss something and confirm the card, `/push` a thought, archive the first conversation, ask `/pull` about both, open each source, click its origin, press Back, copy an origin address into a new tab, then `/delete` one conversation and open its thought again. Check that every step matches the `thought-origin` spec, that the archived conversation stays archived, and save screenshots of the origin section and the marked card under `.context/`
