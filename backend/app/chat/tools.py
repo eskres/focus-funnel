@@ -1,5 +1,5 @@
-"""What the two tools do. Each sits behind one function, so the changes that
-add thought storage and search replace it without touching the tool loop."""
+"""What the two tools do: parse their arguments, and turn a search into the
+compact result the model reads and the sources the chat shows."""
 
 import uuid
 from dataclasses import dataclass, field
@@ -10,18 +10,25 @@ import httpx2
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.config import SearchConfig
+from app.chat.prompt import MAX_PARTS
 from app.config import Settings
 from app.errors import ApiError, ErrorCode
 from app.models import User
 from app.provider_config import get_providers_config
+from app.thoughts.categories import clean_name
 from app.thoughts.search import SearchResult, search_thoughts
 
-NO_MATCH = "No filed thoughts match."
+NO_MATCH = (
+    "No filed thoughts match. Say so plainly, and do not answer as if the user had "
+    "filed something."
+)
 PROPOSAL_SHOWN = (
     "The proposal is now shown to the user as a card they can edit and confirm. "
-    "Nothing is saved until they confirm. Do not call propose_thought again in this "
-    "turn. Now reply to the user's latest message. If it held only what you "
-    "proposed, reply in one short sentence."
+    "Nothing is saved until they confirm, so do not say it is saved, noted, added, "
+    "or recorded, or that you will remember it: say it is ready for them to check "
+    "and confirm. Do not call "
+    "propose_thought again in this turn. Now reply to the user's latest message. "
+    "If it held only what you proposed, reply in one short sentence."
 )
 
 
@@ -30,30 +37,67 @@ class ToolArgumentError(ValueError):
 
 
 @dataclass(frozen=True)
-class Proposal:
+class ProposalPart:
     title: str
     summary: str
     tags: list[str]
+    category: str | None
 
     def as_dict(self) -> dict[str, Any]:
-        return {"title": self.title, "summary": self.summary, "tags": self.tags}
+        """The part as stored on a proposal row, not yet saved."""
+        return {
+            "title": self.title,
+            "summary": self.summary,
+            "tags": self.tags,
+            "category": self.category,
+            "thought_id": None,
+        }
 
 
-def parse_proposal(arguments: dict[str, Any]) -> Proposal:
-    title = arguments.get("title")
-    summary = arguments.get("summary")
-    tags = arguments.get("tags", [])
+def _parse_part(item: Any, where: str, categories: list[str]) -> ProposalPart:
+    if not isinstance(item, dict):
+        raise ToolArgumentError(f"{where} must be an object")
+    title = item.get("title")
+    summary = item.get("summary")
+    tags = item.get("tags", [])
+    category = item.get("category")
     if not isinstance(title, str) or not title.strip():
-        raise ToolArgumentError("title must be a non-empty string")
+        raise ToolArgumentError(f"{where}title must be a non-empty string")
     if not isinstance(summary, str) or not summary.strip():
-        raise ToolArgumentError("summary must be a non-empty string")
+        raise ToolArgumentError(f"{where}summary must be a non-empty string")
+    if tags is None:
+        tags = []
     if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
-        raise ToolArgumentError("tags must be a list of strings")
-    return Proposal(
+        raise ToolArgumentError(f"{where}tags must be a list of strings")
+    cleaned_tags: list[str] = []
+    for tag in tags:
+        tag = tag.strip()
+        if tag and tag not in cleaned_tags:
+            cleaned_tags.append(tag)
+    # A category the user does not have is dropped, so the card shows none.
+    named = clean_name(category) if isinstance(category, str) else None
+    return ProposalPart(
         title=title.strip(),
         summary=summary.strip(),
-        tags=[tag.strip() for tag in tags if tag.strip()],
+        tags=cleaned_tags,
+        category=named if named in categories else None,
     )
+
+
+def parse_proposal(arguments: dict[str, Any], categories: list[str]) -> list[ProposalPart]:
+    """The parts of a propose_thought call.
+
+    The call's shape is {"thoughts": [...]}. A call with title, summary, and
+    tags at the top, as the tool once took, is read as one part.
+    """
+    if "thoughts" not in arguments and "title" in arguments:
+        return [_parse_part(arguments, "", categories)]
+    items = arguments.get("thoughts")
+    if not isinstance(items, list) or not 1 <= len(items) <= MAX_PARTS:
+        raise ToolArgumentError(f"thoughts must be a list of 1 to {MAX_PARTS} thoughts")
+    return [
+        _parse_part(item, f"thoughts[{index}].", categories) for index, item in enumerate(items)
+    ]
 
 
 @dataclass(frozen=True)
@@ -86,8 +130,9 @@ def parse_search(arguments: dict[str, Any]) -> SearchArguments:
 @dataclass
 class SearchToolResult:
     text: str
-    # The ids of the thoughts shown, for the chat to list as sources.
-    thought_ids: list[str] = field(default_factory=list)
+    # The thoughts shown, in order, for the chat to list as sources:
+    # {id, title, created_at, tags}. The model never sees the ids.
+    sources: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _shorten(text: str, limit: int) -> str:
@@ -128,7 +173,7 @@ def format_search_result(
         return SearchToolResult(text="\n".join([NO_MATCH, *note]))
     order = "newest first" if newest_first else "best first"
     entries: list[str] = []
-    ids: list[str] = []
+    sources: list[dict[str, Any]] = []
     used = 0
     for number, hit in enumerate(result.hits, start=1):
         thought = hit.thought
@@ -142,7 +187,14 @@ def format_search_result(
         if entries and used + len(entry) + 1 > config.budget_chars:
             break
         entries.append(entry)
-        ids.append(str(thought.id))
+        sources.append(
+            {
+                "id": str(thought.id),
+                "title": thought.title,
+                "created_at": thought.created_at.isoformat(),
+                "tags": list(thought.tags or []),
+            }
+        )
         used += len(entry) + 1
     shown = len(entries)
     header = f"{shown} of your thoughts match ({order}):"
@@ -150,7 +202,7 @@ def format_search_result(
     footer = (
         [f"{more} more matched. Add tags or a start date to narrow the search."] if more else []
     )
-    return SearchToolResult(text="\n".join([header, *entries, *footer, *note]), thought_ids=ids)
+    return SearchToolResult(text="\n".join([header, *entries, *footer, *note]), sources=sources)
 
 
 async def search_tool_result(
@@ -176,16 +228,3 @@ async def search_tool_result(
         config=config,
     )
     return format_search_result(result, config, settings)
-
-
-@dataclass(frozen=True)
-class SaveOutcome:
-    saved: bool
-    message: str
-
-
-async def save_thought(user: User, proposal: Proposal) -> SaveOutcome:
-    """Hand a confirmed proposal to thought storage. Replaced by push-and-pull."""
-    return SaveOutcome(
-        saved=False, message="Saving thoughts is not available yet. Copy the text to keep it."
-    )

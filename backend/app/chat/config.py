@@ -74,6 +74,14 @@ class SearchConfig:
 
 
 @dataclass(frozen=True)
+class FilingConfig:
+    """Filing thoughts. See openspec push-and-pull design decision 6."""
+
+    # The user's tags named in the proposal tool, most used first.
+    known_tags: int
+
+
+@dataclass(frozen=True)
 class ChatConfig:
     temperature: TemperatureConfig
     reply_max_tokens: int
@@ -84,6 +92,7 @@ class ChatConfig:
     documented_efforts: tuple[str, ...]
     unsupported_efforts: tuple[EffortRule, ...]
     search: SearchConfig
+    filing: FilingConfig
 
     def efforts_for(self, model: str) -> list[str]:
         """The efforts offered for a model: every documented one it is not known to refuse."""
@@ -172,6 +181,12 @@ def _parse_search(raw: object) -> SearchConfig:
     )
 
 
+def _parse_filing(raw: object) -> FilingConfig:
+    if not isinstance(raw, dict):
+        raise ChatConfigError("'filing' must be a mapping of filing settings")
+    return FilingConfig(known_tags=_positive_int(raw, "known_tags", "filing."))
+
+
 def _parse_temperature(raw: object) -> TemperatureConfig:
     if not isinstance(raw, dict):
         raise ChatConfigError("'temperature' must be a mapping with default, min, and max")
@@ -243,6 +258,7 @@ def load_chat_config(path: str | Path | None = None) -> ChatConfig:
         documented_efforts=documented,
         unsupported_efforts=rules,
         search=_parse_search(raw.get("search")),
+        filing=_parse_filing(raw.get("filing")),
     )
 
 

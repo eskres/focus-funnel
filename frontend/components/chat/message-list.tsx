@@ -3,11 +3,12 @@
 import { useEffect, useRef } from "react";
 
 import { ChatError } from "@/components/chat/chat-error";
-import { ProposalCard } from "@/components/chat/proposal-card";
+import { ProposalGroup } from "@/components/chat/proposal-card";
+import { SourcesList } from "@/components/chat/sources-list";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { ApiError } from "@/lib/api";
-import type { Proposal } from "@/lib/sse";
+import type { Proposal, Source } from "@/lib/sse";
 import { cn } from "@/lib/utils";
 
 export type ToolIndication = {
@@ -23,8 +24,10 @@ export type AnswerMessage = {
   prompt: string;
   text: string;
   tools: ToolIndication[];
-  /** A proposal the model made in this answer. Stored answers have none. */
-  proposal?: Proposal;
+  /** The proposals the model made in this answer, with their saved state. */
+  proposals?: Proposal[];
+  /** The thoughts this answer's searches returned, each once. */
+  sources?: Source[];
   status: "streaming" | "done" | "failed" | "cut";
   error?: ApiError;
   /** Replaced for the model by a /compact summary, and still shown. */
@@ -137,10 +140,11 @@ function Answer({
           {toolLabel(tool)}
         </p>
       ))}
-      {answer.proposal && (
-        <ProposalCard conversationId={conversationId} proposal={answer.proposal} />
-      )}
+      {answer.proposals?.map((proposal) => (
+        <ProposalGroup key={proposal.id} conversationId={conversationId} proposal={proposal} />
+      ))}
       {text && <p className="max-w-[85%] text-sm whitespace-pre-wrap">{text}</p>}
+      {answer.sources && <SourcesList sources={answer.sources} />}
       {thinking && (
         <p role="status" className="text-xs text-muted-foreground">
           Thinking…

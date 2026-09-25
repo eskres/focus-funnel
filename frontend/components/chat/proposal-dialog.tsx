@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { ProposalCard } from "@/components/chat/proposal-card";
+import { ProposalGroup } from "@/components/chat/proposal-card";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -30,8 +30,8 @@ export type HeldOffer = {
  */
 export async function heldProposalFor(conversationId: string): Promise<Proposal | null> {
   try {
-    const held = (await offerProposal(conversationId)).held_proposal;
-    return held ? { title: held.title, summary: held.summary, tags: held.tags } : null;
+    const offered = await offerProposal(conversationId);
+    return offered && offered.parts.some((part) => part.thoughtId === null) ? offered : null;
   } catch {
     return null;
   }
@@ -62,10 +62,11 @@ export function ProposalDialog({ offer, onClose }: { offer: HeldOffer | null; on
           </DialogDescription>
         </DialogHeader>
         {offer && (
-          <ProposalCard
-            key={offer.conversationId}
+          <ProposalGroup
+            key={offer.proposal.id}
             conversationId={offer.conversationId}
             proposal={offer.proposal}
+            onlyUnsaved
           />
         )}
         <DialogFooter>

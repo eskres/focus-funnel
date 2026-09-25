@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import select, update
 
+from app.chat.tools import NO_MATCH
 from app.models import Thought, UsageEvent
 from app.thoughts.store import store_thought
 from tests.chat_helpers import (
@@ -56,7 +57,13 @@ def search_in_chat(client, headers, fake_llm, arguments: dict, message="what did
     return response, tool_result["content"]
 
 
-def test_result_has_the_documented_form_and_ids_go_in_the_event(
+def stored_tool_details(client, headers) -> list:
+    conversation_id = client.get("/api/conversations", headers=headers).json()["conversations"][0]["id"]
+    messages = client.get(f"/api/conversations/{conversation_id}", headers=headers).json()["messages"]
+    return [m["details"] for m in messages if m["role"] == "tool"]
+
+
+def test_result_has_the_documented_form_and_sources_go_in_the_event_and_the_message(
     client, alice, fake_llm, test_database_url
 ):
     ready_user(client, alice)
@@ -65,14 +72,22 @@ def test_result_has_the_documented_form_and_ids_go_in_the_event(
         test_database_url, user_id, fake_llm, "Oat milk", "Buy oat milk on the way home.",
         created=datetime(2026, 9, 20, tzinfo=UTC), tags=["groceries"],
     )
+    other_id = store(
+        test_database_url, user_id, fake_llm, "Shopping list", "Milk, bread, eggs.",
+        created=datetime(2026, 9, 21, tzinfo=UTC), tags=["shopping"],
+    )
 
-    response, content = search_in_chat(client, alice, fake_llm, {"query": "milk"})
+    response, content = search_in_chat(client, alice, fake_llm, {"query": "oat milk"})
 
-    assert content.startswith("1 of your thoughts match (best first):\n")
+    assert content.startswith("2 of your thoughts match (best first):\n")
     assert "1. Oat milk · 2026-09-20 · #groceries\n   Buy oat milk on the way home." in content
-    assert thought_id not in content
+    assert thought_id not in content and other_id not in content
     [end] = [e for e in events_of(response, "tool") if e["phase"] == "end"]
-    assert end["thought_ids"] == [thought_id]
+    assert end["sources"] == [
+        {"id": thought_id, "title": "Oat milk", "created_at": "2026-09-20T00:00:00+00:00", "tags": ["groceries"]},
+        {"id": other_id, "title": "Shopping list", "created_at": "2026-09-21T00:00:00+00:00", "tags": ["shopping"]},
+    ]
+    assert stored_tool_details(client, alice) == [{"sources": end["sources"]}]
     assert events_of(response, "done")
 
 
@@ -103,15 +118,18 @@ def test_malformed_since_is_a_tool_argument_error(client, alice, fake_llm):
 def test_no_thoughts_gives_no_match(client, alice, fake_llm):
     ready_user(client, alice)
     _, content = search_in_chat(client, alice, fake_llm, {"query": "milk"})
-    assert content == "No filed thoughts match."
+    assert content == NO_MATCH
 
 
 def test_no_match(client, alice, fake_llm, test_database_url):
     ready_user(client, alice)
     user_id = user_id_for(client, alice)
     store(test_database_url, user_id, fake_llm, "Oat milk", "Buy oat milk on the way home.")
-    _, content = search_in_chat(client, alice, fake_llm, {"query": "quantum physics"})
-    assert content == "No filed thoughts match."
+    response, content = search_in_chat(client, alice, fake_llm, {"query": "quantum physics"})
+    assert content == NO_MATCH
+    [end] = [e for e in events_of(response, "tool") if e["phase"] == "end"]
+    assert end["sources"] == []
+    assert stored_tool_details(client, alice) == [{"sources": []}]
 
 
 def test_missing_key_searches_by_words_and_the_turn_ends_normally(

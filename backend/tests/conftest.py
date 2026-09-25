@@ -83,6 +83,10 @@ def test_database_url(tmp_path, settings_env) -> str:
         async with engine.begin() as connection:
             if connection.dialect.name == "postgresql":
                 await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                # Tables left by an older schema may lack a constraint that
+                # drop_all would drop by name first.
+                for table in Base.metadata.sorted_tables:
+                    await connection.execute(text(f'DROP TABLE IF EXISTS "{table.name}" CASCADE'))
             await connection.run_sync(Base.metadata.drop_all)
             await connection.run_sync(Base.metadata.create_all)
         await engine.dispose()

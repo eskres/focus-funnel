@@ -5,7 +5,15 @@ import uuid
 import pytest
 from sqlalchemy import func, select
 
-from app.models import SearchIndex, Thought, ThoughtEmbedding, User
+from app.models import (
+    Conversation,
+    Proposal,
+    SearchIndex,
+    Thought,
+    ThoughtEmbedding,
+    User,
+    UserCategory,
+)
 from app.thoughts.store import store_thought
 from tests.chat_helpers import (
     chat,
@@ -34,12 +42,35 @@ def everything(url, user_id) -> dict[str, int]:
     return run_db(url, lambda session: counts(session, uuid.UUID(user_id)))
 
 
+def add_proposal_and_category(url, user_id):
+    async def work(session):
+        conversation = (
+            await session.execute(select(Conversation).where(Conversation.user_id == uuid.UUID(user_id)))
+        ).scalar_one()
+        session.add(
+            Proposal(
+                conversation_id=conversation.id,
+                user_id=conversation.user_id,
+                position=1,
+                from_position=0,
+                to_position=0,
+                raw_text="hi",
+                parts=[{"title": "t", "summary": "s", "tags": [], "category": None, "thought_id": None}],
+            )
+        )
+        session.add(UserCategory(user_id=conversation.user_id, name="recipe"))
+        await session.commit()
+
+    run_db(url, work)
+
+
 def give_data(client, headers, fake_llm, url) -> str:
     ready_user(client, headers)
     user_id = user_id_for(client, headers)
     fake_llm.queue(text_chunks("Hello!"))
     assert chat(client, headers, "hi").status_code == 200
     store(url, user_id, fake_llm)
+    add_proposal_and_category(url, user_id)
     return user_id
 
 
@@ -48,7 +79,10 @@ def test_delete_removes_everything_of_the_user_only(client, alice, bob, fake_llm
     bob_id = give_data(client, bob, fake_llm, test_database_url)
     before = everything(test_database_url, alice_id)
     bob_before = everything(test_database_url, bob_id)
-    assert all(before[model.__tablename__] > 0 for model in (Thought, SearchIndex, ThoughtEmbedding))
+    assert all(
+        before[model.__tablename__] > 0
+        for model in (Thought, SearchIndex, ThoughtEmbedding, Proposal, UserCategory)
+    )
 
     response = client.delete("/api/me", headers=alice)
 
@@ -64,17 +98,26 @@ def test_delete_removes_everything_of_the_user_only(client, alice, bob, fake_llm
     assert run_db(test_database_url, user_exists) == 0
 
 
-CONTENT = {"thoughts", "search_indexes", "thought_embeddings", "conversations", "messages"}
+CONTENT = {
+    "thoughts",
+    "search_indexes",
+    "thought_embeddings",
+    "conversations",
+    "messages",
+    "proposals",
+}
 
 
-def test_delete_content_keeps_the_account_keys_settings_and_usage(
+def test_delete_content_keeps_the_account_keys_settings_categories_and_usage(
     client, alice, bob, fake_llm, test_database_url
 ):
     alice_id = give_data(client, alice, fake_llm, test_database_url)
     bob_id = give_data(client, bob, fake_llm, test_database_url)
     before = everything(test_database_url, alice_id)
     bob_before = everything(test_database_url, bob_id)
-    assert all(before[table] > 0 for table in CONTENT | {"usage_events", "provider_keys"})
+    assert all(
+        before[table] > 0 for table in CONTENT | {"usage_events", "provider_keys", "user_categories"}
+    )
 
     assert client.delete("/api/me/content", headers=alice).status_code == 204
 

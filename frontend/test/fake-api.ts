@@ -23,10 +23,57 @@ export const delta = (text: string) => `event: delta\ndata: ${JSON.stringify({ t
 export const done = "event: done\ndata: {}\n\n";
 export const conversationEvent = (id: string, title: string) =>
   `event: conversation\ndata: ${JSON.stringify({ id, title })}\n\n`;
-export const toolEvent = (name: string, phase: "start" | "end", summary?: string) =>
-  `event: tool\ndata: ${JSON.stringify({ name, phase, ...(summary ? { summary } : {}) })}\n\n`;
-export const proposalEvent = (proposal: { title: string; summary: string; tags: string[] }) =>
-  `event: proposal\ndata: ${JSON.stringify(proposal)}\n\n`;
+export const toolEvent = (
+  name: string,
+  phase: "start" | "end",
+  summary?: string,
+  sources?: WireSource[],
+) =>
+  `event: tool\ndata: ${JSON.stringify({
+    name,
+    phase,
+    ...(summary ? { summary } : {}),
+    ...(sources ? { sources } : {}),
+  })}\n\n`;
+
+/** A proposal part as the server sends it. */
+export type WirePart = {
+  title: string;
+  summary: string;
+  tags: string[];
+  category?: string | null;
+  thought_id?: string | null;
+};
+
+export const wireProposal = (
+  id: string,
+  parts: WirePart[],
+  position = 2,
+  replacedBy: string | null = null,
+) => ({
+  id,
+  position,
+  parts: parts.map((part) => ({ category: null, thought_id: null, ...part })),
+  replaced_by: replacedBy,
+});
+
+export const proposalEvent = (
+  id: string,
+  parts: WirePart[],
+  position = 2,
+  replaces: string | null = null,
+) =>
+  `event: proposal\ndata: ${JSON.stringify({ ...wireProposal(id, parts, position), replaces })}\n\n`;
+
+/** A source as the server sends it, in the tool event and on a stored tool message. */
+export type WireSource = { id: string; title: string; created_at: string; tags: string[] };
+
+export const source = (id: string, title: string, createdAt: string, tags: string[] = []): WireSource => ({
+  id,
+  title,
+  created_at: createdAt,
+  tags,
+});
 export const usageEvent = (promptTokens: number, contextLength?: number, completionTokens = 20) =>
   `event: usage\ndata: ${JSON.stringify({
     prompt_tokens: promptTokens,
@@ -124,7 +171,19 @@ export const storedMessage = (
   status: "complete",
   error_code: null,
   compacted: false,
+  details: null,
   created_at: "2026-09-23T10:00:00Z",
+  ...extra,
+});
+
+/** A stored conversation with its messages and proposals. */
+export const detail = (extra: Record<string, unknown> = {}) => ({
+  ...summary("c1", "Milk"),
+  last_prompt_tokens: null,
+  held_proposal_id: null,
+  context: { tokens: 0, estimated: true, context_length: null },
+  messages: [],
+  proposals: [],
   ...extra,
 });
 

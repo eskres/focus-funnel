@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { CategoriesSection } from "@/components/categories-settings";
 import { DemoBar } from "@/components/demo/demo-bar";
 import { DeleteDataSection } from "@/components/delete-data-settings";
 import { DemoProvider } from "@/components/demo/demo-context";
@@ -30,6 +31,7 @@ export default async function SettingsPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
           <ProvidersSettings />
           <ModelSettingsSection />
+          <CategoriesSection />
           <UsageSection />
           <DeleteDataSection />
         </main>

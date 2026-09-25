@@ -17,7 +17,8 @@ from app.chat.config import ChatConfig
 from app.chat.context import compact_suggestion
 from app.chat.conversations import next_position
 from app.chat.model_call import ModelCall
-from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, TOOLS, drop_held_note, tool_arguments
+from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, drop_held_note, tool_arguments
+from app.chat.proposal import Filing, proposal_payload, write_proposal
 from app.chat.sse import Event
 from app.chat.usage import record_usage, usage_warning
 from app.chat.tools import (
@@ -106,7 +107,10 @@ class Turn:
         call: ModelCall,
         config: ChatConfig,
         context: list[dict[str, Any]],
+        filing: Filing,
         forced_tool: dict[str, Any] | None = None,
+        command: str | None = None,
+        held_parts: list[dict[str, Any]] | None = None,
         settings: Settings | None = None,
         http_client: httpx2.AsyncClient | None = None,
     ):
@@ -118,13 +122,17 @@ class Turn:
         self.call = call
         self.config = config
         self.context = context
+        self.filing = filing
         self.forced_tool = forced_tool
+        self.command = command
+        # The held proposal's parts the context's note lists, if any.
+        self.held_parts = held_parts
         self._first_chunks: AsyncIterator[Any] | None = None
         # The count before this turn, so the soft limit is noted once per crossing.
         self._tokens_before = conversation.last_prompt_tokens
 
     def _options(self, round_number: int) -> dict[str, Any]:
-        options: dict[str, Any] = {"tools": TOOLS}
+        options: dict[str, Any] = {"tools": self.filing.tools}
         if round_number == 0 and self.forced_tool is not None:
             options["tool_choice"] = self.forced_tool
         return options
@@ -247,6 +255,7 @@ class Turn:
         name = tool_call["function"]["name"]
         summary = ""
         extra: dict[str, Any] = {}
+        details: dict[str, Any] | None = None
         try:
             arguments = tool_arguments(tool_call["function"]["arguments"])
             if name == SEARCH_TOOL:
@@ -261,13 +270,29 @@ class Turn:
                     http_client=self.http_client,
                 )
                 result = found.text
-                extra = {"thought_ids": found.thought_ids}
+                extra = {"sources": found.sources}
+                details = {"sources": found.sources}
                 summary = f"Searched your thoughts for “{search.query}”"
             elif name == PROPOSE_TOOL:
-                proposal = parse_proposal(arguments)
-                drop_held_note(self.context, self.conversation.held_proposal)
-                self.conversation.held_proposal = {**proposal.as_dict(), "position": position}
-                yield ("proposal", proposal.as_dict())
+                parts = parse_proposal(arguments, self.filing.categories)
+                drop_held_note(self.context, self.held_parts)
+                self.held_parts = None
+                proposal, replaced = await write_proposal(
+                    self.session,
+                    self.conversation,
+                    [part.as_dict() for part in parts],
+                    await next_position(self.session, self.conversation),
+                    push=self.command == "push",
+                )
+                details = {"proposal_id": str(proposal.id)}
+                yield (
+                    "proposal",
+                    {
+                        **proposal_payload(proposal),
+                        # The earlier proposal whose card now shows as replaced.
+                        "replaces": str(replaced) if replaced else None,
+                    },
+                )
                 result = PROPOSAL_SHOWN
                 summary = "Proposed a thought to file"
             else:
@@ -282,6 +307,8 @@ class Turn:
             result = f"Error: {exc.message}. Call the tool again with valid arguments."
             summary = "The tool call was not valid"
 
-        await self._store(role="tool", tool_call_id=tool_call["id"], content=result)
+        await self._store(
+            role="tool", tool_call_id=tool_call["id"], content=result, details=details
+        )
         self.context.append({"role": "tool", "tool_call_id": tool_call["id"], "content": result})
         yield ("tool", {"name": name, "phase": "end", "summary": summary, **extra})

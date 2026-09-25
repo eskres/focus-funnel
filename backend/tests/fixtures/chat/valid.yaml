@@ -11,6 +11,8 @@ efforts:
       efforts: [none]
     - match: openai/gpt-oss-*
       efforts: [none, minimal]
+filing:
+  known_tags: 40
 search:
   limit: 8
   candidates: 50

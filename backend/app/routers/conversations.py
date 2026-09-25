@@ -14,7 +14,6 @@ from app.auth import get_current_user
 from app.chat.compaction import store_compaction
 from app.chat.config import ChatConfig, get_chat_config
 from app.chat.context import meter
-from app.chat import tools
 from app.chat.conversations import (
     claim_turn,
     get_conversation,
@@ -25,12 +24,20 @@ from app.chat.conversations import (
 )
 from app.chat.model_info import model_info
 from app.chat.prompt import build_context
-from app.chat.proposal import offer_proposal
+from app.chat.proposal import (
+    held_parts,
+    held_proposal,
+    list_proposals,
+    offer_proposal,
+    proposal_payload,
+)
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.errors import ApiError, ErrorCode
-from app.models import Conversation, User
+from app.models import Conversation, Proposal, User
 from app.providers import get_provider_http_client
+from app.thoughts.categories import clean_name, user_categories
+from app.thoughts.store import add_thought
 
 router = APIRouter(prefix="/api/conversations")
 
@@ -56,7 +63,27 @@ class MessageOut(BaseModel):
     status: str
     error_code: str | None
     compacted: bool
+    # {"proposal_id"} on a propose_thought result, {"sources"} on a search.
+    details: dict[str, Any] | None
     created_at: datetime
+
+
+class ProposalPart(BaseModel):
+    title: str
+    summary: str
+    tags: list[str]
+    category: str | None
+    # Set once the part is saved.
+    thought_id: uuid.UUID | None
+
+
+class ProposalOut(BaseModel):
+    id: uuid.UUID
+    # The position of the tool message the card belongs after.
+    position: int
+    parts: list[ProposalPart]
+    # The later proposal that replaced this one while it was held.
+    replaced_by: uuid.UUID | None
 
 
 class ContextMeter(BaseModel):
@@ -70,9 +97,10 @@ class ContextMeter(BaseModel):
 
 class ConversationDetail(ConversationSummary):
     last_prompt_tokens: int | None
-    held_proposal: dict[str, Any] | None
+    held_proposal_id: uuid.UUID | None
     context: ContextMeter
     messages: list[MessageOut]
+    proposals: list[ProposalOut]
 
 
 class CompactionIn(BaseModel):
@@ -86,20 +114,24 @@ class ConversationList(BaseModel):
     archived: list[ConversationSummary]
 
 
-class ProposalIn(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
-    summary: str = Field(min_length=1)
-    tags: list[str] = Field(default_factory=list, max_length=20)
+class ConfirmIn(BaseModel):
+    # The indexes of the parts the card covers: one, or every part after a merge.
+    parts: list[int] = Field(min_length=1)
+    # The thought store checks the fields, so its messages name them.
+    title: Any = None
+    summary: Any = None
+    tags: Any = None
+    category: str | None = None
 
 
 class ConfirmOutcome(BaseModel):
     saved: bool
+    thought_id: uuid.UUID
     message: str
-    proposal: ProposalIn
 
 
 class OfferedProposal(BaseModel):
-    held_proposal: dict[str, Any] | None
+    proposal: ProposalOut | None
 
 
 class ConversationPatch(BaseModel):
@@ -138,15 +170,16 @@ async def detail(
         if conversation.model is not None
         else None
     )
+    held = held_parts(await held_proposal(session, conversation))
     gauge = meter(
         conversation,
-        build_context(messages, conversation.held_proposal),
+        build_context(messages, held),
         info.context_length if info is not None else None,
     )
     return ConversationDetail(
         **summary(conversation).model_dump(),
         last_prompt_tokens=conversation.last_prompt_tokens,
-        held_proposal=conversation.held_proposal,
+        held_proposal_id=conversation.held_proposal_id,
         context=ContextMeter(
             tokens=gauge.tokens, estimated=gauge.estimated, context_length=gauge.context_length
         ),
@@ -161,9 +194,13 @@ async def detail(
                 status=m.status,
                 error_code=m.error_code,
                 compacted=m.compacted,
+                details=m.details,
                 created_at=m.created_at,
             )
             for m in messages
+        ],
+        proposals=[
+            ProposalOut(**proposal_payload(p)) for p in await list_proposals(session, conversation)
         ],
     )
 
@@ -313,46 +350,105 @@ async def offer_held_proposal(
 ) -> OfferedProposal:
     """The proposal to show before archive or /compact.
 
-    A held proposal comes back as it is. Without one, the model is asked for
-    one (a forced call), and it is held from then on. None means there is
-    nothing to propose, and the action goes ahead.
+    A held proposal with a part not yet saved comes back as it is. Without
+    one, the model is asked for one (a forced call), and it is held from then
+    on. None means there is nothing to propose, and the action goes ahead.
     """
     conversation = await get_conversation(session, user, conversation_id)
-    if conversation.held_proposal is not None:
-        return OfferedProposal(held_proposal=conversation.held_proposal)
+    held = await held_proposal(session, conversation)
+    if held_parts(held) is not None:
+        return OfferedProposal(proposal=ProposalOut(**proposal_payload(held)))
     await claim_turn(session, conversation)
     try:
-        held = await offer_proposal(session, user, conversation, config, settings, http_client)
+        offered = await offer_proposal(session, user, conversation, config, settings, http_client)
+        payload = proposal_payload(offered) if offered is not None else None
     finally:
         await session.rollback()
         await release_turn(session, conversation_id)
-    return OfferedProposal(held_proposal=held)
+    return OfferedProposal(proposal=ProposalOut(**payload) if payload is not None else None)
 
 
-@router.post("/{conversation_id}/proposal/confirm", response_model=ConfirmOutcome)
+def part_already_saved() -> ApiError:
+    return ApiError(
+        409,
+        ErrorCode.PROPOSAL_PART_SAVED,
+        "Part of this proposal was saved already, so it can no longer be merged. "
+        "Save the other parts one by one.",
+    )
+
+
+@router.post(
+    "/{conversation_id}/proposals/{proposal_id}/confirm", response_model=ConfirmOutcome
+)
 async def confirm_proposal(
     conversation_id: uuid.UUID,
-    body: ProposalIn,
+    proposal_id: uuid.UUID,
+    body: ConfirmIn,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+    http_client: httpx2.AsyncClient | None = Depends(get_provider_http_client),
 ) -> ConfirmOutcome:
-    """Hand the proposal, as the user edited it, to thought storage.
+    """Save one card of a proposal, as the user edited it, with the proposal's raw text.
 
-    A saved proposal is no longer held. One that could not be saved stays
-    held, and its text comes back so the card can keep it.
+    The proposal row is locked, so a repeated or concurrent confirm of the
+    same parts stores one thought and answers its id. The thought and the
+    parts' thought_id are committed together.
     """
     conversation = await get_conversation(session, user, conversation_id)
-    title = body.title.strip()
-    summary = body.summary.strip()
-    if not title or not summary:
-        raise ApiError(422, ErrorCode.VALIDATION_ERROR, "A proposal needs a title and a summary.")
-    proposal = tools.Proposal(
-        title=title, summary=summary, tags=[tag.strip() for tag in body.tags if tag.strip()]
+    proposal = (
+        await session.execute(
+            select(Proposal)
+            .where(Proposal.id == proposal_id, Proposal.conversation_id == conversation.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if proposal is None:
+        raise ApiError(404, ErrorCode.NOT_FOUND, "Not found.")
+
+    indexes = sorted(set(body.parts))
+    count = len(proposal.parts)
+    if any(not 0 <= index < count for index in indexes):
+        raise ApiError(422, ErrorCode.VALIDATION_ERROR, f"parts: must be indexes from 0 to {count - 1}")
+    if len(indexes) > 1 and len(indexes) != count:
+        raise ApiError(422, ErrorCode.VALIDATION_ERROR, "parts: name one part, or every part to merge them")
+
+    saved = {proposal.parts[index].get("thought_id") for index in indexes}
+    if len(saved) == 1 and None not in saved:
+        return ConfirmOutcome(saved=True, thought_id=saved.pop(), message="Saved.")
+    if any(saved - {None}):
+        raise part_already_saved()
+
+    category = clean_name(body.category) if body.category is not None else None
+    if category == "":
+        category = None
+    if category is not None and category not in await user_categories(session, user):
+        raise ApiError(
+            422, ErrorCode.VALIDATION_ERROR, f"category: '{category}' is not one of your categories"
+        )
+
+    outcome = await add_thought(
+        session,
+        user,
+        title=body.title,
+        summary=body.summary,
+        tags=body.tags,
+        raw_text=proposal.raw_text,
+        category=category,
+        settings=settings,
+        conversation_id=conversation.id,
+        http_client=http_client,
     )
-    outcome = await tools.save_thought(user, proposal)
-    if outcome.saved:
-        conversation.held_proposal = None
-        await session.commit()
-    return ConfirmOutcome(
-        saved=outcome.saved, message=outcome.message, proposal=ProposalIn(**proposal.as_dict())
-    )
+    thought_id = str(outcome.thought.id)
+    # A new list, so the JSON column is written.
+    proposal.parts = [
+        {**part, "thought_id": thought_id} if index in indexes else part
+        for index, part in enumerate(proposal.parts)
+    ]
+    if conversation.held_proposal_id == proposal.id and not any(
+        part.get("thought_id") is None for part in proposal.parts
+    ):
+        conversation.held_proposal_id = None
+    await session.commit()
+    return ConfirmOutcome(saved=True, thought_id=outcome.thought.id, message="Saved.")

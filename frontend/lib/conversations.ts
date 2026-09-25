@@ -1,6 +1,6 @@
 // Typed client for the stored conversations (`/api/conversations`).
 import { apiFetch } from "@/lib/api";
-import type { Proposal } from "@/lib/sse";
+import { toProposal, toSources, type Proposal, type Source } from "@/lib/sse";
 
 export type ConversationSummary = {
   id: string;
@@ -29,10 +29,15 @@ export type StoredMessage = {
   status: "complete" | "cut" | "failed";
   error_code: string | null;
   compacted: boolean;
+  /** `{proposal_id}` on a propose_thought result, `{sources}` on a search. */
+  details: { proposal_id?: string; sources?: unknown } | null;
   created_at: string;
 };
 
-export type HeldProposal = Proposal & { position: number };
+/** The sources a stored search result holds. */
+export function storedSources(message: StoredMessage): Source[] {
+  return toSources(message.details?.sources);
+}
 
 /** How full the context is. `estimated` is true until the next answer reports the count. */
 export type ContextMeter = {
@@ -43,10 +48,19 @@ export type ContextMeter = {
 
 export type ConversationDetail = ConversationSummary & {
   last_prompt_tokens: number | null;
-  held_proposal: HeldProposal | null;
+  held_proposal_id: string | null;
   context: ContextMeter;
   messages: StoredMessage[];
+  /** Every proposal of the conversation, in position order, with each part's saved state. */
+  proposals: unknown[];
 };
+
+/** The stored proposals, skipping any that does not fit. */
+export function storedProposals(conversation: ConversationDetail): Proposal[] {
+  return (conversation.proposals ?? [])
+    .map(toProposal)
+    .filter((proposal): proposal is Proposal => proposal !== null);
+}
 
 export type ConversationList = {
   conversations: ConversationSummary[];
@@ -61,7 +75,16 @@ export type ConversationChange = {
   reasoning_effort?: string | null;
 };
 
-export type ConfirmOutcome = { saved: boolean; message: string; proposal: Proposal };
+/** A card as the user left it, and the parts it covers: one, or every part after a merge. */
+export type ConfirmRequest = {
+  parts: number[];
+  title: string;
+  summary: string;
+  tags: string[];
+  category: string | null;
+};
+
+export type ConfirmOutcome = { saved: boolean; thought_id: string; message: string };
 
 const BASE = "/api/conversations";
 
@@ -87,19 +110,25 @@ export function deleteConversation(id: string): Promise<void> {
   return apiFetch<void>(`${BASE}/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
-export function confirmProposal(id: string, proposal: Proposal): Promise<ConfirmOutcome> {
-  return apiFetch<ConfirmOutcome>(`${BASE}/${encodeURIComponent(id)}/proposal/confirm`, {
-    method: "POST",
-    body: JSON.stringify(proposal),
-  });
+/** Saves one card of a proposal. Repeating the request answers the same thought. */
+export function confirmProposal(
+  id: string,
+  proposalId: string,
+  card: ConfirmRequest,
+): Promise<ConfirmOutcome> {
+  return apiFetch<ConfirmOutcome>(
+    `${BASE}/${encodeURIComponent(id)}/proposals/${encodeURIComponent(proposalId)}/confirm`,
+    { method: "POST", body: JSON.stringify(card) },
+  );
 }
 
 /** The held proposal to show before archive or /compact; the server asks the model when none is held. */
-export function offerProposal(id: string): Promise<{ held_proposal: HeldProposal | null }> {
-  return apiFetch<{ held_proposal: HeldProposal | null }>(
+export async function offerProposal(id: string): Promise<Proposal | null> {
+  const offered = await apiFetch<{ proposal: unknown }>(
     `${BASE}/${encodeURIComponent(id)}/proposal`,
     { method: "POST" },
   );
+  return toProposal(offered.proposal);
 }
 
 /** Stores an accepted /compact summary. The messages it replaces stay, marked compacted. */

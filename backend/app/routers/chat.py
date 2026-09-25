@@ -32,6 +32,7 @@ from app.chat.loadout import find_loadout_model, get_default_model, get_loadout,
 from app.chat.model_call import open_model_call
 from app.chat.model_info import model_info
 from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, build_context, estimate_tokens, forced_tool
+from app.chat.proposal import filing_for, held_parts, held_proposal
 from app.chat.sse import sse_response
 from app.chat.turn import Turn
 from app.config import Settings, get_settings
@@ -173,9 +174,9 @@ async def chat(
 
         await _ensure_model(session, user, conversation)
 
-        context = build_context(
-            await list_messages(session, conversation), conversation.held_proposal
-        )
+        held = held_parts(await held_proposal(session, conversation))
+        context = build_context(await list_messages(session, conversation), held)
+        filing = await filing_for(session, user, config)
         info = await model_info(
             session, user, conversation.provider_id, conversation.model, settings, http_client
         )
@@ -202,9 +203,12 @@ async def chat(
             call,
             config,
             context=context,
+            filing=filing,
             forced_tool=forced_tool(FORCED_TOOLS[parsed.command])
             if parsed.command in FORCED_TOOLS
             else None,
+            command=parsed.command,
+            held_parts=held,
             settings=settings,
             http_client=http_client,
         )

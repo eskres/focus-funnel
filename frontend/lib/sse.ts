@@ -1,8 +1,8 @@
 // Parses the chat event stream (`POST /api/chat`) into typed events.
 // The backend sends named events, each with a JSON payload:
 //   event: conversation  data: {"id":"...","title":"..."}    first, for a new conversation
-//   event: tool          data: {"name":"...","phase":"start"|"end","summary":"..."}
-//   event: proposal      data: {"title":"...","summary":"...","tags":["..."]}
+//   event: tool          data: {"name":"...","phase":"start"|"end","summary":"...","sources":[...]}
+//   event: proposal      data: {"id":"...","position":2,"parts":[{"title","summary","tags","category","thought_id"}],"replaced_by":null,"replaces":"..."|null}
 //   event: delta         data: {"text":"..."}
 //   event: usage         data: {"prompt_tokens":1,"completion_tokens":1,"context_length":1}
 //   event: notice        data: {"kind":"compact_suggested"|"usage_warning", ...}
@@ -11,15 +11,37 @@
 //   event: error         data: {"error":{"code":"...","message":"..."}}
 //   event: done          data: {}
 
-export type Proposal = { title: string; summary: string; tags: string[] };
+/** One part of a proposal: one card. `thoughtId` is set once it is saved. */
+export type ProposalPart = {
+  title: string;
+  summary: string;
+  tags: string[];
+  category: string | null;
+  thoughtId: string | null;
+};
+
+/**
+ * What one propose_thought call proposed. `position` is its tool message's.
+ * `replacedBy` is the later proposal that replaced it while it was held.
+ */
+export type Proposal = {
+  id: string;
+  position: number;
+  parts: ProposalPart[];
+  replacedBy: string | null;
+};
+
+/** A thought a search showed the model, listed under the answer. */
+export type Source = { id: string; title: string; createdAt: string; tags: string[] };
 
 /** A loadout model large enough to write a /compact summary. */
 export type CompactModel = { providerId: string; model: string; contextLength: number };
 
 export type SseEvent =
   | { type: "conversation"; id: string; title: string }
-  | { type: "tool"; name: string; phase: "start" | "end"; summary?: string }
-  | ({ type: "proposal" } & Proposal)
+  | { type: "tool"; name: string; phase: "start" | "end"; summary?: string; sources?: Source[] }
+  /** `replaces`: the earlier proposal whose cards now show as replaced. */
+  | ({ type: "proposal"; replaces: string | null } & Proposal)
   | { type: "delta"; text: string }
   | { type: "usage"; promptTokens: number; completionTokens: number; contextLength?: number }
   | { type: "notice"; kind: string; data: Record<string, unknown> }
@@ -45,6 +67,57 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function toPart(value: unknown): ProposalPart | null {
+  return isRecord(value) &&
+    typeof value.title === "string" &&
+    typeof value.summary === "string" &&
+    isStringArray(value.tags)
+    ? {
+        title: value.title,
+        summary: value.summary,
+        tags: value.tags,
+        category: typeof value.category === "string" ? value.category : null,
+        thoughtId: typeof value.thought_id === "string" ? value.thought_id : null,
+      }
+    : null;
+}
+
+/** A proposal as the server sends it, in the event and in the stored conversation. */
+export function toProposal(value: unknown): Proposal | null {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.position !== "number" ||
+    !Array.isArray(value.parts)
+  ) {
+    return null;
+  }
+  const parts = value.parts.map(toPart);
+  if (parts.length === 0 || parts.some((part) => part === null)) return null;
+  return {
+    id: value.id,
+    position: value.position,
+    parts: parts as ProposalPart[],
+    replacedBy: typeof value.replaced_by === "string" ? value.replaced_by : null,
+  };
+}
+
+function toSource(value: unknown): Source | null {
+  return isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.title === "string" &&
+    typeof value.created_at === "string" &&
+    isStringArray(value.tags)
+    ? { id: value.id, title: value.title, createdAt: value.created_at, tags: value.tags }
+    : null;
+}
+
+/** The sources a search returned, skipping any entry that does not fit. */
+export function toSources(value: unknown): Source[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(toSource).filter((source): source is Source => source !== null);
 }
 
 function toCompactModel(value: unknown): CompactModel | null {
@@ -80,15 +153,20 @@ function toEvent(name: string, data: string): SseEvent | null {
           name: payload.name,
           phase: payload.phase,
           ...(typeof payload.summary === "string" ? { summary: payload.summary } : {}),
+          ...(Array.isArray(payload.sources) ? { sources: toSources(payload.sources) } : {}),
         };
       }
       return null;
-    case "proposal":
-      return typeof payload.title === "string" &&
-        typeof payload.summary === "string" &&
-        isStringArray(payload.tags)
-        ? { type: "proposal", title: payload.title, summary: payload.summary, tags: payload.tags }
+    case "proposal": {
+      const proposal = toProposal(payload);
+      return proposal
+        ? {
+            type: "proposal",
+            ...proposal,
+            replaces: typeof payload.replaces === "string" ? payload.replaces : null,
+          }
         : null;
+    }
     case "delta":
       return typeof payload.text === "string" ? { type: "delta", text: payload.text } : null;
     case "usage":

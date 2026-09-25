@@ -1,0 +1,15 @@
+# Recall questions for the no-match probe (push-and-pull task 7.1). Every
+# search finds nothing. `pull: true` sends the question as /pull, which
+# forces the search.
+
+cases:
+  - {id: boat, pull: true, message: "what did I decide about the boat?"}
+  - {id: restaurant, pull: false, message: "What was the name of the restaurant Anna recommended?"}
+  - {id: roof, pull: false, message: "remind me what I noted about the roof repair"}
+  - {id: tax, pull: true, message: "Did I file anything about my tax return?"}
+  - {id: speech, pull: false, message: "What were my ideas for the wedding speech?"}
+  - {id: laptop, pull: true, message: "what did I say about the new laptop?"}
+  - {id: books, pull: false, message: "Which books did I want to read this summer?"}
+  - {id: shed, pull: true, message: "what's the plan for the garden shed?"}
+  - {id: doctor, pull: false, message: "What did the doctor tell me last time?"}
+  - {id: gym, pull: false, message: "What was my decision on the gym membership?"}

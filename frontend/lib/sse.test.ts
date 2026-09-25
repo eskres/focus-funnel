@@ -24,8 +24,8 @@ async function collect(stream: ReadableStream<Uint8Array>): Promise<SseEvent[]> 
 const wire =
   'event: conversation\ndata: {"id":"c1","title":"buy oat milk"}\n\n' +
   'event: tool\ndata: {"name":"search_thoughts","phase":"start"}\n\n' +
-  'event: tool\ndata: {"name":"search_thoughts","phase":"end","summary":"Searched"}\n\n' +
-  'event: proposal\ndata: {"title":"Oat milk","summary":"Buy it.","tags":["shopping"]}\n\n' +
+  'event: tool\ndata: {"name":"search_thoughts","phase":"end","summary":"Searched","sources":[{"id":"t1","title":"Oat milk","created_at":"2026-09-20T08:00:00+00:00","tags":["groceries"]}]}\n\n' +
+  'event: proposal\ndata: {"id":"p1","position":2,"parts":[{"title":"Oat milk","summary":"Buy it.","tags":["shopping"],"category":"task","thought_id":null}],"replaced_by":null,"replaces":"p0"}\n\n' +
   'event: delta\ndata: {"text":"Hel"}\n\n' +
   'event: delta\ndata: {"text":"lo"}\n\n' +
   'event: usage\ndata: {"prompt_tokens":550,"completion_tokens":36,"context_length":131072}\n\n' +
@@ -35,8 +35,21 @@ const wire =
 const expected: SseEvent[] = [
   { type: "conversation", id: "c1", title: "buy oat milk" },
   { type: "tool", name: "search_thoughts", phase: "start" },
-  { type: "tool", name: "search_thoughts", phase: "end", summary: "Searched" },
-  { type: "proposal", title: "Oat milk", summary: "Buy it.", tags: ["shopping"] },
+  {
+    type: "tool",
+    name: "search_thoughts",
+    phase: "end",
+    summary: "Searched",
+    sources: [{ id: "t1", title: "Oat milk", createdAt: "2026-09-20T08:00:00+00:00", tags: ["groceries"] }],
+  },
+  {
+    type: "proposal",
+    id: "p1",
+    position: 2,
+    parts: [{ title: "Oat milk", summary: "Buy it.", tags: ["shopping"], category: "task", thoughtId: null }],
+    replacedBy: null,
+    replaces: "p0",
+  },
   { type: "delta", text: "Hel" },
   { type: "delta", text: "lo" },
   { type: "usage", promptTokens: 550, completionTokens: 36, contextLength: 131072 },
@@ -147,7 +160,9 @@ describe("parseSse", () => {
           "event: delta\ndata: not json\n\n" +
           'event: delta\ndata: {"text":5}\n\n' +
           'event: tool\ndata: {"name":"x","phase":"middle"}\n\n' +
-          'event: proposal\ndata: {"title":"x","summary":"y","tags":"z"}\n\n' +
+          'event: proposal\ndata: {"title":"x","summary":"y","tags":["z"]}\n\n' +
+          'event: proposal\ndata: {"id":"p","position":1,"parts":[]}\n\n' +
+          'event: proposal\ndata: {"id":"p","position":1,"parts":[{"title":"x","summary":"y","tags":"z"}]}\n\n' +
           'event: error\ndata: {"error":{"code":5}}\n\n' +
           "event: done\ndata: {}\n\n",
       ),

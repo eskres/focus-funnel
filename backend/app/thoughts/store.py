@@ -192,7 +192,7 @@ async def _index_thought(
     return StoreOutcome(thought=thought, embedded=embedded, error=outcome.error)
 
 
-async def store_thought(
+async def add_thought(
     session: AsyncSession,
     user: User,
     *,
@@ -205,7 +205,8 @@ async def store_thought(
     conversation_id: uuid.UUID | None = None,
     http_client: httpx2.AsyncClient | None = None,
 ) -> StoreOutcome:
-    """Store a thought for the user and index it. Raises validation_error only."""
+    """Add a thought for the user and index it, without committing, so the
+    caller can commit it with other changes. Raises validation_error only."""
     fields = check_fields(title, summary, tags, raw_text, category)
     thought = Thought(
         id=uuid.uuid4(),
@@ -227,9 +228,52 @@ async def store_thought(
         conversation_id=conversation_id,
         http_client=http_client,
     )
-    await session.commit()
-    await session.refresh(thought)
+    await session.flush()
     return outcome
+
+
+async def store_thought(
+    session: AsyncSession,
+    user: User,
+    *,
+    settings: Settings,
+    conversation_id: uuid.UUID | None = None,
+    http_client: httpx2.AsyncClient | None = None,
+    **fields: Any,
+) -> StoreOutcome:
+    """Store a thought for the user and index it. Raises validation_error only."""
+    outcome = await add_thought(
+        session,
+        user,
+        settings=settings,
+        conversation_id=conversation_id,
+        http_client=http_client,
+        **fields,
+    )
+    await session.commit()
+    await session.refresh(outcome.thought)
+    return outcome
+
+
+async def known_tags(session: AsyncSession, user: User, limit: int) -> list[str]:
+    """The user's tags, most used first, then by name, up to limit.
+
+    Postgres only: on another database the user has no known tags.
+    """
+    if session.bind.dialect.name != "postgresql":
+        return []
+    tag = func.unnest(Thought.tags).table_valued("tag").render_derived()
+    uses = func.count()
+    rows = await session.execute(
+        select(tag.c.tag)
+        .select_from(Thought)
+        .join(tag, literal_column("true"))
+        .where(Thought.user_id == user.id)
+        .group_by(tag.c.tag)
+        .order_by(uses.desc(), tag.c.tag)
+        .limit(limit)
+    )
+    return list(rows.scalars())
 
 
 async def get_thought(session: AsyncSession, user: User, thought_id: uuid.UUID) -> Thought:

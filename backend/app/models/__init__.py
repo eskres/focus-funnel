@@ -1,8 +1,9 @@
 """Import every model here so Base.metadata is complete for Alembic."""
 
 from app.db import Base
+from app.models.category import UserCategory
 from app.models.chat_settings import ChatModel, UserSettings
-from app.models.conversation import Conversation, Message
+from app.models.conversation import Conversation, Message, Proposal
 from app.models.provider_key import ProviderKey
 from app.models.thought import SearchIndex, Thought, ThoughtEmbedding
 from app.models.usage_event import UsageEvent
@@ -13,11 +14,13 @@ __all__ = [
     "ChatModel",
     "Conversation",
     "Message",
+    "Proposal",
     "ProviderKey",
     "SearchIndex",
     "Thought",
     "ThoughtEmbedding",
     "UsageEvent",
     "User",
+    "UserCategory",
     "UserSettings",
 ]

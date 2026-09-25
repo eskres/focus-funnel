@@ -49,7 +49,9 @@ def test_the_documented_form_without_ids(env):
         "   Buy oat milk on the way home."
     )
     assert str(t.id) not in result.text
-    assert result.thought_ids == [str(t.id)]
+    assert result.sources == [
+        {"id": str(t.id), "title": "Oat milk", "created_at": "2026-09-20T08:00:00+00:00", "tags": ["groceries"]}
+    ]
 
 
 def test_no_tags_and_an_excerpt(env):
@@ -81,7 +83,8 @@ def test_the_budget_stops_early_and_says_more_matched(env):
     hits = [hit(thought(title=f"Thought {n}", summary="x " * 190)) for n in range(10)]
     result = format_search_result(SearchResult(hits=hits, total=14), config, settings)
     assert len(result.text) <= config.budget_chars + 200
-    shown = len(result.thought_ids)
+    shown = len(result.sources)
+    assert [source["title"] for source in result.sources] == [f"Thought {n}" for n in range(shown)]
     assert 1 <= shown < 10
     assert result.text.startswith(f"{shown} of your thoughts match")
     assert f"{14 - shown} more matched. Add tags or a start date" in result.text
@@ -89,7 +92,10 @@ def test_the_budget_stops_early_and_says_more_matched(env):
 
 def test_no_match(env):
     config, settings = env
-    assert format_search_result(SearchResult(), config, settings).text == NO_MATCH
+    result = format_search_result(SearchResult(), config, settings)
+    assert result.text == NO_MATCH
+    assert result.sources == []
+    assert "Say so plainly" in NO_MATCH
 
 
 def test_words_only_names_the_provider_for_a_missing_key(env):

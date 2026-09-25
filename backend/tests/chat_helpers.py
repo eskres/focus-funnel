@@ -370,3 +370,50 @@ def ready_user(client, headers, *entries: dict):
     save_key(client, headers)
     response = save_models(client, headers, *(entries or (entry(NANO, default=True),)))
     assert response.status_code == 200, response.text
+
+
+def part(title="Oat milk", summary="Buy oat milk tomorrow.", tags=("shopping",), category="task", thought_id=None):
+    """One proposal part as stored."""
+    return {
+        "title": title,
+        "summary": summary,
+        "tags": list(tags),
+        "category": category,
+        "thought_id": thought_id,
+    }
+
+
+def seed_proposal(
+    url: str,
+    conversation_id: str,
+    parts: list[dict],
+    position: int = 1,
+    raw_text: str = "hello",
+    from_position: int = 0,
+    to_position: int = 0,
+    hold: bool = True,
+) -> str:
+    """Store a proposal in a conversation, held unless hold is False; return its id."""
+    import uuid
+
+    from app.models import Conversation, Proposal
+
+    async def work(session):
+        conversation = await session.get(Conversation, uuid.UUID(conversation_id))
+        proposal = Proposal(
+            conversation_id=conversation.id,
+            user_id=conversation.user_id,
+            position=position,
+            from_position=from_position,
+            to_position=to_position,
+            raw_text=raw_text,
+            parts=parts,
+        )
+        session.add(proposal)
+        await session.flush()
+        if hold:
+            conversation.held_proposal_id = proposal.id
+        await session.commit()
+        return str(proposal.id)
+
+    return run_db(url, work)

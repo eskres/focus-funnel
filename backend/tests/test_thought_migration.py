@@ -19,14 +19,8 @@ from tests.conftest import TEST_ISSUER
 from tests.test_provider_key_migration import run_alembic
 
 REVISION = "5e8b2c0d4a17"
+PREVIOUS = "a97e96671d5c"
 TABLES = {"thoughts", "search_indexes", "thought_embeddings"}
-
-
-def test_single_head_is_this_revision():
-    res = run_alembic("sqlite+aiosqlite:///:memory:", "heads")
-    assert res.returncode == 0, res.stderr
-    heads = [line for line in res.stdout.splitlines() if line.strip()]
-    assert heads == [f"{REVISION} (head)"]
 
 
 def sqlite_tables(db_file) -> set[str]:
@@ -40,7 +34,7 @@ def test_upgrade_and_downgrade_on_an_empty_sqlite_database(tmp_path):
     assert run_alembic(db_url, "upgrade", "head").returncode == 0
     assert TABLES <= sqlite_tables(db_file)
 
-    res = run_alembic(db_url, "downgrade", "-1")
+    res = run_alembic(db_url, "downgrade", PREVIOUS)
     assert res.returncode == 0, res.stderr
     assert not TABLES & sqlite_tables(db_file)
 
@@ -113,7 +107,7 @@ def test_upgrade_and_downgrade_on_an_empty_postgres_database():
         res = run_alembic(db_url, "check")
         assert res.returncode == 0, res.stdout + res.stderr
         assert embedding_storage(db_url) == "m"
-        res = run_alembic(db_url, "downgrade", "-1")
+        res = run_alembic(db_url, "downgrade", PREVIOUS)
         assert res.returncode == 0, res.stderr
         res = run_alembic(db_url, "upgrade", "head")
         assert res.returncode == 0, res.stderr
