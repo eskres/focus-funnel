@@ -351,7 +351,7 @@ async def offer_held_proposal(
     """The proposal to show before archive or /compact.
 
     A held proposal with a part not yet saved comes back as it is. Without
-    one, the model is asked for one (a forced call), and it is held from then
+    one, the model is asked for one, which it may decline, and it is held from then
     on. None means there is nothing to propose, and the action goes ahead.
     """
     conversation = await get_conversation(session, user, conversation_id)

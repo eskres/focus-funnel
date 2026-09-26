@@ -187,11 +187,25 @@ def held_proposal_note(parts: list[dict[str, Any]]) -> str:
     return HELD_PROPOSAL_NOTE.format(parts="\n\n".join(blocks))
 
 
+OFFER_NOTE = (
+    "The user is about to archive or compact this conversation. If the "
+    "conversation since the last filed thought holds something worth keeping, "
+    "such as a decision, a task, an idea, or facts to look up later, call "
+    "propose_thought for it. Leave out greetings, thanks, and small talk. If "
+    "nothing is worth keeping, reply with one word, nothing, and call no tool."
+)
+
 FILED_NOTE = (
     "These thoughts were already filed from this conversation:\n{titles}\n"
-    "Propose only what the conversation added since, and do not propose any of "
-    "these again, in any wording."
+    "Do not propose them again. New facts or decisions about the same topic "
+    "may still be worth keeping."
 )
+
+
+def offer_note(filed: list[str]) -> str:
+    """The note for the call before archive or /compact, with the thoughts
+    this conversation already filed, if any."""
+    return OFFER_NOTE if not filed else OFFER_NOTE + "\n\n" + filed_note(filed)
 
 
 def filed_note(titles: list[str]) -> str:

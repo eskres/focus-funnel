@@ -3,8 +3,8 @@
 Each propose_thought call writes one proposals row. Its raw text is fixed
 there, from the user's own messages, never from the browser. The held
 proposal is the latest with a part not yet saved; the app offers it before
-archive and /compact. When none is held, the model is asked for one with a
-forced propose_thought call.
+archive and /compact. When none is held and the user said something since
+the last saved proposal, the model is asked for one, and may decline.
 """
 
 import logging
@@ -23,8 +23,7 @@ from app.chat.model_call import ModelCall, open_model_call
 from app.chat.prompt import (
     PROPOSE_TOOL,
     build_context,
-    filed_note,
-    forced_tool,
+    offer_note,
     text_for_model,
     tool_arguments,
     tools_for,
@@ -191,18 +190,19 @@ def proposal_payload(proposal: Proposal) -> dict[str, Any]:
     }
 
 
-async def forced_proposal(
+async def asked_proposal(
     session: AsyncSession,
     call: ModelCall,
     context: list[dict[str, Any]],
     filing: Filing,
     conversation_id: uuid.UUID | None = None,
 ) -> list[dict[str, Any]] | None:
-    """Ask the model for a proposal. Returns its parts, or None when the
-    model's arguments do not make a proposal."""
-    completion = await call.complete(
-        context, tools=filing.tools, tool_choice=forced_tool(PROPOSE_TOOL)
-    )
+    """Ask the model for a proposal, which it may decline. Returns its parts,
+    or None when it calls no tool or its arguments do not make a proposal.
+
+    Not forced: a forced call makes the model propose something even when
+    only small talk is left."""
+    completion = await call.complete(context, tools=filing.tools)
     await record_usage(session, call, "proposal", *completion_usage(completion), conversation_id)
     choices = completion.choices or []
     tool_calls = (choices[0].message.tool_calls if choices else None) or []
@@ -215,7 +215,7 @@ async def forced_proposal(
             )
             return [part.as_dict() for part in parts]
         except (ValueError, ToolArgumentError):
-            logger.info("The forced proposal call returned arguments that do not fit")
+            logger.info("The offered proposal call returned arguments that do not fit")
     return None
 
 
@@ -262,10 +262,8 @@ async def offer_proposal(
     )
     try:
         context = build_context(messages)
-        titles = filed_titles(proposals)
-        if titles:
-            context.append({"role": "system", "content": filed_note(titles)})
-        parts = await forced_proposal(session, call, context, filing, conversation.id)
+        context.append({"role": "system", "content": offer_note(filed_titles(proposals))})
+        parts = await asked_proposal(session, call, context, filing, conversation.id)
     finally:
         await call.aclose()
     if parts is None:

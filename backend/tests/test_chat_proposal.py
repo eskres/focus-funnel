@@ -136,7 +136,7 @@ def test_a_new_topic_replaces_the_held_proposal(client, alice, fake_llm, test_da
 # --- the forced proposal call ---
 
 
-def test_the_forced_call_returns_and_holds_a_proposal(client, alice, fake_llm, test_database_url):
+def test_the_offer_call_returns_and_holds_a_proposal(client, alice, fake_llm, test_database_url):
     ready_user(client, alice)
     conversation_id = seed_conversation(
         test_database_url, client, alice, messages=("I must buy oat milk", "Noted.")
@@ -150,7 +150,9 @@ def test_the_forced_call_returns_and_holds_a_proposal(client, alice, fake_llm, t
     assert offered["parts"] == [{**PROPOSAL, "thought_id": None}]
     assert offered["position"] == 1
     request = fake_llm.chat_requests[0]
-    assert request["tool_choice"] == {"type": "function", "function": {"name": "propose_thought"}}
+    # Not forced, so the model can decline when only small talk is left.
+    assert "tool_choice" not in request
+    assert system_notes(request)[-1].startswith("The user is about to archive or compact")
     assert "stream" not in request
     body = stored(client, alice, conversation_id)
     assert body["held_proposal_id"] == offered["id"]
@@ -214,11 +216,20 @@ def test_a_later_discussion_is_offered_without_what_was_filed(
 
     assert offered["parts"][0]["thought_id"] is None
     [request] = fake_llm.chat_requests
-    assert system_notes(request)[-1] == (
+    assert system_notes(request)[-1].endswith(
         "These thoughts were already filed from this conversation:\n- Oat milk\n"
-        "Propose only what the conversation added since, and do not propose any of "
-        "these again, in any wording."
+        "Do not propose them again. New facts or decisions about the same topic "
+        "may still be worth keeping."
     )
+
+
+def test_an_offer_the_model_declines_offers_nothing(client, alice, fake_llm, test_database_url):
+    ready_user(client, alice)
+    conversation_id = seed_conversation(test_database_url, client, alice, messages=("thanks", "Any time."))
+    fake_llm.queue(completion("nothing"))
+
+    assert offer(client, alice, conversation_id).json() == {"proposal": None}
+    assert proposals(test_database_url, conversation_id) == []
 
 
 def test_a_conversation_without_a_discussion_has_nothing_to_offer(
