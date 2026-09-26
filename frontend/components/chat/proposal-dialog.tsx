@@ -54,7 +54,7 @@ export function ProposalDialog({ offer, onClose }: { offer: HeldOffer | null; on
 
   return (
     <Dialog open={offer !== null} onOpenChange={(next) => !next && onClose()}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Before you go on</DialogTitle>
           <DialogDescription>
