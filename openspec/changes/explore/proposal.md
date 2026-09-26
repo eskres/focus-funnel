@@ -19,7 +19,9 @@ Two parts were left. The first, showing which past thoughts informed an answer w
 - `thought-origin`: The link from a saved thought to its conversation, how the detail view shows it, and opening the conversation at the proposal card.
 
 ### Modified Capabilities
-None. The origin's display and the address that opens a conversation at a card are in `thought-origin`, because `thought-detail-view` is not a main spec until `push-and-pull` is archived.
+- `conversation-agent`: two added requirements, from bugs found while testing this change: one proposal per answer, and the offer before archive or `/compact` may propose nothing. Neither changes an existing requirement.
+
+The origin's display and the address that opens a conversation at a card are in `thought-origin`, because `thought-detail-view` is not a main spec until `push-and-pull` is archived.
 
 ## Impact
 
