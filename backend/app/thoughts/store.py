@@ -9,6 +9,7 @@ fail a store. These operations run on Postgres only.
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import httpx2
@@ -19,7 +20,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.chat.config import get_chat_config
 from app.config import Settings
 from app.errors import ApiError, ErrorCode
-from app.models import SearchIndex, Thought, ThoughtEmbedding, User
+from app.models import Conversation, Proposal, SearchIndex, Thought, ThoughtEmbedding, User
 from app.thoughts.chunking import Piece, pieces
 from app.thoughts.indexing import (
     ACTIVE,
@@ -203,10 +204,14 @@ async def add_thought(
     category: Any = None,
     settings: Settings,
     conversation_id: uuid.UUID | None = None,
+    proposal_id: uuid.UUID | None = None,
     http_client: httpx2.AsyncClient | None = None,
 ) -> StoreOutcome:
     """Add a thought for the user and index it, without committing, so the
-    caller can commit it with other changes. Raises validation_error only."""
+    caller can commit it with other changes. Raises validation_error only.
+
+    conversation_id is for the embedding's usage record; proposal_id is the
+    thought's origin, the proposal it was saved from."""
     fields = check_fields(title, summary, tags, raw_text, category)
     thought = Thought(
         id=uuid.uuid4(),
@@ -216,6 +221,7 @@ async def add_thought(
         tags=fields.tags,
         raw_text=fields.raw_text,
         category=fields.category,
+        proposal_id=proposal_id,
         search_tsv=search_vector(fields.title, fields.tags, fields.summary, fields.raw_text),
     )
     outcome = await _index_thought(
@@ -286,6 +292,46 @@ async def get_thought(session: AsyncSession, user: User, thought_id: uuid.UUID) 
     if thought is None:
         raise thought_not_found()
     return thought
+
+
+@dataclass
+class ThoughtOrigin:
+    """The conversation and proposal a thought was saved from, as they are now."""
+
+    conversation_id: uuid.UUID
+    conversation_title: str
+    archived: bool
+    proposal_id: uuid.UUID
+    proposed_at: datetime
+
+
+async def get_thought_with_origin(
+    session: AsyncSession, user: User, thought_id: uuid.UUID
+) -> tuple[Thought, ThoughtOrigin | None]:
+    """The user's thought and its origin, in one query, or not_found as get_thought."""
+    row = (
+        await session.execute(
+            select(Thought, Proposal.created_at, Conversation)
+            .outerjoin(Proposal, Proposal.id == Thought.proposal_id)
+            .outerjoin(
+                Conversation,
+                (Conversation.id == Proposal.conversation_id) & (Conversation.user_id == user.id),
+            )
+            .where(Thought.id == thought_id, Thought.user_id == user.id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise thought_not_found()
+    thought, proposed_at, conversation = row
+    if conversation is None:
+        return thought, None
+    return thought, ThoughtOrigin(
+        conversation_id=conversation.id,
+        conversation_title=conversation.title,
+        archived=conversation.archived_at is not None,
+        proposal_id=thought.proposal_id,
+        proposed_at=proposed_at,
+    )
 
 
 _UNSET: Any = object()

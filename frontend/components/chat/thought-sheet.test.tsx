@@ -20,7 +20,7 @@ import { Chat } from "./chat";
 vi.mock("@/lib/redirect-to-login", () => ({ redirectToLogin: vi.fn() }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
-  usePathname: () => "/app",
+  usePathname: () => window.location.pathname,
 }));
 
 const THOUGHT = {

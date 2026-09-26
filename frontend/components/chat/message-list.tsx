@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ChatError } from "@/components/chat/chat-error";
 import { ProposalGroup } from "@/components/chat/proposal-card";
@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { ApiError } from "@/lib/api";
 import type { Proposal, Source } from "@/lib/sse";
+import { useProposalAnchor } from "@/lib/thought-link";
 import { cn } from "@/lib/utils";
 
 export type ToolIndication = {
@@ -44,6 +45,9 @@ const runningLabels: Record<string, string> = {
   propose_thought: "Proposing a thought to file…",
 };
 
+// How long a card an origin opened stays ringed.
+const MARK_MS = 2000;
+
 const doneLabels: Record<string, string> = {
   search_thoughts: "Searched your thoughts",
   propose_thought: "Proposed a thought to file",
@@ -67,14 +71,51 @@ export function MessageList({
   onRetry: (answer: AnswerMessage) => void;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLOListElement>(null);
+  const anchor = useProposalAnchor();
+  const [marked, setMarked] = useState<string | null>(null);
+  const loaded = useRef(false);
+  const seenRequest = useRef(anchor.request);
+
+  /** Scroll to the proposal card and ring it; false when it is not in the list. */
+  function showProposal(id: string | null): boolean {
+    if (!id) return false;
+    const group = [...(listRef.current?.querySelectorAll<HTMLElement>("[data-proposal-id]") ?? [])].find(
+      (element) => element.dataset.proposalId === id,
+    );
+    if (!group) return false;
+    group.scrollIntoView?.({ block: "center" });
+    setMarked(id);
+    return true;
+  }
 
   useEffect(() => {
+    // The first messages are the conversation's load: an origin address shows
+    // its card instead of the end, for that load only.
+    const first = !loaded.current;
+    loaded.current = true;
+    if (first && showProposal(anchor.id)) return;
     endRef.current?.scrollIntoView?.({ block: "end" });
+    // Only a change of messages scrolls here; the anchor has its own effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
+
+  // An origin opened in this conversation, with its messages already shown.
+  useEffect(() => {
+    if (anchor.request === seenRequest.current) return;
+    seenRequest.current = anchor.request;
+    showProposal(anchor.id);
+  }, [anchor]);
+
+  useEffect(() => {
+    if (!marked) return;
+    const timer = setTimeout(() => setMarked(null), MARK_MS);
+    return () => clearTimeout(timer);
+  }, [marked]);
 
   return (
     <>
-      <ol className="mx-auto flex w-full max-w-3xl flex-col gap-4" aria-label="Conversation">
+      <ol ref={listRef} className="mx-auto flex w-full max-w-3xl flex-col gap-4" aria-label="Conversation">
         {messages.map((message) =>
           message.role === "summary" ? (
             <li key={message.id} className={message.compacted ? "opacity-60" : undefined}>
@@ -105,6 +146,7 @@ export function MessageList({
               answer={message}
               canAct={canAct}
               onRetry={onRetry}
+              marked={marked}
             />
           ),
         )}
@@ -119,11 +161,14 @@ function Answer({
   answer,
   canAct,
   onRetry,
+  marked,
 }: {
   conversationId: string | undefined;
   answer: AnswerMessage;
   canAct: boolean;
   onRetry: (answer: AnswerMessage) => void;
+  /** The proposal to ring, if it is one of this answer's. */
+  marked: string | null;
 }) {
   // Models often start with a blank line before their text.
   const text = answer.text.trimStart();
@@ -141,7 +186,13 @@ function Answer({
         </p>
       ))}
       {answer.proposals?.map((proposal) => (
-        <ProposalGroup key={proposal.id} conversationId={conversationId} proposal={proposal} />
+        <ProposalGroup
+          key={proposal.id}
+          conversationId={conversationId}
+          proposal={proposal}
+          anchor
+          marked={proposal.id === marked}
+        />
       ))}
       {text && <p className="max-w-[85%] text-sm whitespace-pre-wrap">{text}</p>}
       {answer.sources && <SourcesList sources={answer.sources} />}

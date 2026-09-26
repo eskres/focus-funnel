@@ -141,7 +141,21 @@ def map_provider_error(
         if exc.status_code >= 500:
             return unreachable(provider)
         return request_refused(provider, str(exc))
+    if isinstance(exc, openai.APIError) and not isinstance(exc, openai.APIResponseValidationError):
+        # An error the provider sent inside a stream, after the response
+        # started: it has a message but no status code.
+        if _says_busy(exc.message):
+            return rate_limited(provider)
+        return request_refused(provider, exc.message)
     return None
+
+
+BUSY_PHRASES = ("overload", "capacity", "too many requests", "rate limit")
+
+
+def _says_busy(message: str) -> bool:
+    lowered = message.lower()
+    return any(phrase in lowered for phrase in BUSY_PHRASES)
 
 
 async def check_provider_key(

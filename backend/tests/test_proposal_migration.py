@@ -22,13 +22,6 @@ PREVIOUS = "5e8b2c0d4a17"
 TABLES = {"proposals", "user_categories"}
 
 
-def test_single_head_is_this_revision():
-    res = run_alembic("sqlite+aiosqlite:///:memory:", "heads")
-    assert res.returncode == 0, res.stderr
-    heads = [line for line in res.stdout.splitlines() if line.strip()]
-    assert heads == [f"{REVISION} (head)"]
-
-
 def sqlite_columns(db_file, table: str) -> set[str]:
     with sqlite3.connect(db_file) as conn:
         return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
@@ -48,7 +41,7 @@ def test_upgrade_and_downgrade_on_sqlite(tmp_path):
     assert "held_proposal" not in sqlite_columns(db_file, "conversations")
     assert "details" in sqlite_columns(db_file, "messages")
 
-    res = run_alembic(db_url, "downgrade", "-1")
+    res = run_alembic(db_url, "downgrade", PREVIOUS)
     assert res.returncode == 0, res.stderr
     assert not TABLES & sqlite_tables(db_file)
     assert "held_proposal" in sqlite_columns(db_file, "conversations")
@@ -63,7 +56,7 @@ def test_upgrade_and_downgrade_on_sqlite(tmp_path):
 def test_upgrade_and_downgrade_on_postgres():
     db_url, drop = with_database("ff_proposal_migration")
     try:
-        for step in (("upgrade", "head"), ("check",), ("downgrade", "-1"), ("upgrade", "head")):
+        for step in (("upgrade", "head"), ("check",), ("downgrade", PREVIOUS), ("upgrade", "head")):
             res = run_alembic(db_url, *step)
             assert res.returncode == 0, res.stdout + res.stderr
     finally:

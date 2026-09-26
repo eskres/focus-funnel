@@ -22,6 +22,12 @@ NO_MATCH = (
     "No filed thoughts match. Say so plainly, and do not answer as if the user had "
     "filed something."
 )
+ALREADY_PROPOSED = (
+    "Error: a proposal is already shown in this turn, and nothing was proposed now. "
+    "Do not call propose_thought again in this turn: one proposal holds every "
+    "thought as its parts. Now reply to the user's latest message."
+)
+
 PROPOSAL_SHOWN = (
     "The proposal is now shown to the user as a card they can edit and confirm. "
     "Nothing is saved until they confirm, so do not say it is saved, noted, added, "
