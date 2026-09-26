@@ -188,18 +188,37 @@ def test_an_offer_with_one_part_saved_keeps_both_parts_with_their_state(
     assert fake_llm.chat_requests == []
 
 
-def test_a_held_proposal_with_every_part_saved_is_not_offered(
+def test_nothing_is_offered_when_every_part_is_saved_and_nothing_was_said_since(
     client, alice, fake_llm, test_database_url
 ):
     ready_user(client, alice)
     conversation_id = seed_conversation(test_database_url, client, alice)
+    # The proposal covers the user's only message, at position 0.
     seed_proposal(test_database_url, conversation_id, [part(thought_id=str(uuid.uuid4()))])
+
+    assert offer(client, alice, conversation_id).json() == {"proposal": None}
+    assert fake_llm.chat_requests == []
+
+
+def test_a_later_discussion_is_offered_without_what_was_filed(
+    client, alice, fake_llm, test_database_url
+):
+    ready_user(client, alice)
+    conversation_id = seed_conversation(
+        test_database_url, client, alice, messages=("buy oat milk", "Noted.", "and book the dentist", "OK.")
+    )
+    seed_proposal(test_database_url, conversation_id, [part(title="Oat milk", thought_id=str(uuid.uuid4()))])
     fake_llm.queue(completion(None, tool_calls=[tool_call("propose_thought", {"thoughts": [PROPOSAL]})]))
 
     offered = offer(client, alice, conversation_id).json()["proposal"]
 
-    assert len(fake_llm.chat_requests) == 1
     assert offered["parts"][0]["thought_id"] is None
+    [request] = fake_llm.chat_requests
+    assert system_notes(request)[-1] == (
+        "These thoughts were already filed from this conversation:\n- Oat milk\n"
+        "Propose only what the conversation added since, and do not propose any of "
+        "these again, in any wording."
+    )
 
 
 def test_a_conversation_without_a_discussion_has_nothing_to_offer(

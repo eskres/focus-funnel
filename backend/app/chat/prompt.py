@@ -187,6 +187,18 @@ def held_proposal_note(parts: list[dict[str, Any]]) -> str:
     return HELD_PROPOSAL_NOTE.format(parts="\n\n".join(blocks))
 
 
+FILED_NOTE = (
+    "These thoughts were already filed from this conversation:\n{titles}\n"
+    "Propose only what the conversation added since, and do not propose any of "
+    "these again, in any wording."
+)
+
+
+def filed_note(titles: list[str]) -> str:
+    """The note for an offered proposal: the thoughts this conversation already filed."""
+    return FILED_NOTE.format(titles="\n".join(f"- {title}" for title in titles))
+
+
 def drop_held_note(context: list[dict[str, Any]], held_parts: list[dict[str, Any]] | None) -> None:
     """Remove the held-proposal note once the turn has proposed, so the model
     does not follow the note again in the next round."""
