@@ -62,6 +62,11 @@ class Thought(Base):
     raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list[str]] = mapped_column(TagsType, nullable=False, default=list)
+    # The proposal the thought was saved from, and so its conversation. Deleting
+    # the conversation deletes the proposal and clears this; the thought stays.
+    proposal_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("proposals.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     # Only the database reads it, so it is not loaded with the row.
     search_tsv: Mapped[str | None] = mapped_column(TsVectorType, nullable=True, deferred=True)
     created_at: Mapped[datetime] = mapped_column(

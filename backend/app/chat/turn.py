@@ -22,6 +22,7 @@ from app.chat.proposal import Filing, proposal_payload, write_proposal
 from app.chat.sse import Event
 from app.chat.usage import record_usage, usage_warning
 from app.chat.tools import (
+    ALREADY_PROPOSED,
     PROPOSAL_SHOWN,
     ToolArgumentError,
     parse_proposal,
@@ -130,6 +131,8 @@ class Turn:
         self._first_chunks: AsyncIterator[Any] | None = None
         # The count before this turn, so the soft limit is noted once per crossing.
         self._tokens_before = conversation.last_prompt_tokens
+        # One proposal per turn: a second propose_thought call is refused.
+        self._proposed = False
 
     def _options(self, round_number: int) -> dict[str, Any]:
         options: dict[str, Any] = {"tools": self.filing.tools}
@@ -273,6 +276,9 @@ class Turn:
                 extra = {"sources": found.sources}
                 details = {"sources": found.sources}
                 summary = f"Searched your thoughts for “{search.query}”"
+            elif name == PROPOSE_TOOL and self._proposed:
+                result = ALREADY_PROPOSED
+                summary = "Already proposed in this answer"
             elif name == PROPOSE_TOOL:
                 parts = parse_proposal(arguments, self.filing.categories)
                 drop_held_note(self.context, self.held_parts)
@@ -293,6 +299,7 @@ class Turn:
                         "replaces": str(replaced) if replaced else None,
                     },
                 )
+                self._proposed = True
                 result = PROPOSAL_SHOWN
                 summary = "Proposed a thought to file"
             else:

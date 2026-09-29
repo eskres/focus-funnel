@@ -136,7 +136,7 @@ def test_a_new_topic_replaces_the_held_proposal(client, alice, fake_llm, test_da
 # --- the forced proposal call ---
 
 
-def test_the_forced_call_returns_and_holds_a_proposal(client, alice, fake_llm, test_database_url):
+def test_the_offer_call_returns_and_holds_a_proposal(client, alice, fake_llm, test_database_url):
     ready_user(client, alice)
     conversation_id = seed_conversation(
         test_database_url, client, alice, messages=("I must buy oat milk", "Noted.")
@@ -150,7 +150,9 @@ def test_the_forced_call_returns_and_holds_a_proposal(client, alice, fake_llm, t
     assert offered["parts"] == [{**PROPOSAL, "thought_id": None}]
     assert offered["position"] == 1
     request = fake_llm.chat_requests[0]
-    assert request["tool_choice"] == {"type": "function", "function": {"name": "propose_thought"}}
+    # Not forced, so the model can decline when only small talk is left.
+    assert "tool_choice" not in request
+    assert system_notes(request)[-1].startswith("The user is about to archive or compact")
     assert "stream" not in request
     body = stored(client, alice, conversation_id)
     assert body["held_proposal_id"] == offered["id"]
@@ -188,18 +190,46 @@ def test_an_offer_with_one_part_saved_keeps_both_parts_with_their_state(
     assert fake_llm.chat_requests == []
 
 
-def test_a_held_proposal_with_every_part_saved_is_not_offered(
+def test_nothing_is_offered_when_every_part_is_saved_and_nothing_was_said_since(
     client, alice, fake_llm, test_database_url
 ):
     ready_user(client, alice)
     conversation_id = seed_conversation(test_database_url, client, alice)
+    # The proposal covers the user's only message, at position 0.
     seed_proposal(test_database_url, conversation_id, [part(thought_id=str(uuid.uuid4()))])
+
+    assert offer(client, alice, conversation_id).json() == {"proposal": None}
+    assert fake_llm.chat_requests == []
+
+
+def test_a_later_discussion_is_offered_without_what_was_filed(
+    client, alice, fake_llm, test_database_url
+):
+    ready_user(client, alice)
+    conversation_id = seed_conversation(
+        test_database_url, client, alice, messages=("buy oat milk", "Noted.", "and book the dentist", "OK.")
+    )
+    seed_proposal(test_database_url, conversation_id, [part(title="Oat milk", thought_id=str(uuid.uuid4()))])
     fake_llm.queue(completion(None, tool_calls=[tool_call("propose_thought", {"thoughts": [PROPOSAL]})]))
 
     offered = offer(client, alice, conversation_id).json()["proposal"]
 
-    assert len(fake_llm.chat_requests) == 1
     assert offered["parts"][0]["thought_id"] is None
+    [request] = fake_llm.chat_requests
+    assert system_notes(request)[-1].endswith(
+        "These thoughts were already filed from this conversation:\n- Oat milk\n"
+        "Do not propose them again. New facts or decisions about the same topic "
+        "may still be worth keeping."
+    )
+
+
+def test_an_offer_the_model_declines_offers_nothing(client, alice, fake_llm, test_database_url):
+    ready_user(client, alice)
+    conversation_id = seed_conversation(test_database_url, client, alice, messages=("thanks", "Any time."))
+    fake_llm.queue(completion("nothing"))
+
+    assert offer(client, alice, conversation_id).json() == {"proposal": None}
+    assert proposals(test_database_url, conversation_id) == []
 
 
 def test_a_conversation_without_a_discussion_has_nothing_to_offer(
@@ -274,6 +304,27 @@ def propose(fake_llm, *titles):
     fake_llm.queue(
         tool_call_chunks("propose_thought", json.dumps({"thoughts": thoughts})), text_chunks("Noted.")
     )
+
+
+def test_a_second_proposal_in_one_turn_is_refused(client, alice, fake_llm, test_database_url):
+    ready_user(client, alice)
+    lisbon = json.dumps({"thoughts": [{"title": "Lisbon", "summary": "Trip.", "tags": [], "category": "decision"}]})
+    fake_llm.queue(
+        tool_call_chunks("propose_thought", lisbon),
+        tool_call_chunks("propose_thought", lisbon),
+        text_chunks("Ready to confirm."),
+    )
+
+    response = chat(client, alice, "3 nights in Lisbon, decided")
+
+    conversation_id = first_conversation(client, alice)
+    assert len(proposals(test_database_url, conversation_id)) == 1
+    assert len(proposal_events(response)) == 1
+    tool_results = [m for m in fake_llm.chat_requests[-1]["messages"] if m["role"] == "tool"]
+    assert [r["content"].startswith("Error: a proposal is already shown") for r in tool_results] == [
+        False,
+        True,
+    ]
 
 
 def first_conversation(client, headers) -> str:

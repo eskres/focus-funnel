@@ -170,6 +170,8 @@ function ConversationRow({
             aria-label="Conversation title"
             className="h-7 flex-1"
             autoFocus
+            // Selected, so typing replaces the old title.
+            onFocus={(event) => event.currentTarget.select()}
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             onBlur={saveTitle}

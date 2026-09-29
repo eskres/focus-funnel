@@ -92,7 +92,9 @@ describe("Sidebar", () => {
     renderSidebar();
 
     fireEvent.click(within(await openMenu("Rent")).getByRole("menuitem", { name: "Rename" }));
-    const input = await screen.findByLabelText("Conversation title");
+    const input = (await screen.findByLabelText("Conversation title")) as HTMLInputElement;
+    await waitFor(() => expect(input).toHaveFocus());
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, input.value.length]);
     fireEvent.change(input, { target: { value: "Rent plan" } });
     fireEvent.keyDown(input, { key: "Enter" });
 

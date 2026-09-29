@@ -232,6 +232,26 @@ def test_429_means_rate_limited(provider):
     assert mapped.status_code == 429
 
 
+def stream_error(message: str) -> openai.APIError:
+    return openai.APIError(message, httpx2.Request("POST", "https://example.test/v1/chat"), body=None)
+
+
+@pytest.mark.parametrize(
+    "message", ["Service temporarily overloaded", "At capacity", "Rate limit exceeded"]
+)
+def test_a_busy_error_inside_a_stream_means_rate_limited(provider, message):
+    mapped = map_provider_error(stream_error(message), provider, saved_key=True)
+    assert mapped is not None
+    assert mapped.code == ErrorCode.PROVIDER_RATE_LIMITED
+
+
+def test_another_error_inside_a_stream_carries_the_providers_message(provider):
+    mapped = map_provider_error(stream_error("Content filter triggered"), provider, saved_key=True)
+    assert mapped is not None
+    assert mapped.code == ErrorCode.PROVIDER_REQUEST_REFUSED
+    assert mapped.message == f"{provider.label}: Content filter triggered"
+
+
 def test_unmapped_client_error_carries_the_providers_message(provider):
     err = status_error(openai.BadRequestError, 400)
     mapped = map_provider_error(err, provider, saved_key=True)

@@ -2,6 +2,15 @@
 // setting (`/api/settings/categories`).
 import { apiFetch } from "@/lib/api";
 
+/** The conversation and proposal a thought was saved from, as they are now. */
+export type ThoughtOrigin = {
+  conversation_id: string;
+  conversation_title: string;
+  archived: boolean;
+  proposal_id: string;
+  proposed_at: string;
+};
+
 export type Thought = {
   id: string;
   title: string;
@@ -11,6 +20,8 @@ export type Thought = {
   raw_text: string | null;
   created_at: string;
   updated_at: string;
+  /** Null, or missing from an older server, when there is no origin. */
+  origin?: ThoughtOrigin | null;
 };
 
 export function getThought(id: string): Promise<Thought> {

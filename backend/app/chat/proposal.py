@@ -3,8 +3,8 @@
 Each propose_thought call writes one proposals row. Its raw text is fixed
 there, from the user's own messages, never from the browser. The held
 proposal is the latest with a part not yet saved; the app offers it before
-archive and /compact. When none is held, the model is asked for one with a
-forced propose_thought call.
+archive and /compact. When none is held and the user said something since
+the last saved proposal, the model is asked for one, and may decline.
 """
 
 import logging
@@ -23,7 +23,7 @@ from app.chat.model_call import ModelCall, open_model_call
 from app.chat.prompt import (
     PROPOSE_TOOL,
     build_context,
-    forced_tool,
+    offer_note,
     text_for_model,
     tool_arguments,
     tools_for,
@@ -108,6 +108,25 @@ def fit_raw_text(messages: list[Message]) -> RawText:
     return RawText("\n\n".join(text for _, text in kept), kept[0][0], last_position)
 
 
+def discussion_start(proposals: list[Proposal]) -> int:
+    """The position after the latest proposal with a saved part, or 0."""
+    for proposal in reversed(proposals):
+        if any(part.get("thought_id") for part in proposal.parts):
+            return proposal.to_position + 1
+    return 0
+
+
+def filed_titles(proposals: list[Proposal]) -> list[str]:
+    """The titles of the parts saved from these proposals, each once."""
+    titles = [
+        part.get("title", "")
+        for proposal in proposals
+        for part in proposal.parts
+        if part.get("thought_id")
+    ]
+    return list(dict.fromkeys(title for title in titles if title))
+
+
 async def raw_text_for(
     session: AsyncSession, conversation: Conversation, messages: list[Message], *, push: bool
 ) -> RawText:
@@ -120,11 +139,7 @@ async def raw_text_for(
     users = [message for message in messages if message.role == "user"]
     if push:
         return fit_raw_text(users[-1:])
-    start = 0
-    for proposal in reversed(await list_proposals(session, conversation)):
-        if any(part.get("thought_id") for part in proposal.parts):
-            start = proposal.to_position + 1
-            break
+    start = discussion_start(await list_proposals(session, conversation))
     discussion = [message for message in users if message.position >= start] or users[-1:]
     return fit_raw_text(discussion)
 
@@ -175,18 +190,19 @@ def proposal_payload(proposal: Proposal) -> dict[str, Any]:
     }
 
 
-async def forced_proposal(
+async def asked_proposal(
     session: AsyncSession,
     call: ModelCall,
     context: list[dict[str, Any]],
     filing: Filing,
     conversation_id: uuid.UUID | None = None,
 ) -> list[dict[str, Any]] | None:
-    """Ask the model for a proposal. Returns its parts, or None when the
-    model's arguments do not make a proposal."""
-    completion = await call.complete(
-        context, tools=filing.tools, tool_choice=forced_tool(PROPOSE_TOOL)
-    )
+    """Ask the model for a proposal, which it may decline. Returns its parts,
+    or None when it calls no tool or its arguments do not make a proposal.
+
+    Not forced: a forced call makes the model propose something even when
+    only small talk is left."""
+    completion = await call.complete(context, tools=filing.tools)
     await record_usage(session, call, "proposal", *completion_usage(completion), conversation_id)
     choices = completion.choices or []
     tool_calls = (choices[0].message.tool_calls if choices else None) or []
@@ -199,7 +215,7 @@ async def forced_proposal(
             )
             return [part.as_dict() for part in parts]
         except (ValueError, ToolArgumentError):
-            logger.info("The forced proposal call returned arguments that do not fit")
+            logger.info("The offered proposal call returned arguments that do not fit")
     return None
 
 
@@ -220,7 +236,10 @@ async def offer_proposal(
     if held_parts(held) is not None:
         return held
     messages = await list_messages(session, conversation)
-    if not any(m.role == "user" and not m.compacted for m in messages):
+    proposals = await list_proposals(session, conversation)
+    # Nothing said since the last saved proposal: nothing new to file.
+    start = discussion_start(proposals)
+    if not any(m.role == "user" and not m.compacted and m.position >= start for m in messages):
         return None
 
     if conversation.model is None:
@@ -242,9 +261,9 @@ async def offer_proposal(
         http_client=http_client,
     )
     try:
-        parts = await forced_proposal(
-            session, call, build_context(messages), filing, conversation.id
-        )
+        context = build_context(messages)
+        context.append({"role": "system", "content": offer_note(filed_titles(proposals))})
+        parts = await asked_proposal(session, call, context, filing, conversation.id)
     finally:
         await call.aclose()
     if parts is None:

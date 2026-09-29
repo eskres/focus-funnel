@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { type MouseEvent, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -12,8 +13,14 @@ import {
 } from "@/components/ui/sheet";
 import { NotFoundError, UnauthenticatedError } from "@/lib/api";
 import { redirectToLogin } from "@/lib/redirect-to-login";
-import { closeThought, useOpenThought } from "@/lib/thought-link";
-import { getThought, type Thought } from "@/lib/thoughts";
+import {
+  closeThought,
+  isOpenConversation,
+  openOriginHere,
+  originHref,
+  useOpenThought,
+} from "@/lib/thought-link";
+import { getThought, type Thought, type ThoughtOrigin } from "@/lib/thoughts";
 
 type Loaded =
   | { id: string; state: "ready"; thought: Thought }
@@ -91,6 +98,7 @@ export function ThoughtSheet() {
               <h3 className="mb-1 text-xs font-medium text-muted-foreground">Summary</h3>
               <p className="whitespace-pre-wrap">{thought.summary}</p>
             </section>
+            {thought.origin && <Origin origin={thought.origin} />}
             {showRaw && (
               <section aria-label="Raw text">
                 <h3 className="mb-1 text-xs font-medium text-muted-foreground">Raw text</h3>
@@ -101,5 +109,37 @@ export function ThoughtSheet() {
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * Where the thought was saved from. The link is a real link, so it can be
+ * copied; a plain click in the conversation it names stays on this page.
+ */
+function Origin({ origin }: { origin: ThoughtOrigin }) {
+  const router = useRouter();
+  const href = originHref(origin.conversation_id, origin.proposal_id);
+
+  function open(event: MouseEvent<HTMLAnchorElement>) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    if (isOpenConversation(origin.conversation_id)) {
+      openOriginHere(origin.conversation_id, origin.proposal_id);
+    } else {
+      router.push(href);
+    }
+  }
+
+  return (
+    <section aria-label="Origin">
+      <h3 className="mb-1 text-xs font-medium text-muted-foreground">From</h3>
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+        <a href={href} onClick={open} className="text-primary underline-offset-4 hover:underline">
+          {origin.conversation_title}
+        </a>
+        <span className="text-muted-foreground">proposed {when(origin.proposed_at)}</span>
+        {origin.archived && <Badge variant="outline">Archived</Badge>}
+      </p>
+    </section>
   );
 }

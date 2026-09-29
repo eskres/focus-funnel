@@ -337,6 +337,20 @@ def test_an_error_mid_stream_is_an_event_with_the_same_code(client, alice, fake_
     assert body["messages"][-1]["status"] == "failed"
 
 
+def test_a_busy_provider_mid_stream_says_to_wait(client, alice, fake_llm):
+    ready_user(client, alice)
+    fake_llm.queue(
+        text_chunks("Half an ans")[:-1] + [{"error": {"message": "Service temporarily overloaded"}}]
+    )
+
+    response = chat(client, alice, "hello")
+
+    assert names(response) == ["conversation", "delta", "error"]
+    assert events_of(response, "error")[0]["error"]["code"] == ErrorCode.PROVIDER_RATE_LIMITED
+    body = stored(client, alice, conversation_id_of(response))
+    assert body["messages"][-1]["status"] == "failed"
+
+
 def test_resending_an_unanswered_message_does_not_store_it_twice(client, alice, fake_llm):
     ready_user(client, alice)
     fake_llm.queue(api_error(500), api_error(500), api_error(500), text_chunks("Hi!"))
