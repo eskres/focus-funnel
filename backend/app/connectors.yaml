@@ -1,0 +1,36 @@
+# MCP connectors (openspec mcp-connectors, design decision 5). Read only when
+# MCP_ENABLED=true; an invalid file then stops the server. MCP_CONNECTORS_PATH
+# points the server at another file. See docs/connectors.md.
+
+# The operator's connectors. Every user sees them and can switch their tools
+# on, but cannot change or remove them. Each entry:
+#   name       the prefix of its tool names: a lowercase letter, then lowercase
+#              letters, digits, or underscores (at most 24 characters)
+#   url        the server's Streamable HTTP endpoint, e.g. http://gcal-mcp:8000/mcp
+#   auth       optional: {kind: bearer, env: VAR} sends "Authorization: Bearer
+#              <value of VAR>"; {kind: header, header: X-Api-Key, env: VAR}
+#              sends that header. The variable must be set at startup.
+#   tools      optional: the server tools to offer; default all
+#   read_only  optional: tools to mark as reads, which run without approval;
+#              trusted over the server's own hint. Must be in tools when given.
+# Example:
+#   - name: calendar
+#     url: http://gcal-mcp:8000/mcp
+#     tools: [list-calendars, list-events, search-events, get-event,
+#             get-freebusy, get-current-time, create-event, update-event]
+#     read_only: [list-calendars, list-events, search-events, get-event,
+#                 get-freebusy, get-current-time]
+connectors: []
+
+# Known servers offered in settings when MCP_USER_CONNECTORS=true. Picking one
+# fills in the add form. auth names only the kind (none, bearer, or header with
+# its header name); the user enters the value.
+catalog:
+  - name: calendar
+    title: Google Calendar
+    description: >-
+      Read your calendar and add events, through a Google Calendar MCP server
+      you run yourself with your own Google OAuth client.
+    url: http://gcal-mcp:8000/mcp
+    auth: {kind: none}
+    guide: https://github.com/eskres/focus-funnel/blob/main/docs/connectors.md#google-calendar

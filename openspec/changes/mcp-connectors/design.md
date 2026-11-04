@@ -207,6 +207,18 @@ What the probe saw, with a placeholder `gcp-oauth.keys.json` mounted at `/config
 - `manage-accounts` starts Google sign-in from inside a chat, and the server's `ENABLED_TOOLS` filter always keeps it, so the operator entry lists its `tools:` without it.
 - A call without tokens answers `isError: true` with "No valid Google account tokens. Use the manage-accounts tool ...", a normal tool error.
 
+### 14. Loading the connector configuration
+
+Task 2.2 settled what decision 5 left open:
+
+- `connectors.yaml` is read and checked at startup only when `MCP_ENABLED=true`, so with connectors off a bad or missing file costs nothing, as the goals ask. `MCP_CONNECTORS_PATH` is a backend setting like the two switches; the loader is `app/connector_config.py` (`get_connector_config`, cached like `get_chat_config`).
+- A variable named by an operator connector's `auth.env` must be set (and not blank) at startup; the value itself is read again at call time and never kept in the loaded configuration.
+- `read_only` must be a subset of `tools` only when `tools` is given; without `tools` it names server tools that do not have to exist yet.
+- Unknown fields are refused, at the top level and in each entry, so a typo such as `read-only` stops startup instead of silently treating every tool as an act.
+- A catalog entry has a `title` (the display name, "Google Calendar") beside its `name` (the suggested connector name, `calendar`), and its `auth` names only the kind and, for `header`, the header name: the user enters the value. Catalog URLs get the user URL checks (http or https, no user info), because picking an entry fills the user's add form; operator URLs must parse as http or https with a host and nothing more.
+- The name and header checks (`name_problem`, `header_problem`) live in the loader module so the connector API (task 5.2) applies the same rules.
+- The `chat.yaml` `connectors` section is required, like every other section; `connect_seconds` and `call_seconds` may be fractions (tests use sub-second timeouts), the other three are whole numbers of at least 1.
+
 ## Risks / Trade-offs
 
 - [Injected text in results talks the model into an action] → acts tools always need a card after connector data enters the turn; results are marked as data; the card shows the real arguments, not the model's description of them.

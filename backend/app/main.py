@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from app.chat.config import get_chat_config
 from app.config import get_settings
+from app.connector_config import get_connector_config
 from app.db import get_engine, get_sessionmaker
 from app.demo import cleanup_loop
 from app.errors import register_error_handlers
@@ -33,6 +34,8 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     check_embedding_provider(settings, get_providers_config())
     get_chat_config()
+    if settings.mcp_enabled:
+        get_connector_config()
     async with get_engine().connect() as connection:
         await check_vector_extension(connection)
     cleanup = None
