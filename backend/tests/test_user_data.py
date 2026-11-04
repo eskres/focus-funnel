@@ -11,19 +11,22 @@ from app.db import create_engine
 from app.models import (
     Base,
     ChatModel,
+    Connector,
     Conversation,
+    ConversationConnector,
     Message,
     Proposal,
     ProviderKey,
     SearchIndex,
     Thought,
     ThoughtEmbedding,
+    ToolAction,
     UsageEvent,
     User,
     UserCategory,
     UserSettings,
 )
-from app.user_data import delete_user_data
+from app.user_data import delete_user_content, delete_user_data
 from tests.conftest import TEST_ISSUER, count_users
 
 # Every table with rows that belong to a user, and how to find that user's rows.
@@ -43,6 +46,11 @@ USER_OWNED = {
     ThoughtEmbedding: lambda user_id: ThoughtEmbedding.thought_id.in_(
         select(Thought.id).where(Thought.user_id == user_id)
     ),
+    Connector: lambda user_id: Connector.user_id == user_id,
+    ConversationConnector: lambda user_id: ConversationConnector.connector_id.in_(
+        select(Connector.id).where(Connector.user_id == user_id)
+    ),
+    ToolAction: lambda user_id: ToolAction.user_id == user_id,
 }
 
 
@@ -97,10 +105,22 @@ async def add_everything(session, user: User) -> None:
         dimension=2,
         status="active",
     )
-    session.add_all([thought, index])
+    connector = Connector(user_id=user.id, name="calendar", source="user", url="http://mcp/x")
+    session.add_all([thought, index, connector])
     await session.flush()
-    session.add(
-        ThoughtEmbedding(index_id=index.id, thought_id=thought.id, chunk=0, embedding=[0.1, 0.2])
+    session.add_all(
+        [
+            ThoughtEmbedding(index_id=index.id, thought_id=thought.id, chunk=0, embedding=[0.1, 0.2]),
+            ConversationConnector(conversation_id=conversation.id, connector_id=connector.id),
+            ToolAction(
+                conversation_id=conversation.id,
+                user_id=user.id,
+                connector_id=connector.id,
+                position=2,
+                tool="create_event",
+                arguments={"title": "x"},
+            ),
+        ]
     )
     await session.commit()
 
@@ -137,3 +157,21 @@ def test_delete_user_data_leaves_nothing_of_that_user_and_keeps_others(test_data
     assert bob_after == bob_before
     assert count_users(test_database_url, "alice") == 0
     assert count_users(test_database_url, "bob") == 1
+
+
+def test_delete_user_content_keeps_connectors_and_drops_links_and_actions(test_database_url):
+    async def run():
+        engine = create_engine(test_database_url, poolclass=NullPool)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as session:
+            alice = await get_or_create_user(session, TEST_ISSUER, "alice")
+            await add_everything(session, alice)
+            await delete_user_content(session, alice)
+            after = await counts(session, alice.id)
+        await engine.dispose()
+        return after
+
+    after = asyncio.run(run())
+    assert after["connectors"] == 1
+    assert after["conversation_connectors"] == 0
+    assert after["tool_actions"] == 0

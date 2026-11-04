@@ -3,6 +3,7 @@
 from app.db import Base
 from app.models.category import UserCategory
 from app.models.chat_settings import ChatModel, UserSettings
+from app.models.connector import Connector, ConversationConnector, ToolAction
 from app.models.conversation import Conversation, Message, Proposal
 from app.models.provider_key import ProviderKey
 from app.models.thought import SearchIndex, Thought, ThoughtEmbedding
@@ -12,13 +13,16 @@ from app.models.user import User
 __all__ = [
     "Base",
     "ChatModel",
+    "Connector",
     "Conversation",
+    "ConversationConnector",
     "Message",
     "Proposal",
     "ProviderKey",
     "SearchIndex",
     "Thought",
     "ThoughtEmbedding",
+    "ToolAction",
     "UsageEvent",
     "User",
     "UserCategory",

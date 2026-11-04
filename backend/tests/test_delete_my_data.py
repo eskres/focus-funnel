@@ -6,11 +6,14 @@ import pytest
 from sqlalchemy import func, select
 
 from app.models import (
+    Connector,
     Conversation,
+    ConversationConnector,
     Proposal,
     SearchIndex,
     Thought,
     ThoughtEmbedding,
+    ToolAction,
     User,
     UserCategory,
 )
@@ -59,6 +62,20 @@ def add_proposal_and_category(url, user_id):
             )
         )
         session.add(UserCategory(user_id=conversation.user_id, name="recipe"))
+        connector = Connector(user_id=conversation.user_id, name="calendar", source="user", url="http://mcp/x")
+        session.add(connector)
+        await session.flush()
+        session.add(ConversationConnector(conversation_id=conversation.id, connector_id=connector.id))
+        session.add(
+            ToolAction(
+                conversation_id=conversation.id,
+                user_id=conversation.user_id,
+                connector_id=connector.id,
+                position=2,
+                tool="create_event",
+                arguments={},
+            )
+        )
         await session.commit()
 
     run_db(url, work)
@@ -81,7 +98,7 @@ def test_delete_removes_everything_of_the_user_only(client, alice, bob, fake_llm
     bob_before = everything(test_database_url, bob_id)
     assert all(
         before[model.__tablename__] > 0
-        for model in (Thought, SearchIndex, ThoughtEmbedding, Proposal, UserCategory)
+        for model in USER_OWNED
     )
 
     response = client.delete("/api/me", headers=alice)
@@ -105,6 +122,8 @@ CONTENT = {
     "conversations",
     "messages",
     "proposals",
+    "conversation_connectors",
+    "tool_actions",
 }
 
 
@@ -116,7 +135,8 @@ def test_delete_content_keeps_the_account_keys_settings_categories_and_usage(
     before = everything(test_database_url, alice_id)
     bob_before = everything(test_database_url, bob_id)
     assert all(
-        before[table] > 0 for table in CONTENT | {"usage_events", "provider_keys", "user_categories"}
+        before[table] > 0
+        for table in CONTENT | {"usage_events", "provider_keys", "user_categories", "connectors"}
     )
 
     assert client.delete("/api/me/content", headers=alice).status_code == 204
