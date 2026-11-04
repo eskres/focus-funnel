@@ -104,6 +104,21 @@ class FilingConfig:
 
 
 @dataclass(frozen=True)
+class ConnectorLimits:
+    """MCP connector limits. See openspec mcp-connectors design decisions 8 to 10."""
+
+    # Switched-on tools across a conversation's connectors (built-ins not counted).
+    max_tools: int
+    # Model calls in one turn while any connector is on, instead of tool_rounds.
+    tool_rounds: int
+    # Seconds to connect and initialize, and to wait for one tools/call.
+    connect_seconds: float
+    call_seconds: float
+    # A tool result is cut to this many characters before the model sees it.
+    result_max_chars: int
+
+
+@dataclass(frozen=True)
 class ChatConfig:
     temperature: TemperatureConfig
     reply_max_tokens: int
@@ -115,6 +130,7 @@ class ChatConfig:
     unsupported_efforts: tuple[EffortRule, ...]
     search: SearchConfig
     filing: FilingConfig
+    connectors: ConnectorLimits
 
     def efforts_for(self, model: str) -> list[str]:
         """The efforts offered for a model: every documented one it is not known to refuse."""
@@ -144,6 +160,13 @@ def _positive_int(raw: dict, name: str, where: str = "") -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ChatConfigError(f"'{where}{name}' must be a whole number of at least 1")
     return value
+
+
+def _positive_number(raw: dict, name: str, where: str = "") -> float:
+    value = raw.get(name)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        raise ChatConfigError(f"'{where}{name}' must be a number above 0")
+    return float(value)
 
 
 def _similarity(value: object, where: str) -> float:
@@ -231,6 +254,18 @@ def _parse_similar(raw: object) -> SimilarConfig:
     return SimilarConfig(**values)
 
 
+def _parse_connectors(raw: object) -> ConnectorLimits:
+    if not isinstance(raw, dict):
+        raise ChatConfigError("'connectors' must be a mapping of connector settings")
+    return ConnectorLimits(
+        max_tools=_positive_int(raw, "max_tools", "connectors."),
+        tool_rounds=_positive_int(raw, "tool_rounds", "connectors."),
+        connect_seconds=_positive_number(raw, "connect_seconds", "connectors."),
+        call_seconds=_positive_number(raw, "call_seconds", "connectors."),
+        result_max_chars=_positive_int(raw, "result_max_chars", "connectors."),
+    )
+
+
 def _parse_temperature(raw: object) -> TemperatureConfig:
     if not isinstance(raw, dict):
         raise ChatConfigError("'temperature' must be a mapping with default, min, and max")
@@ -303,6 +338,7 @@ def load_chat_config(path: str | Path | None = None) -> ChatConfig:
         unsupported_efforts=rules,
         search=_parse_search(raw.get("search")),
         filing=_parse_filing(raw.get("filing")),
+        connectors=_parse_connectors(raw.get("connectors")),
     )
 
 

@@ -7,10 +7,10 @@
 
 ## 2. Settings and configuration
 
-- [ ] 2.1 Add `MCP_ENABLED`, `MCP_USER_CONNECTORS`, and `MCP_CONNECTORS_PATH` to the backend `Settings`, with the demo guard from design decision 5. Check with pytest that both switches default to false, that demo mode with an explicit `MCP_ENABLED=true` fails naming the setting, and that demo mode otherwise forces it off
-- [ ] 2.2 Add the connector configuration loader for `connectors.yaml` (operator connectors and catalog) with the shipped file holding the Google Calendar catalog entry. Check with pytest that a valid file loads, and that a bad name, a duplicate or reserved name, a URL that does not parse, an unknown auth kind, a missing auth environment variable, and a `read_only` tool not in `tools` each fail naming the connector and the field
-- [ ] 2.3 Add the `connectors` section to `chat.yaml` and `ChatConfig` (`max_tools`, `tool_rounds`, `connect_seconds`, `call_seconds`, `result_max_chars`). Check with pytest that each value is checked by name as the other sections are
-- [ ] 2.4 Add the new variables to `.env.example` with a one-line explanation each. Check by reading it against design decision 5
+- [x] 2.1 Add `MCP_ENABLED`, `MCP_USER_CONNECTORS`, and `MCP_CONNECTORS_PATH` to the backend `Settings`, with the demo guard from design decision 5. Check with pytest that both switches default to false, that demo mode with an explicit `MCP_ENABLED=true` fails naming the setting, and that demo mode otherwise forces it off
+- [x] 2.2 Add the connector configuration loader for `connectors.yaml` (operator connectors and catalog) with the shipped file holding the Google Calendar catalog entry. Check with pytest that a valid file loads, and that a bad name, a duplicate or reserved name, a URL that does not parse, an unknown auth kind, a missing auth environment variable, and a `read_only` tool not in `tools` each fail naming the connector and the field
+- [x] 2.3 Add the `connectors` section to `chat.yaml` and `ChatConfig` (`max_tools`, `tool_rounds`, `connect_seconds`, `call_seconds`, `result_max_chars`). Check with pytest that each value is checked by name as the other sections are
+- [x] 2.4 Add the new variables to `.env.example` with a one-line explanation each. Check by reading it against design decision 5
 
 ## 3. Data
 

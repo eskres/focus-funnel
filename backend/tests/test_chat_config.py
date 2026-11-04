@@ -52,6 +52,7 @@ def test_the_shipped_file_loads():
         "efforts",
         "search",
         "filing",
+        "connectors",
     ],
 )
 def test_a_missing_value_fails_naming_it(tmp_path, key):
@@ -148,6 +149,66 @@ def test_a_missing_search_value_fails_naming_it(tmp_path):
     search.pop("excerpt_chars")
     with pytest.raises(ChatConfigError, match="search.excerpt_chars"):
         load_chat_config(write(tmp_path, {**VALID, "search": search}))
+
+
+def test_connector_settings_load():
+    connectors = load_chat_config(FIXTURES / "valid.yaml").connectors
+    assert (connectors.max_tools, connectors.tool_rounds) == (20, 5)
+    assert (connectors.connect_seconds, connectors.call_seconds) == (10, 30)
+    assert connectors.result_max_chars == 8000
+
+
+def test_the_shipped_connector_settings_match_the_design():
+    path = Path(__file__).parent.parent / "app" / "chat" / "chat.yaml"
+    connectors = load_chat_config(path).connectors
+    assert (connectors.max_tools, connectors.tool_rounds) == (20, 5)
+    assert (connectors.connect_seconds, connectors.call_seconds) == (10, 30)
+    assert connectors.result_max_chars == 8000
+
+
+def connectors_with(**change) -> dict:
+    return {**VALID, "connectors": {**VALID["connectors"], **change}}
+
+
+@pytest.mark.parametrize(
+    "name", ["max_tools", "tool_rounds", "connect_seconds", "call_seconds", "result_max_chars"]
+)
+def test_a_missing_connector_value_fails_naming_it(tmp_path, name):
+    connectors = {**VALID["connectors"]}
+    connectors.pop(name)
+    with pytest.raises(ChatConfigError, match=f"connectors.{name}"):
+        load_chat_config(write(tmp_path, {**VALID, "connectors": connectors}))
+
+
+@pytest.mark.parametrize(
+    "change, name",
+    [
+        ({"max_tools": 0}, "connectors.max_tools"),
+        ({"max_tools": 2.5}, "connectors.max_tools"),
+        ({"tool_rounds": -1}, "connectors.tool_rounds"),
+        ({"tool_rounds": True}, "connectors.tool_rounds"),
+        ({"connect_seconds": 0}, "connectors.connect_seconds"),
+        ({"connect_seconds": "10"}, "connectors.connect_seconds"),
+        ({"call_seconds": -0.5}, "connectors.call_seconds"),
+        ({"result_max_chars": 0}, "connectors.result_max_chars"),
+        ({"result_max_chars": "8000"}, "connectors.result_max_chars"),
+    ],
+)
+def test_an_invalid_connector_value_fails_naming_it(tmp_path, change, name):
+    with pytest.raises(ChatConfigError, match=name):
+        load_chat_config(write(tmp_path, connectors_with(**change)))
+
+
+def test_connector_timeouts_may_be_fractions(tmp_path):
+    connectors = load_chat_config(
+        write(tmp_path, connectors_with(connect_seconds=0.5, call_seconds=1.5))
+    ).connectors
+    assert (connectors.connect_seconds, connectors.call_seconds) == (0.5, 1.5)
+
+
+def test_connectors_must_be_a_mapping(tmp_path):
+    with pytest.raises(ChatConfigError, match="'connectors' must be a mapping"):
+        load_chat_config(write(tmp_path, {**VALID, "connectors": 20}))
 
 
 def test_the_file_chooses_no_model():

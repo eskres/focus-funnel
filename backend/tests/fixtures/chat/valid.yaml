@@ -13,6 +13,12 @@ efforts:
       efforts: [none, minimal]
 filing:
   known_tags: 40
+connectors:
+  max_tools: 20
+  tool_rounds: 5
+  connect_seconds: 10
+  call_seconds: 30
+  result_max_chars: 8000
 search:
   limit: 8
   candidates: 50
