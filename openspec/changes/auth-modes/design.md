@@ -152,6 +152,12 @@ The overlay pins `ghcr.io/pocket-id/pocket-id:v2.16.0` (task 1.1) with `APP_URL`
 
 `not_allowed` (403), `demo_session_expired` (401), `demo_full` (503), and `rate_limited` (429, with `Retry-After`). `unauthenticated` and `service_unavailable` keep their meaning. The frontend adds the codes to `ApiErrorCode` with a page or message for each.
 
+### 14. A demo cookie the backend does not know (decided during the 11.4 check, 2026-11-04)
+
+After a restart of the demo overlay wipes the database, or after cleanup has deleted an expired user, the browser still sends its old `ff_demo` value. The backend finds no user for it and answers `401 unauthenticated`, not `demo_session_expired`. The API proxy used to clear the demo cookies only on `demo_session_expired`, so the page sent the visitor to `/auth/login`, which in demo mode redirects straight back, and `proxy.ts` saw the cookie and started no new session: the page reloaded itself in a loop. The API proxy now clears `ff_demo` and `ff_demo_keys` on a backend `401 unauthenticated` too. The page's redirect through `/auth/login` then reaches `proxy.ts` without a cookie, and the visitor gets a new, empty session.
+
+**Alternatives:** clear the cookies in `/auth/login` in demo mode (rejected: any link to `/auth/login` would then drop a live session, while the backend is what knows the value is dead), or answer `demo_session_expired` for an unknown value in the backend (rejected: it changes the meaning of `unauthenticated` that task 5.2's tests pin down, for no gain to the visitor).
+
 ## Risks / Trade-offs
 
 - [A provider does not send `email_verified`, so an allow-list shuts everyone out] → Task 1.1 probes Pocket ID. The failure is closed and the refusal page names the reason, so it is found at once. Without an allow-list the provider's own access rules apply.

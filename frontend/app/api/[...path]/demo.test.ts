@@ -254,6 +254,42 @@ describe("the end of a demo session", () => {
     );
   });
 
+  it("clears the demo cookies when the backend knows no user for the session", async () => {
+    // After a restart wiped the database, or after cleanup deleted the user,
+    // the browser still sends its old value. Keeping the cookie would stop
+    // proxy.ts from starting a new session, and the page would loop through
+    // /auth/login back to itself.
+    backend = await startBackend(
+      json(401, { error: { code: "unauthenticated", message: "Authentication required." } }),
+    );
+    useDemo(backend.url);
+
+    const held = { keys: { nebius: { key: KEY, set_at: Date.now() } }, last_used_at: Date.now() };
+    const response = await GET(visitor(`${APP}/api/me`, {}, await keysCookie(held)), ctx("me"));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: { code: "unauthenticated" } });
+    const cleared = response.headers.getSetCookie();
+    expect(cleared).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(new RegExp(`^${DEMO_SESSION_COOKIE}=;.*Max-Age=0`)),
+        expect.stringMatching(new RegExp(`^${DEMO_KEYS_COOKIE}=;.*Max-Age=0`)),
+      ]),
+    );
+    // Nothing re-seals the keys after the clear.
+    expect(cleared.filter((c) => c.startsWith(`${DEMO_KEYS_COOKIE}=`))).toHaveLength(1);
+  });
+
+  it("keeps the demo cookies on other errors", async () => {
+    backend = await startBackend(json(404, { error: { code: "not_found", message: "Not found." } }));
+    useDemo(backend.url);
+
+    const response = await GET(visitor(`${APP}/api/conversations/x`), ctx("conversations", "x"));
+
+    expect(response.status).toBe(404);
+    expect(response.headers.getSetCookie().join()).not.toContain(`${DEMO_SESSION_COOKIE}=;`);
+  });
+
   it("clears the demo cookies after End demo", async () => {
     backend = await startBackend((_req, _body, res) => {
       res.writeHead(204);

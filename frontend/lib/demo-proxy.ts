@@ -99,8 +99,13 @@ export async function prepareDemoCall(
         headers.set("content-type", "application/json");
       } else if (upstream.status === 401) {
         const text = await upstream.text();
-        if ((await readErrorCode(text)) === "demo_session_expired") {
-          // The backend has deleted, or will delete, everything of this session.
+        const code = await readErrorCode(text);
+        // demo_session_expired: the backend has deleted, or will delete,
+        // everything of this session. unauthenticated: the backend has no
+        // user for the value at all (a restart wiped the database, or
+        // cleanup ran), so the cookie is dead too and must go, or proxy.ts
+        // would never start a new session for this browser.
+        if (code === "demo_session_expired" || code === "unauthenticated") {
           cookies.push(...clearDemoCookies());
           held = null;
         }
