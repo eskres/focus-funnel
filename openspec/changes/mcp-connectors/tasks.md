@@ -14,9 +14,12 @@
 
 ## 3. Data
 
-- [ ] 3.1 Add the models and one migration for `connectors`, `conversation_connectors`, `tool_actions`, and `users.connector_warning_accepted_at` from design decision 4. Check that `alembic upgrade head` then `downgrade -1` runs cleanly on SQLite and on the compose Postgres, that there is one head, and that `alembic check` finds no changes
-- [ ] 3.2 Add auth encryption for connectors with `connector:<id>` as associated data, and register decrypted values with log masking. Check with pytest that a round trip works, that a ciphertext moved to another connector or user fails to decrypt, and that a logged decrypted value is masked
-- [ ] 3.3 Extend `delete_user_data` and the ownership helpers to cover connectors and actions. Check with pytest that deleting a user leaves none of their connector, link, or action rows, and that another user's connector responds 404
+- [x] 3.1 Add the models and one migration for `connectors`, `conversation_connectors`, `tool_actions`, and `users.connector_warning_accepted_at` from design decision 4. Check that `alembic upgrade head` then `downgrade -1` runs cleanly on SQLite and on the compose Postgres, that there is one head, and that `alembic check` finds no changes
+  - Passed on 2026-11-04 at `10eb753` plus this commit. `tests/test_mcp_connectors_migration.py`: one head (`9b4660dc0603`), and on SQLite and on Postgres (the compose image `pgvector/pgvector:0.8.1-pg18-trixie`, a fresh `ff07_mcp_connectors_migration` database) `alembic upgrade head`, `check` (no changes), `downgrade -1` (tables and column gone), `upgrade head`, and `check` all succeed.
+- [x] 3.2 Add auth encryption for connectors with `connector:<id>` as associated data, and register decrypted values with log masking. Check with pytest that a round trip works, that a ciphertext moved to another connector or user fails to decrypt, and that a logged decrypted value is masked
+  - Passed on 2026-11-04 at `10eb753` plus this commit. `tests/test_connector_auth.py`: a round trip keeps only the last 4 characters in clear, a ciphertext moved to another connector of the same user or to the same connector id of another user raises `DecryptionError`, and a value decrypted in a later request and logged comes out as `[REDACTED]`.
+- [x] 3.3 Extend `delete_user_data` and the ownership helpers to cover connectors and actions. Check with pytest that deleting a user leaves none of their connector, link, or action rows, and that another user's connector responds 404
+  - Passed on 2026-11-04 at `10eb753` plus this commit. `tests/test_user_data.py` (SQLite and Postgres) and `tests/test_delete_my_data.py` (Postgres): deleting a user leaves none of their connector, link, or action rows and keeps the other user's; "Delete my content" removes links and actions and keeps connectors. `tests/test_ownership.py`: another user's connector or action, and an action asked for through another conversation, raise 404 `not_found` like a missing record.
 
 ## 4. MCP client
 

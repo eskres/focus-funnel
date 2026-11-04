@@ -77,7 +77,7 @@ One migration adds:
 
 - `connectors`: `id`, `user_id` (cascade), `name`, `source` (`user` or `operator`), `operator_key` (the operator entry's name, null for user rows), `url` (null for operator rows; read from config), `auth_kind` (`none`, `bearer`, `header`), `auth_header` (header name), `auth_ciphertext`, `auth_nonce`, `auth_key_version`, `auth_last4`, `tools` (JSON list: `name`, `description`, `input_schema`, `read_only_hint`, `available`), `tools_listed_at`, `tool_settings` (JSON map tool name → `{enabled, acts, always_allow}`), timestamps. Unique `(user_id, name)`.
 - `conversation_connectors`: `conversation_id` (cascade), `connector_id` (cascade), primary key on both.
-- `tool_actions`: `id`, `conversation_id` (cascade), `user_id`, `connector_id` (set null), `position` (the tool message's position), `tool` (unprefixed), `arguments` (JSON), `status` (`pending`, `running`, `done`, `failed`, `declined`, `expired`), `result` (text, capped), `error_code`, `turn_number`, timestamps.
+- `tool_actions`: `id`, `conversation_id` (cascade), `user_id`, `connector_id` (set null), `position` (the tool message's position), `tool` (unprefixed), `arguments` (JSON), `status` (`pending`, `running`, `done`, `failed`, `declined`, `expired`), `result` (text, capped), `error_code`, timestamps (decision 15 drops `turn_number`).
 - `users.connector_warning_accepted_at`.
 
 Operator connectors get a per-user row the first time the user lists connectors, so tool switches and "always allow" live in one place for both kinds. Rows whose `operator_key` is no longer configured are deleted at that listing, which removes them from conversations by cascade. Auth for operator connectors is never stored; it is read from the environment at call time.
@@ -218,6 +218,16 @@ Task 2.2 settled what decision 5 left open:
 - A catalog entry has a `title` (the display name, "Google Calendar") beside its `name` (the suggested connector name, `calendar`), and its `auth` names only the kind and, for `header`, the header name: the user enters the value. Catalog URLs get the user URL checks (http or https, no user info), because picking an entry fills the user's add form; operator URLs must parse as http or https with a host and nothing more.
 - The name and header checks (`name_problem`, `header_problem`) live in the loader module so the connector API (task 5.2) applies the same rules.
 - The `chat.yaml` `connectors` section is required, like every other section; `connect_seconds` and `call_seconds` may be fractions (tests use sub-second timeouts), the other three are whole numbers of at least 1.
+
+### 15. Data model details
+
+Tasks 3.1 to 3.3 settled what decision 4 left open:
+
+- `tool_actions` has no `turn_number`. Conversations keep no turn counter, and expiry works by status when a turn starts (decision 7), so nothing would fill or read it. `position` (the tool message's) already ties an action to its turn.
+- `tools` and `tool_settings` are not null, starting as `[]` and `{}`; `auth_kind` starts as `none`. `tool_actions.user_id` cascades from `users` like every user-owned table, and both `connector_id` columns are indexed, so deleting a connector finds its links and actions without a scan.
+- One migration (`9b4660dc0603`, after `8a4d6f2b9c13`) adds the three tables and the user column. Migration tests for earlier revisions downgrade to their own previous revision, not `-1`, so a later head does not break them.
+- Connector auth lives in `app/connector_auth.py`: `store_auth` assigns the row's id before encrypting (the id is in the associated data) and keeps the last 4 characters; `read_auth` decrypts, registers the value with log masking, and raises `DecryptionError` for a value that does not belong to that connector and user.
+- `get_owned_or_404` takes extra conditions, so an action is found only through its own conversation (`ToolAction.conversation_id == conversation_id`) and otherwise answers 404 like a missing one. Deleting a user removes connectors, links, and actions by cascade; "Delete my content" removes links and actions with the conversations and keeps connectors, which are settings.
 
 ## Risks / Trade-offs
 

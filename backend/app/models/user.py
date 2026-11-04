@@ -31,3 +31,7 @@ class User(Base):
     demo_notice_accepted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # When the user accepted the warning shown before their first connector.
+    connector_warning_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

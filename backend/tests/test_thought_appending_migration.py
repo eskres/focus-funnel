@@ -20,12 +20,13 @@ ADDITION_COLUMNS = {
 }
 
 
-def test_single_head_is_this_revision():
+def test_this_revision_is_below_the_single_head():
+    # Later revisions exist, so these tests downgrade to PREVIOUS, not "-1".
     res = run_alembic("sqlite+aiosqlite:///:memory:", "heads")
     assert res.returncode == 0, res.stderr
-    heads = [line for line in res.stdout.splitlines() if line.strip()]
-    assert heads == [f"{REVISION} (head)"]
-    res = run_alembic("sqlite+aiosqlite:///:memory:", "history", "-r", f"{PREVIOUS}:{REVISION}")
+    heads = [line.split()[0] for line in res.stdout.splitlines() if line.strip()]
+    assert len(heads) == 1, res.stdout
+    res = run_alembic("sqlite+aiosqlite:///:memory:", "history", "-r", f"{REVISION}:{heads[0]}")
     assert res.returncode == 0, res.stderr
     assert f"{PREVIOUS} -> {REVISION}" in res.stdout
 
@@ -38,7 +39,7 @@ def test_upgrade_and_downgrade_on_sqlite(tmp_path):
     assert sqlite_columns(db_file, "thought_additions") == ADDITION_COLUMNS
     assert BASELINE_COLUMNS <= sqlite_columns(db_file, "search_indexes")
 
-    res = run_alembic(db_url, "downgrade", "-1")
+    res = run_alembic(db_url, "downgrade", PREVIOUS)
     assert res.returncode == 0, res.stdout + res.stderr
     assert "thought_additions" not in sqlite_tables(db_file)
     assert not BASELINE_COLUMNS & sqlite_columns(db_file, "search_indexes")
@@ -85,7 +86,7 @@ def test_upgrade_and_downgrade_on_postgres():
         assert BASELINE_COLUMNS <= indexes
         assert "ix_thought_additions_thought_id" in names
 
-        res = run_alembic(db_url, "downgrade", "-1")
+        res = run_alembic(db_url, "downgrade", PREVIOUS)
         assert res.returncode == 0, res.stdout + res.stderr
         additions, indexes, _ = postgres_shape(db_url)
         assert additions == set()
