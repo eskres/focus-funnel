@@ -1,4 +1,4 @@
-> **Planning status:** Proposal only. Write the specs, design, and tasks when this change is picked up. Depends on `auth-modes` and `model-providers`.
+> **Planning status:** Planned. Specs, design, and tasks are written. Depends on `auth-modes` and `model-providers` (both built), and in the stack on `mcp-connectors` (its settings only; design decision 17).
 
 ## Why
 
@@ -7,14 +7,14 @@ A self-hoster must set an auth mode, generate secrets, add a provider key, and p
 ## What Changes
 
 - Add a first-run setup wizard that walks through the same settings the app already has:
-  1. Choose the auth mode and enter its settings (for `oidc`: issuer, client id and secret; for `firebase`: project settings). Optionally set an email allow-list.
+  1. Check the auth mode and its settings (for `oidc`: issuer, client id and secret; for `firebase`: project settings), and the optional email allow-list. The wizard shows them and names the variables; they are set in `.env` before the first start, because both servers check them at startup (design decision 1).
   2. Add a provider and its key from the presets, with the provider's "get a key" link and notice, or a custom local server such as Ollama. A Test lists models.
   3. Choose the default model and loadout, with the effort options and the Test from `conversation-agent`.
   4. Check that Postgres is reachable and has the pgvector extension.
 - The wizard is a checklist over a status endpoint, `GET /api/setup/status`, that reports what is missing. It uses the same APIs as the settings screens and has no logic of its own.
-- Protect setup mode. The server prints a one-time setup token in its log at first run, the wizard requires it, and the wizard locks when setup completes. It is never left open.
-- Keep bootstrap secrets in the environment: the database URL and the key-encryption key, which a setup script or compose step can generate. Everything the wizard chooses is stored in the database, with secrets encrypted by that key.
-- Let every wizard option also be set through environment variables, so Docker and CI installs can skip the wizard.
+- Protect setup mode. While setup is open, the server prints a setup token in its log at each start; the token is valid until the next start or until setup finishes. The wizard requires it, and setup locks when it completes and never reopens.
+- Keep bootstrap secrets in the environment: the database URL and the key-encryption key, which a setup script or compose step can generate. What the wizard saves, the operator's own provider key and models through the settings APIs, is stored in the database, the key encrypted by that key.
+- Set every instance-wide option only through environment variables, so Docker and CI installs can skip the wizard (`SETUP_WIZARD=false`). A user's keys and models stay per user (design decision 3). The model settings offer a preset that needs no key without a saved row, as the backend already allows (design decision 2).
 - Add a `doctor` command that prints the same status from the command line and checks connections to the database and the provider.
 - Add an offline install guide and an offline check for air-gapped installs: images bundled with `docker save`, a local model provider, no runtime calls to the internet (telemetry off, no CDN fonts), and a smoke test on a compose network marked `internal` to prove it.
 
@@ -31,7 +31,7 @@ None expected.
 
 ## Impact
 
-- **Backend:** the status endpoint, the setup-mode token and lock, environment-variable reading for wizard options, and the `doctor` command.
-- **Frontend:** the wizard screens, reusing the provider and model settings components.
-- **Deployment:** a setup script for bootstrap secrets, a compose overlay for an internal network, and the offline guide.
+- **Backend:** the status endpoint, the setup-mode token and lock (one table, one migration), the `SETUP_WIZARD` setting, the `doctor` command, and `OidcDiscovery.fetch_document()` in `auth.py` for the doctor's issuer check.
+- **Frontend:** the wizard screens, reusing the provider and model settings components; the proxy forwards the setup token only to setup routes; the model settings treat a keyless preset as choosable with no saved row.
+- **Deployment:** a setup script for bootstrap secrets, image names and a bundling script, an offline overlay with a local model server, a compose overlay for an internal network with its check, the offline guide, and updates to the README and `docs/login.md`.
 - **Out of scope:** installing or configuring an identity provider for the user. The wizard only asks for its settings.
