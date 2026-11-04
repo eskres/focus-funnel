@@ -8,7 +8,7 @@
 - `app/crypto.py`: AES-256-GCM with the user id and a provider id as associated data; `app/log_masking.py` masks registered secrets in logs.
 - `app/config.py`: `Settings` with the demo-mode guard pattern (`ALLOW_CUSTOM_PROVIDER=true` in demo mode refuses startup; otherwise demo forces it off).
 - The custom provider URL check (`_validate_custom_base_url` in `routers/providers.py`) accepts only `http` and `https` with a host.
-- The backend already depends on `httpx2`, which the official MCP Python SDK (`mcp` 2.2.0, Python ≥ 3.10) also uses.
+- The backend already depends on `httpx2`, which the official MCP Python SDK (`mcp` 2.3.0, Python ≥ 3.10) also uses.
 
 See `proposal.md` for why.
 
@@ -32,7 +32,21 @@ See `proposal.md` for why.
 
 ### 1. Client library: the official MCP Python SDK, Streamable HTTP only
 
-Use `mcp` (the official SDK) and its Streamable HTTP client. It already uses `httpx2`, so it adds no second HTTP stack, and it tracks the protocol's version negotiation for us. Only Streamable HTTP is supported; the older HTTP+SSE transport is not, because it is deprecated in the protocol and most servers now offer the new one. Task 1.1 pins the version and records the exact client entry point and the tool annotation field names in this decision before any code depends on them.
+Use `mcp` (the official SDK) and its Streamable HTTP client. It already uses `httpx2`, so it adds no second HTTP stack, and it tracks the protocol's version negotiation for us. Only Streamable HTTP is supported; the older HTTP+SSE transport is not, because it is deprecated in the protocol and most servers now offer the new one. Task 1.1 probed the SDK with `backend/scripts/mcp_probe.py` (`uv run --with mcp==2.3.0 python -m scripts.mcp_probe selftest`, local servers on free ports); what it found:
+
+- **Version.** Pin `mcp==2.3.0`. It brings `mcp-types==2.3.0` (the types live in the package `mcp_types`) and resolves against the backend's locked `httpx2` 2.13, `pydantic` 2.13, `starlette`, and `uvicorn` without changing them.
+- **Entry point.** `mcp.Client(transport, read_timeout_seconds=call_seconds, cache=None)` used as `async with`, where `transport = mcp.client.streamable_http.streamable_http_client(url, http_client=client)` and `client` is our own `httpx2.AsyncClient(headers=..., timeout=...)`. Auth headers go on that client; the probe server saw `Authorization: Bearer ...` on every request. The default `mode="auto"` sends `server/discover` at protocol `2026-07-28` and falls back to `initialize`, so `initialize` happens inside `__aenter__`; the local 2.3.0 server negotiated `2026-07-28`, and the Node server behind the bridge in decision 13 negotiated `2025-11-25`. `cache=None` turns off the SDK's response cache, so Test always gets a fresh list. MCP requests follow a redirect only within the same origin.
+- **Listing and calling.** `await client.list_tools(cursor=cursor)` returns a `ListToolsResult` with `.tools` and `.next_cursor`; loop until `next_cursor is None` (the probe read 3 pages of 2). `await client.call_tool(name, arguments)` returns a `CallToolResult`. Calling a tool this session has not listed works; the SDK only logs `Tool X not listed by server, cannot validate any structured content`.
+- **Field names.** The types are pydantic models with snake_case attributes and camelCase wire aliases. `Tool`: `name`, `title`, `description`, `input_schema` (`inputSchema`), `output_schema` (`outputSchema`), `annotations`. `ToolAnnotations`: `title`, `read_only_hint` (`readOnlyHint`), `destructive_hint` (`destructiveHint`), `idempotent_hint` (`idempotentHint`), `open_world_hint` (`openWorldHint`), each `bool | None`; `None` means the server gave no hint, which counts as not read-only. `CallToolResult`: `content` (a list of `TextContent`, `ImageContent`, `AudioContent`, `ResourceLink`, and `EmbeddedResource`, told apart by `type`), `structured_content` (`structuredContent`, any JSON or `None`), and `is_error` (`isError`, default `False`).
+- **Failures.** An error that leaves the `async with` comes out wrapped in nested `ExceptionGroup`s from the transport's task group, so `app/mcp_client.py` catches call errors inside the context and unwraps the group for errors raised while connecting. What each case raised:
+  - Closed port or unknown host: `httpx2.ConnectError` → `connector_unreachable`.
+  - HTTP 401 and HTTP 403: `MCPError` code `-32603`, "Server returned an error response". The status code is not in the error, so the client records it with an httpx2 `event_hooks={"response": [...]}` hook (it saw `[401, 401]`: the `server/discover` probe, then the `initialize` fallback) → `connector_auth_failed`.
+  - HTTP 404 before a session exists: `MCPError` `-32601` "Not Found" (the SDK source gives `-32600` "Session terminated" once a session exists).
+  - A 200 answer in `text/html`: `MCPError` `-32600` "Unexpected content type: text/html" → `connector_protocol_error`, as are a JSON-RPC error body and any other `MCPError` while connecting.
+  - A JSON-RPC error answering `tools/call` (an unknown tool): `MCPError` with the server's code (`-32602`). This is a tool error for the model, not a connection failure.
+  - No answer to a request within `read_timeout_seconds`: `MCPError` code `-32001` (`REQUEST_TIMEOUT`), "Request 'tools/call' timed out", after that time (2.02 s with 2 s). The httpx2 read timeout must be longer than `read_timeout_seconds` (the probe uses `call_seconds + 5`), or httpx2's `ReadTimeout` wins the race and tears down the session instead.
+  - No answer while connecting: `server/discover` times out, then the `initialize` fallback does too (7 s with 2 s settings), so the connect step is bounded as a whole with `anyio.fail_after(connect_seconds)`, which raises `TimeoutError` on time (1.00 s with 1 s).
+- **Proxies.** httpx2 reads `HTTPS_PROXY` and `NO_PROXY` from the environment, so connector requests follow the deployment's proxy settings; a refusing proxy gives `httpx2.ProxyError` (→ `connector_unreachable`).
 
 *Alternatives:* a hand-written JSON-RPC client (less to import, but we would own session ids, protocol negotiation, and SSE framing); `fastmcp`'s client (more features than needed, another dependency tree).
 
@@ -165,7 +179,33 @@ URLs: the custom provider check, plus no user info in the URL (a token belongs i
 
 ### 13. Compose example for a command-based server
 
-`docker-compose.mcp.yml` adds one service that runs a stdio MCP server behind a stdio-to-Streamable-HTTP bridge, reachable only on the compose network (no published port). Task 1.2 chooses the Google Calendar server and the bridge and records both, with pinned versions, here. The backend reaches it by service name through an operator connector.
+`docker-compose.mcp.yml` adds one service that runs a stdio MCP server behind a stdio-to-Streamable-HTTP bridge, reachable only on the compose network (no published port). The backend reaches it by service name through an operator connector.
+
+Task 1.2 chose:
+
+- **Server:** `@cocal/google-calendar-mcp` 2.7.0 (npm, MIT, github.com/nspady/google-calendar-mcp), a stdio server that runs with the user's own Google OAuth client: a "Desktop app" client's `gcp-oauth.keys.json` at `GOOGLE_OAUTH_CREDENTIALS`, and tokens at `GOOGLE_CALENDAR_MCP_TOKEN_PATH`, written once by its `auth` command (a loopback OAuth callback on a port from 3500 up).
+- **Bridge:** `supergateway` 4.2.0 (npm, MIT), `--stdio "<command>" --outputTransport streamableHttp --stateful`, serving `/mcp` on port 8000. Stateful mode starts one server process per MCP session and stops it when the client closes the session (the SDK sends `DELETE` on close), which matches one session per turn (decision 9).
+
+Both are the newest releases that were at least two weeks old when chosen (the server has 2.8.1, the bridge 4.2.1). The server also has its own HTTP mode, but that mode adds an account web page and runs its sign-in over HTTP, so the bridge keeps the server's surface to MCP alone. Both run in one image:
+
+```dockerfile
+FROM node:24-alpine
+RUN npm install -g --omit=dev @cocal/google-calendar-mcp@2.7.0 supergateway@4.2.0 \
+ && npm cache clean --force
+ENV GOOGLE_OAUTH_CREDENTIALS=/config/gcp-oauth.keys.json \
+    GOOGLE_CALENDAR_MCP_TOKEN_PATH=/config/tokens.json
+USER node
+EXPOSE 8000
+CMD ["supergateway", "--stdio", "google-calendar-mcp", "--outputTransport", "streamableHttp", \
+     "--stateful", "--port", "8000", "--healthEndpoint", "/healthz"]
+```
+
+What the probe saw, with a placeholder `gcp-oauth.keys.json` mounted at `/config` and no Google account: `scripts.mcp_probe list http://127.0.0.1:<port>/mcp` negotiated `2025-11-25` and listed 13 tools in one page. Without any credentials file the server exits at its first session, so the file must be mounted. What the overlay and the catalog entry need to know:
+
+- Tool names use hyphens (`list-events`, `create-event`), so the offered names are `calendar__list-events` and so on; they match `^[a-zA-Z0-9_-]{1,64}$`. Examples elsewhere in this change that say `list_events` mean these.
+- Every tool carries `readOnlyHint`: true for `list-calendars`, `list-events`, `search-events`, `get-event`, `list-colors`, `get-freebusy`, and `get-current-time`; false for `create-event`, `create-events`, `update-event`, `delete-event`, `respond-to-event`, and `manage-accounts`.
+- `manage-accounts` starts Google sign-in from inside a chat, and the server's `ENABLED_TOOLS` filter always keeps it, so the operator entry lists its `tools:` without it.
+- A call without tokens answers `isError: true` with "No valid Google account tokens. Use the manage-accounts tool ...", a normal tool error.
 
 ## Risks / Trade-offs
 
@@ -184,4 +224,4 @@ One Alembic migration adds the three tables and the user column; downgrade drops
 
 ## Open Questions
 
-- The Google Calendar server and bridge for the compose example (task 1.2). The rest of the design does not depend on which.
+- None. The Google Calendar server and bridge for the compose example are chosen in decision 13.
