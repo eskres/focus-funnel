@@ -25,3 +25,13 @@ A card for a status part SHALL say "Mark done:" with the thought's current title
 - **WHEN** a user confirms a status card, leaves, and opens the conversation again
 - **THEN** the card says `Marked done: Call the plumber` with its link
 - **AND** a status card not yet confirmed can still be confirmed
+
+### Requirement: A status card shows that its thought was deleted
+
+When the thought of a confirmed status card is deleted later, the card SHALL say that it was deleted, with the title it was proposed with, and SHALL have no link. It SHALL say so at once in the open chat and when the conversation is opened again.
+
+#### Scenario: Thought deleted after the mark
+
+- **WHEN** a user confirms the card that marks `Call the plumber` done, and later deletes that thought from the sheet
+- **THEN** the card says `Call the plumber` was deleted and has no link
+- **AND** it says so, with no link, when the conversation is opened again

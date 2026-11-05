@@ -22,7 +22,7 @@ A proposal part SHALL be able to mark done a thought the conversation has seen, 
 
 ### Requirement: A status change for a missing thought is refused
 
-A confirm of a status part whose thought was deleted, or belongs to another user, SHALL change nothing and SHALL say that the thought no longer exists, with the same answer in both cases. A confirm of a status part whose thought is already done SHALL succeed and SHALL change nothing. A status part whose thought no longer exists SHALL NOT keep its proposal held, and SHALL NOT be offered or listed to the model as waiting for the user.
+A confirm of a status part whose thought was deleted, or belongs to another user, SHALL change nothing and SHALL say that the thought no longer exists, with the same answer in both cases. A confirm of a status part whose thought is already done SHALL succeed and SHALL change nothing.
 
 #### Scenario: Deleted before confirming
 
@@ -39,11 +39,6 @@ A confirm of a status part whose thought was deleted, or belongs to another user
 
 - **WHEN** a user marks a task done in the sheet and then confirms a card that marks it done
 - **THEN** the card shows that it was marked done, and the task is unchanged by the confirm
-
-#### Scenario: Deleted thought does not stay held
-
-- **WHEN** a proposal's only unconfirmed part marks a task done, and the user deletes that task and then runs `/compact`
-- **THEN** no proposal is offered for it, and the note to the model lists no proposal waiting for the user
 
 ### Requirement: A status change does not count as filing
 
@@ -64,9 +59,59 @@ A confirmed part that marked a thought done SHALL NOT count as a saved proposal 
 - **WHEN** a conversation's only confirmed part marked `Call the plumber` done
 - **THEN** the model is not told that `Call the plumber` was filed from this conversation
 
-### Requirement: A status part is confirmed on its own
+### Requirement: A status change does not block an addition
 
-Merging SHALL NOT be offered when any part of a proposal sets a status. The system SHALL refuse a confirm that merges a status part with other parts, and nothing SHALL be stored or changed. Each other part of such a proposal SHALL be confirmed on its own, as a new thought or an addition.
+A change of status SHALL NOT count as a change to the thought when an addition to it is confirmed or when its last addition is undone. Confirming an addition SHALL keep the thought's status, and undoing an addition SHALL keep the thought's status and the time of its last status change.
+
+#### Scenario: Marked done, then an addition confirmed
+
+- **WHEN** a proposal adds to the task `Call the plumber`, the user then marks the task done in the sheet, and then confirms the addition
+- **THEN** the addition is saved
+- **AND** the task is still done
+
+#### Scenario: Addition, marked done, then undone
+
+- **WHEN** a user confirms an addition to `Call the plumber`, marks the task done, and then undoes the addition
+- **THEN** the undo succeeds and restores the thought as it was before the addition
+- **AND** the task is still done
+
+## MODIFIED Requirements
+
+### Requirement: A message with several thoughts is split
+
+When a message or discussion holds several separate thoughts, the model SHALL propose each as its own part, in one proposal, and the chat SHALL show one card per part. Each part SHALL be confirmed on its own and SHALL keep the whole raw text of the proposal. Before any part is saved, the user SHALL be able to merge all the parts into one card, with no model call: the first part's title and category, the summaries as paragraphs in order, and the tags of every part without repeats. The merged card SHALL be edited and confirmed like any other card and SHALL store one thought. Merging SHALL NOT be offered when any part of the proposal is an addition to a filed thought or marks a thought done. The system SHALL refuse a confirm that merges a part that marks a thought done with other parts, and nothing SHALL be stored or changed.
+
+#### Scenario: Three things in one message
+
+- **WHEN** a user sends `/push buy oat milk, book the dentist, and idea: a podcast about maps`
+- **THEN** the chat shows three cards, one per thing
+- **AND** nothing is stored yet
+
+#### Scenario: Confirm one part
+
+- **WHEN** a user confirms the second of three cards
+- **THEN** one thought is stored, and the other two cards still wait
+
+#### Scenario: Merge
+
+- **WHEN** a user merges two cards titled `Oat milk` and `Eggs` with the tags `groceries` and `groceries, breakfast`
+- **THEN** one card shows the title `Oat milk`, both summaries, and the tags `groceries` and `breakfast`
+- **AND** confirming it stores one thought
+
+#### Scenario: Merge after a part is saved
+
+- **WHEN** one of three cards is already saved
+- **THEN** the merge button is not offered
+
+#### Scenario: One thing
+
+- **WHEN** a user sends `/push buy oat milk`
+- **THEN** the chat shows one card and no merge button
+
+#### Scenario: A part is an addition
+
+- **WHEN** a proposal has two parts and one of them adds to a filed thought
+- **THEN** the merge button is not offered
 
 #### Scenario: Status part and a new thought
 
@@ -76,5 +121,5 @@ Merging SHALL NOT be offered when any part of a proposal sets a status. The syst
 
 #### Scenario: Merge request
 
-- **WHEN** a confirm request names every part of a proposal that has a status part
+- **WHEN** a confirm request names every part of a proposal that has a part that marks a thought done
 - **THEN** the system refuses it, and nothing is stored or changed
