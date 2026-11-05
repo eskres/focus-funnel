@@ -34,7 +34,7 @@ See proposal.md for the problem. The code as it stands:
 
 A `RunningTurn` holds: the conversation id, the owner's user id, the position of the user message it answers, the event log (a list of `(name, data)`), an `ended` flag, and an `asyncio.Condition`. A subscriber reads from index 0, waits on the condition for more, and stops after the terminal event (`done` or `error`). A cancelled subscriber cancels only its own wait.
 
-`run` turns an exception into the terminal event the same way `event_stream` does today (`ApiError` → `error` with its code, anything else → `internal_error` and a log line), so the event names and payloads on the wire do not change.
+`run` turns an exception into the terminal event the same way `event_stream` does today (`ApiError` → `error` with its code, anything else → `internal_error` and a log line), so the event names and payloads on the wire do not change. Before the exception leaves `Turn.events()`, the turn stores its answer as `failed` with the same code and the text of the round in flight, wherever the error came from (reading a round, opening the next one, a tool, the usage record). Nothing is added when the last stored message is already an answer, or when the turn stored its own reason (`tool_loop_limit` on its last tool round). Nobody may be watching, so the stored answer is the only place the reason survives.
 
 Alternatives:
 - **Shield the existing generator** (`asyncio.shield` around the cleanup only). Frees the claim, but the model call is still cancelled and the answer lost. Rejected: fixes one symptom.
@@ -50,7 +50,7 @@ New route: `GET /api/chat/{conversation_id}/stream`.
 - Running turn found → SSE response that replays the log from the start, then follows it live, then ends with the same terminal event.
 - No running turn → `204 No Content`. Not an error: the stored messages are complete.
 
-`ConversationDetail` gains `turn: {"after_position": int} | null`, set from the registry. The chat renders stored messages up to and including `after_position`, drops later stored messages (the rounds already stored are also in the replayed log), then reattaches and builds the in-progress answer from the replayed events with the same event handling `send` uses. On `204` it reloads the detail.
+`ConversationDetail` gains `turn: {"after_position": int} | null`, set from the registry. The detail reads the registry before the messages: a turn stores its answer before it leaves the registry, so a null `turn` always comes with the stored answer, and a turn that ends after the read only makes the follow answer `204`. The chat renders stored messages up to and including `after_position`, drops later stored messages (the rounds already stored are also in the replayed log), then reattaches and builds the in-progress answer from the replayed events with the same event handling `send` uses. On `204` it reloads the detail.
 
 When the POST stream drops without a terminal event (network break, not the user leaving), the chat does the same thing: reload the detail and reattach if `turn` is set. It marks the answer `cut` only if that fails or the stored answer did not finish.
 
@@ -89,6 +89,60 @@ This change leaves it out. Leaving the chat no longer stops spending, but a turn
 
 A test asserts the demo case end to end: send in demo mode, drop the stream before the search tool runs, and check the search used the header's key and the answer was stored.
 
+### 7. The terminal event goes out after the claim is released
+
+`run` settles in one step after `Turn.events()` ends: close the model call, commit, release the claim, close the session, remove the registry entry (only if it is still this turn's, since a new turn may register once the claim is free), and only then append the terminal `done` or `error` event and wake subscribers. A client that sees the terminal event can send the next message at once, as before this change; the frontend unlocks the input on it and the existing back-to-back tests rely on it. The new-conversation `conversation` event is the first event of the log, so a reattaching chat gets it too; it carries the id the chat already has.
+
+Alternatives:
+- **Terminal event first, release after.** Leaves a short window where a client that saw `done` gets `conversation_busy`. Rejected.
+
+### 8. One shielded step, and a swapped event for waking subscribers
+
+The settle step runs as its own task, awaited through `asyncio.shield` inside an anyio `CancelScope(shield=True)` (`running.shielded`). The task keeps the steps in order on one `AsyncSession` even when its caller is cancelled twice, since nothing outside it touches the session afterwards. The anyio shield matters for `/compact`'s `_closer`, which runs inside a Starlette response whose cancel scope cancels every await again until the scope exits: with it, the response waits for the release instead of leaving it to finish on its own.
+
+Subscribers wait on an `asyncio.Event` that the turn sets and replaces on every append, instead of an `asyncio.Condition`. It meets the same need (wake every waiting subscriber, each reads from its own index) without awaiting a lock in the settle step.
+
+Alternatives:
+- **Shield each step separately.** A second cancellation would let the caller's `finally` close the session while a shielded release still uses it. Rejected.
+
+### 9. The follow route checks the conversation first, then the registry
+
+`GET /api/chat/{conversation_id}/stream` and `ConversationDetail.turn` both load the conversation owner-scoped before they look in the registry, and both also check that the running turn's user is the caller. An unknown id and another user's conversation get the same 404 `not_found` body, and a malformed id gets the 422 `validation_error` every other id route gives. A `/compact` claim has no registry entry, so its conversation answers 204 and `turn: null`: there is nothing to follow, and the draft is not stored. The follow route closes its request session once it has checked the conversation, so a follower holds no database connection while it waits for the turn. `claim_turn` records the claim on the loaded conversation as already stored, so the next flush does not write it again and hold that write open while a `/compact` draft streams.
+
+Alternatives:
+- **Answer from the registry alone.** Saves one query, but would answer 204 for an unknown or foreign id instead of 404. Rejected.
+
+### 10. The interrupted answer is stored in the settle step, by the sweep's rule
+
+On `CancelledError`, `Turn.events()` only marks the turn interrupted and re-raises. The settle step (Decision 8), which already runs shielded, calls `Turn.store_interrupted()` first: roll back (the cancel may have hit a write part way), then store a `failed` / `answer_interrupted` assistant message with the text of the round in flight, then commit and release as usual. Storing from the settle step keeps every write on the turn's `AsyncSession` in one shielded task; storing inside `Turn.events()` under its own shield would race the settle step's release if a second cancel arrived.
+
+Whether to store is decided the same way as the startup sweep, by the last stored message: a failed answer is stored unless it is an assistant message without tool calls (an answer already stored: complete, cut, or failed) or a `summary` (an accepted `/compact`, which answers no message; a `/compact` claim left at a crash would otherwise get a failed answer after the summary). A conversation with no messages is only freed. The sweep also stores one only for a chat turn's claim: a chat turn sets `last_activity_at` when it stores its message, after it claims, while `/compact` and the proposal routes claim without touching it. So a `/compact` draft left at a crash over a message that got no answer (after `context_full`, the error that suggests `/compact`) is only freed, and the conversation is left as it was. This needs no new column. A turn cancelled after a tool round was stored gets an empty failed answer after that round, since the round keeps its own text. Live followers get the terminal `error` event `answer_interrupted` with the message "This answer did not finish. Send the message again to retry."
+
+Shutdown (`running.shutdown`) first yields once so a turn created just before has started (a task cancelled before its first step never runs its `finally`), then cancels every turn and waits with `asyncio.wait` and a 5-second bound, so a turn that runs over is not cancelled a second time; the startup sweep covers it. The sweep runs in the lifespan before serving, so the app now reads its tables at startup: tests that start the app use a migrated test database.
+
+uvicorn closes open connections (waiting `timeout_graceful_shutdown`, unlimited by default) before it runs the lifespan exit, so while a browser follows an answer a SIGTERM waits for the answer to end before the turns are cancelled. That is the same as before this change; a forced stop leaves the claim to the startup sweep. The `uvicorn` command is unchanged apart from the one-process comment.
+
+Alternatives:
+- **Store in `Turn.events()` under `asyncio.shield`.** Rejected for the race above.
+- **Track in memory whether the answer was stored.** A cancel during the final `commit` leaves it unknown whether the row landed; reading the last stored message after the rollback does not guess.
+
+### 11. The chat follows an answer with one recover step
+
+The chat handles every stream that ends without `done` or `error` the same way, whether it is the `POST` stream of a message it sent or a reattach stream: reload the conversation detail; with `turn` set, show the stored messages through `after_position` and follow the turn; without it, show the stored answer. A conversation that loads with `turn` set goes straight into that step. It follows again at most three times per answer, then shows the answer as cut short. The event handling `send` uses is one function that both paths call.
+
+- **Proposals.** Stored proposals after `after_position` are left out with the messages, because the replay sends them again; otherwise the leftover-proposal rule in `fromStored` would add them to the answer before it, and they would show twice.
+- **Text already received.** After a stream break the chat keeps the answer it has (text, tools, cards, sources) while it follows again, and starts the answer over only at the replay's first event. The replay is the whole answer, so nothing shows twice and nothing disappears while the reattach request is on its way.
+- **Did the stored answer finish?** By the backend's rule (Decision 10): the last stored message is an assistant message without tool calls, or an assistant message after the last user message carries an error or a status other than complete (the tool round limit stores its reason on the last tool round, which `fromStored` shows as failed). Then the chat shows the stored conversation as it is: complete, failed with its reason, or cut short. Otherwise (no answer stored, or the last stored message is a tool round with no reason) it keeps the text it received and says the answer was cut short.
+- **A follow the server refuses** (an error status other than an unreachable server, such as 404 once the conversation was deleted) shows that error in place of the answer and is not followed again.
+- **Server cannot be reached.** When the reload fails, or a new conversation's stream broke before its `conversation` event so the chat has no id to reload, the chat keeps the text and says the answer was cut short, adding "Open the conversation again later to see if it finished." (the spec's "the conversation can be opened again").
+- **`answer_interrupted`** has its own error class. `chat-error.tsx` titles it "The answer did not finish", always shows "This answer did not finish. Send the message again to retry.", and offers Try again, like the other errors a second try can fix.
+- **Leaving.** The follow request uses the chat's abort controller, which unmount aborts as before; nothing is sent to the server, so the answer keeps running.
+- **A stream that stays open after `done`.** The chat keeps reading until the stream closes, as it did before this change; the backend closes it after the terminal event.
+
+Alternatives:
+- **Rebuild the whole chat from the reload at once after a break.** Simpler, but the received text would vanish until the replay's first event arrives. Rejected.
+- **Keep the received answer and append only new events.** Would need the client to count events across the break (see Decision 2's rejected offset). Rejected.
+
 ## Risks / Trade-offs
 
 - [One process only] → Recorded as a non-goal and in the Dockerfile comment. The registry is the single place to replace with a shared queue and pub/sub later.
@@ -98,6 +152,7 @@ A test asserts the demo case end to end: send in demo mode, drop the stream befo
 - [Two tabs following one turn] → Both are subscribers to the same log; the input stays locked in both until the terminal event. Sending from the other tab still gets `conversation_busy`.
 - [A subscriber that reads slowly] → The log is a list, not a bounded queue, so a slow reader never blocks the turn.
 - [A running turn at the moment the detail loads, ending before the reattach] → The reattach gets `204` and the chat reloads the detail.
+- [A conversation deleted while its turn runs] → The round in flight finishes; its usage commit fails on the deleted conversation, so the usage is recorded without the conversation (as a deleted conversation's records are kept) and the turn ends with `not_found`, making no further call.
 
 ## Migration Plan
 

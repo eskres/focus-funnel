@@ -156,6 +156,7 @@ def test_app_startup_fails_without_settings(settings_env):
             pass
 
 
-def test_app_starts_with_valid_settings(settings_env):
+# The startup sweep (release_stale_turns) reads the migrated tables.
+def test_app_starts_with_valid_settings(settings_env, test_database_url):
     with TestClient(app):
         pass

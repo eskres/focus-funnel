@@ -11,6 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
+from app.chat import running
 from app.chat.compaction import store_compaction
 from app.chat.config import ChatConfig, get_chat_config
 from app.chat.context import meter
@@ -95,12 +96,21 @@ class ContextMeter(BaseModel):
     context_length: int | None
 
 
+class TurnOut(BaseModel):
+    """The turn running in the conversation: it answers the user message at
+    `after_position`, and `GET /api/chat/{id}/stream` follows it."""
+
+    after_position: int
+
+
 class ConversationDetail(ConversationSummary):
     last_prompt_tokens: int | None
     held_proposal_id: uuid.UUID | None
     context: ContextMeter
     messages: list[MessageOut]
     proposals: list[ProposalOut]
+    # Set while a chat turn runs; a /compact draft is not a running turn.
+    turn: TurnOut | None
 
 
 class CompactionIn(BaseModel):
@@ -162,6 +172,10 @@ async def detail(
     settings: Settings,
     http_client: httpx2.AsyncClient | None,
 ) -> ConversationDetail:
+    # The registry is read before the messages: a turn that ends in between
+    # has stored its answer, so a null turn always comes with every message.
+    # A turn that ends after this read is harmless: following it answers 204.
+    turn = running_turn(user, conversation)
     messages = await list_messages(session, conversation)
     info = (
         await model_info(
@@ -202,7 +216,15 @@ async def detail(
         proposals=[
             ProposalOut(**proposal_payload(p)) for p in await list_proposals(session, conversation)
         ],
+        turn=turn,
     )
+
+
+def running_turn(user: User, conversation: Conversation) -> TurnOut | None:
+    turn = running.get(conversation.id)
+    if turn is None or turn.user_id != user.id:
+        return None
+    return TurnOut(after_position=turn.after_position)
 
 
 @router.get("", response_model=ConversationList)

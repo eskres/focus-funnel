@@ -55,6 +55,15 @@ class MidStreamFailure(Exception):
     """Put last in a streamed reply to break the connection there."""
 
 
+class Hold:
+    """Put in a streamed reply to stop it there: `reached` is set when the
+    stream gets there, and it goes on once the test sets `release`."""
+
+    def __init__(self) -> None:
+        self.reached = asyncio.Event()
+        self.release = asyncio.Event()
+
+
 def completion(content: str | None = "Hello!", tool_calls=None, finish_reason="stop", usage=None):
     message: dict[str, Any] = {"role": "assistant", "content": content}
     if tool_calls:
@@ -147,6 +156,10 @@ class _SseStream(httpx2.AsyncByteStream):
             if isinstance(item, asyncio.Event):
                 # Hold the stream here until the test sets the event.
                 await asyncio.wait_for(item.wait(), timeout=5)
+                continue
+            if isinstance(item, Hold):
+                item.reached.set()
+                await asyncio.wait_for(item.release.wait(), timeout=5)
                 continue
             yield f"data: {json.dumps(item)}\n\n".encode()
         yield b"data: [DONE]\n\n"
@@ -255,6 +268,86 @@ def client(test_database_url, jwks_cache, settings_env):
             yield client
     finally:
         app.dependency_overrides.clear()
+
+
+class AsyncApi:
+    """The app on the test's own event loop, for tests that drive a turn in
+    the background: `http` answers whole responses, `leave` (sse_helpers)
+    drops a stream part way."""
+
+    def __init__(self, http, fake: FakeLLM, headers: dict[str, str]):
+        self.app = app
+        self.http = http
+        self.fake = fake
+        self.headers = headers
+
+    async def ready(self) -> None:
+        """Save a Nebius key and NANO as the default model."""
+        response = await self.http.put(
+            "/api/providers/nebius/key", headers=self.headers, json={"key": "nb-valid-key-aaaa1111"}
+        )
+        assert response.status_code == 200, response.text
+        response = await self.http.put(
+            "/api/settings/models",
+            headers=self.headers,
+            json={"models": [entry(NANO, default=True)], "temperature": None},
+        )
+        assert response.status_code == 200, response.text
+
+    async def chat(self, message: str, conversation_id: str | None = None):
+        body: dict[str, Any] = {"message": message}
+        if conversation_id is not None:
+            body["conversation_id"] = conversation_id
+        return await self.http.post("/api/chat", headers=self.headers, json=body)
+
+    async def user_id(self):
+        import uuid
+
+        return uuid.UUID((await self.http.get("/api/me", headers=self.headers)).json()["id"])
+
+    async def db(self, work):
+        """Run `await work(session)` on the app's database and return its result."""
+        from app.db import get_sessionmaker
+
+        async with get_sessionmaker()() as session:
+            return await work(session)
+
+
+async def turns_settled(timeout: float = 5) -> None:
+    """Wait until every running turn has ended."""
+    from app.chat import running
+
+    tasks = [turn.task for turn in running.running_turns() if turn.task is not None]
+    if tasks:
+        await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout)
+
+
+@pytest.fixture
+async def async_api(test_database_url, jwks_cache, settings_env, make_token):
+    import httpx
+
+    from app.chat import running
+    from app.db import get_engine
+
+    settings_env.setenv("PROVIDERS_CONFIG_PATH", str(PROVIDERS_FIXTURE))
+    fake = FakeLLM()
+    app.dependency_overrides[get_jwks_cache] = lambda: jwks_cache
+    app.dependency_overrides[get_provider_http_client] = fake.http_client
+    headers = {"Authorization": f"Bearer {make_token(sub='user|alice')}"}
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as http:
+            yield AsyncApi(http, fake, headers)
+    finally:
+        try:
+            await turns_settled()
+        finally:
+            for turn in running.running_turns():
+                if turn.task is not None:
+                    turn.task.cancel()
+            app.dependency_overrides.clear()
+            await get_engine().dispose()
 
 
 @pytest.fixture

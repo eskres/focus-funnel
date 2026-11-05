@@ -3,7 +3,9 @@ from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 
+from app.chat import running
 from app.chat.config import get_chat_config
+from app.chat.conversations import release_stale_turns
 from app.config import get_settings
 from app.db import get_engine, get_sessionmaker
 from app.demo import cleanup_loop
@@ -25,6 +27,9 @@ from app.routers import (
 from app.thoughts import check_vector_extension
 from app.thoughts.embeddings import check_embedding_provider
 
+# How long shutdown waits for cancelled chat turns to store their answers.
+TURN_SHUTDOWN_TIMEOUT = 5.0
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,14 +40,22 @@ async def lifespan(app: FastAPI):
     get_chat_config()
     async with get_engine().connect() as connection:
         await check_vector_extension(connection)
+    # One process serves the app, so every claim left now is from a stopped one.
+    async with get_sessionmaker()() as session:
+        await release_stale_turns(session)
     cleanup = None
     if settings.auth_mode == "demo":
         cleanup = asyncio.create_task(cleanup_loop(get_sessionmaker))
     yield
+    # Running turns store what they have as interrupted and free their claims.
+    await running.shutdown(TURN_SHUTDOWN_TIMEOUT)
     if cleanup is not None:
         cleanup.cancel()
         with suppress(asyncio.CancelledError):
             await cleanup
+    # Close the pooled connections on this event loop, rather than leaving
+    # them to the garbage collector after the loop is gone.
+    await get_engine().dispose()
 
 
 install_log_masking()

@@ -14,20 +14,20 @@ async def broken_session():
     yield BrokenSession()
 
 
-def test_health_ok_when_database_answers(settings_env):
+def test_health_ok_when_database_answers(settings_env, test_database_url):
     with TestClient(app) as client:
         response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
-def test_health_needs_no_token(settings_env):
+def test_health_needs_no_token(settings_env, test_database_url):
     with TestClient(app) as client:
         response = client.get("/health", headers={})
     assert response.status_code == 200
 
 
-def test_health_503_when_database_fails(settings_env):
+def test_health_503_when_database_fails(settings_env, test_database_url):
     app.dependency_overrides[get_session] = broken_session
     try:
         with TestClient(app) as client:

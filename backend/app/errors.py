@@ -31,6 +31,8 @@ class ErrorCode:
     # Only ever sent as an `error` event inside a chat stream.
     OUTPUT_LIMIT_REACHED = "output_limit_reached"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
+    # Also stored on an answer the server stopped (shutdown or restart).
+    ANSWER_INTERRUPTED = "answer_interrupted"
     NOT_ALLOWED = "not_allowed"
     DEMO_SESSION_EXPIRED = "demo_session_expired"
     DEMO_FULL = "demo_full"
@@ -125,6 +127,14 @@ def tool_loop_limit() -> ApiError:
         200,
         ErrorCode.TOOL_LOOP_LIMIT,
         "The model kept using tools without finishing its answer. Try again.",
+    )
+
+
+def answer_interrupted() -> ApiError:
+    return ApiError(
+        200,
+        ErrorCode.ANSWER_INTERRUPTED,
+        "This answer did not finish. Send the message again to retry.",
     )
 
 

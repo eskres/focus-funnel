@@ -140,6 +140,7 @@ describe("createApiError", () => {
     ["conversation_busy", "ConversationBusyError"],
     ["output_limit_reached", "OutputLimitReachedError"],
     ["tool_loop_limit", "ToolLoopLimitError"],
+    ["answer_interrupted", "AnswerInterruptedError"],
   ])("turns %s into %s", async (code, className) => {
     const api = await import("./api");
     const ErrorClass = api[className as keyof typeof api] as typeof ApiError;
