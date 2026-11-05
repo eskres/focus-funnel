@@ -5,6 +5,7 @@ thread of its own, serving:
 
 - `/mcp`: an MCP server built on the SDK's low-level `Server`, with tools
   listed two per page. Every request's headers are kept in `seen_headers`.
+  A test can hide tools from the list or add some (`hidden`, `extra_tools`).
 - `/401`: answers every request with HTTP 401.
 - `/html`: answers every request with a plain HTML page and status 200.
 - `/hang`: never answers.
@@ -56,8 +57,18 @@ def server_tools() -> list[types.Tool]:
     ]
 
 
-async def _list_tools(ctx, params: types.PaginatedRequestParams | None) -> types.ListToolsResult:
-    tools = server_tools()
+def _lister(state: McpTestServer):
+    async def list_tools(
+        ctx, params: types.PaginatedRequestParams | None
+    ) -> types.ListToolsResult:
+        tools = [tool for tool in server_tools() if tool.name not in state.hidden]
+        tools += state.extra_tools
+        return _page(tools, params)
+
+    return list_tools
+
+
+def _page(tools: list[types.Tool], params: types.PaginatedRequestParams | None):
     start = int(params.cursor) if params and params.cursor else 0
     end = start + PAGE_SIZE
     return types.ListToolsResult(
@@ -105,6 +116,16 @@ class McpTestServer:
     seen_headers: list[dict[str, str]] = field(default_factory=list)
     # Authorization header values that /mcp answers with 401 from now on.
     revoked: set[str] = field(default_factory=set)
+    # Changes to the listed tools: names left out, and tools added at the end.
+    # A test that sets them puts them back (see `reset`).
+    hidden: set[str] = field(default_factory=set)
+    extra_tools: list[types.Tool] = field(default_factory=list)
+
+    def reset(self) -> None:
+        self.seen_headers.clear()
+        self.revoked.clear()
+        self.hidden.clear()
+        self.extra_tools.clear()
 
     @property
     def url(self) -> str:
@@ -112,7 +133,7 @@ class McpTestServer:
 
 
 def _app(state: McpTestServer):
-    server = Server("test", on_list_tools=_list_tools, on_call_tool=_call_tool)
+    server = Server("test", on_list_tools=_lister(state), on_call_tool=_call_tool)
     mcp_app = server.streamable_http_app(streamable_http_path="/mcp")
 
     async def app(scope, receive, send):

@@ -7,7 +7,8 @@ from app.chat import running
 from app.chat.config import get_chat_config
 from app.chat.conversations import release_stale_turns
 from app.config import get_settings
-from app.connector_config import get_connector_config
+from app.connector_config import ConnectorConfig, get_connector_config
+from app.connectors import prune_operator_rows
 from app.db import get_engine, get_sessionmaker
 from app.demo import cleanup_loop
 from app.errors import register_error_handlers
@@ -15,6 +16,7 @@ from app.log_masking import install_log_masking
 from app.provider_config import get_providers_config
 from app.routers import (
     chat,
+    connectors,
     conversations,
     demo,
     health,
@@ -32,6 +34,14 @@ from app.thoughts.embeddings import check_embedding_provider
 TURN_SHUTDOWN_TIMEOUT = 5.0
 
 
+async def prune_operator_connectors(config: ConnectorConfig) -> None:
+    """Remove every user's rows for operator connectors no longer configured,
+    so conversations drop them at once (openspec mcp-connectors decision 4)."""
+    async with get_sessionmaker()() as session:
+        await prune_operator_rows(session, config)
+        await session.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Fail at startup, not on first request, when settings or the provider or
@@ -40,7 +50,7 @@ async def lifespan(app: FastAPI):
     check_embedding_provider(settings, get_providers_config())
     get_chat_config()
     if settings.mcp_enabled:
-        get_connector_config()
+        await prune_operator_connectors(get_connector_config())
     async with get_engine().connect() as connection:
         await check_vector_extension(connection)
     # One process serves the app, so every claim left now is from a stopped one.
@@ -72,6 +82,7 @@ app.include_router(providers.router)
 app.include_router(settings_models.router)
 app.include_router(settings_categories.router)
 app.include_router(conversations.router)
+app.include_router(connectors.router)
 app.include_router(chat.router)
 app.include_router(thoughts.router)
 app.include_router(usage.router)

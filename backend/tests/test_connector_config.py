@@ -297,7 +297,8 @@ def test_app_refuses_to_start_on_an_invalid_file_when_enabled(settings_env, tmp_
             pass
 
 
-def test_app_starts_with_a_valid_file_when_enabled(settings_env, tmp_path):
+def test_app_starts_with_a_valid_file_when_enabled(settings_env, tmp_path, test_database_url):
+    # Startup also prunes unconfigured operator rows, so it needs the tables.
     settings_env.setenv("MCP_ENABLED", "true")
     settings_env.setenv("MCP_CONNECTORS_PATH", str(write(tmp_path, VALID)))
     with TestClient(app):
