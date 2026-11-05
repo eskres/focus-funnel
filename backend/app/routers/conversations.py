@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 import httpx2
 from fastapi import APIRouter, Depends, Response
@@ -19,6 +19,7 @@ from app.chat.conversations import (
     claim_turn,
     get_conversation,
     list_messages,
+    next_position,
     now,
     release_turn,
     switch_model,
@@ -29,15 +30,24 @@ from app.chat.proposal import (
     held_parts,
     held_proposal,
     list_proposals,
+    lookup_from_refs,
     offer_proposal,
+    part_lookup,
     proposal_payload,
-    saved_titles,
 )
+from app.chat.refs import conversation_refs
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.errors import ApiError, ErrorCode
 from app.models import Conversation, Proposal, User
 from app.providers import get_provider_http_client
+from app.thoughts.additions import (
+    add_to_thought,
+    lock_thought,
+    parse_version,
+    target_gone,
+)
+from app.thoughts.baseline import measure_after_store
 from app.thoughts.categories import check_category
 from app.thoughts.dates import FIELD as WHEN_FIELD
 from app.thoughts.dates import zone_from
@@ -88,6 +98,20 @@ class ProposalPart(BaseModel):
     saved_title: str | None = None
     # True when the part was saved and its thought has since been deleted.
     deleted: bool = False
+    # An addition (thought-appending design decision 3): the thought it adds
+    # to, and that thought's updated_at when the proposal was written, as the
+    # server wrote it, so the client sends it back unchanged.
+    add_to: uuid.UUID | None = None
+    based_on: str | None = None
+    # For an addition, the thought it adds to as it is now: title, summary,
+    # tags, category, created_at, and updated_at, or {"deleted": true}.
+    target: dict[str, Any] | None = None
+    # For a new idea, the strong match the card names, with the same fields
+    # and its thought_id, or null.
+    similar: dict[str, Any] | None = None
+    # Saved as an addition, and that addition undone since.
+    added: bool = False
+    undone: bool = False
 
 
 class ProposalOut(BaseModel):
@@ -139,14 +163,22 @@ class ConversationList(BaseModel):
 class ConfirmIn(BaseModel):
     # The indexes of the parts the card covers: one, or every part after a merge.
     parts: list[int] = Field(min_length=1)
-    # The thought store checks the fields, so its messages name them.
+    # The thought store checks the fields, so its messages name them. An
+    # addition keeps the thought's title, so its title is ignored.
     title: Any = None
     summary: Any = None
     tags: Any = None
     category: str | None = None
     # The card's date with the browser's zone, or null for no date. A missing
-    # key is not a pick: a part with two date choices then gets 422.
+    # key is not a pick: a part with two date choices then gets 422. An
+    # addition keeps its thought's date, so "add" ignores it.
     when: Any = None
+    # "add" adds the card to a filed thought (thought-appending design
+    # decision 7): `add_to` names it, else the part's own add_to, and
+    # `based_on` is the version the card shows, else the part's.
+    mode: Literal["new", "add"] = "new"
+    add_to: uuid.UUID | None = None
+    based_on: str | None = None
 
 
 class ConfirmOutcome(BaseModel):
@@ -206,10 +238,14 @@ async def detail(
     )
     held = held_parts(await held_proposal(session, conversation))
     proposals = await list_proposals(session, conversation)
-    titles = await saved_titles(session, user, proposals)
+    # One lookup gives the refs, the seen-thoughts note, and the saved titles.
+    refs = await conversation_refs(session, user.id, messages, proposals)
+    lookup = await lookup_from_refs(session, user, refs, proposals)
     gauge = meter(
         conversation,
-        build_context(messages, held),
+        build_context(
+            messages, held, seen_note=refs.note(get_chat_config().filing), refs=refs.by_id()
+        ),
         info.context_length if info is not None else None,
     )
     return ConversationDetail(
@@ -235,7 +271,7 @@ async def detail(
             )
             for m in messages
         ],
-        proposals=[ProposalOut(**proposal_payload(p, titles)) for p in proposals],
+        proposals=[ProposalOut(**proposal_payload(p, lookup)) for p in proposals],
         turn=turn,
     )
 
@@ -400,8 +436,8 @@ async def offer_held_proposal(
     conversation = await get_conversation(session, user, conversation_id)
     held = await held_proposal(session, conversation)
     if held_parts(held) is not None:
-        titles = await saved_titles(session, user, [held])
-        return OfferedProposal(proposal=ProposalOut(**proposal_payload(held, titles)))
+        lookup = await part_lookup(session, user, [held])
+        return OfferedProposal(proposal=ProposalOut(**proposal_payload(held, lookup)))
     await claim_turn(session, conversation)
     try:
         offered = await offer_proposal(
@@ -414,7 +450,7 @@ async def offer_held_proposal(
             zone=zone_from(body.time_zone if body is not None else None),
         )
         payload = (
-            proposal_payload(offered, await saved_titles(session, user, [offered]))
+            proposal_payload(offered, await part_lookup(session, user, [offered]))
             if offered is not None
             else None
         )
@@ -476,30 +512,46 @@ async def confirm_proposal(
     if any(saved - {None}):
         raise part_already_saved()
 
-    category = await check_category(session, user, body.category)
-    # A merged card keeps the first part's date or choices. With choices, the
-    # card must say which the user picked: a date, or null for no date.
-    if proposal.parts[indexes[0]].get("when_choices") and "when" not in body.model_fields_set:
-        raise ApiError(422, ErrorCode.VALIDATION_ERROR, f"{WHEN_FIELD}: pick a date, or no date")
-
-    outcome = await add_thought(
-        session,
-        user,
-        title=body.title,
-        summary=body.summary,
-        tags=body.tags,
-        raw_text=proposal.raw_text,
-        category=category,
-        when=body.when,
-        settings=settings,
-        conversation_id=conversation.id,
-        proposal_id=proposal.id,
-        http_client=http_client,
-    )
-    thought_id = str(outcome.thought.id)
+    if body.mode == "add":
+        # An addition never changes its thought's date (thought-appending
+        # design decision 22), so a part's date choices need no pick here.
+        thought_id = await confirm_addition(
+            session, user, conversation, proposal, indexes, body, settings, http_client
+        )
+    else:
+        category = await check_category(session, user, body.category)
+        # A merged card keeps the first part's date or choices. With choices, the
+        # card must say which the user picked: a date, or null for no date.
+        if (
+            proposal.parts[indexes[0]].get("when_choices")
+            and "when" not in body.model_fields_set
+        ):
+            raise ApiError(
+                422, ErrorCode.VALIDATION_ERROR, f"{WHEN_FIELD}: pick a date, or no date"
+            )
+        outcome = await add_thought(
+            session,
+            user,
+            title=body.title,
+            summary=body.summary,
+            tags=body.tags,
+            raw_text=proposal.raw_text,
+            category=category,
+            when=body.when,
+            settings=settings,
+            conversation_id=conversation.id,
+            proposal_id=proposal.id,
+            http_client=http_client,
+        )
+        thought_id = str(outcome.thought.id)
+    # The conversation sees the thought now, after every stored row, so its
+    # ref comes after every ref given so far (thought-appending decision 15).
+    seen_position = await next_position(session, conversation)
     # A new list, so the JSON column is written.
     proposal.parts = [
-        {**part, "thought_id": thought_id} if index in indexes else part
+        {**part, "thought_id": thought_id, "seen_position": seen_position}
+        if index in indexes
+        else part
         for index, part in enumerate(proposal.parts)
     ]
     if conversation.held_proposal_id == proposal.id and not any(
@@ -507,4 +559,76 @@ async def confirm_proposal(
     ):
         conversation.held_proposal_id = None
     await session.commit()
-    return ConfirmOutcome(saved=True, thought_id=outcome.thought.id, message="Saved.")
+    if body.mode == "add":
+        # An addition adds no thought, so the baseline cannot be due.
+        return ConfirmOutcome(saved=True, thought_id=thought_id, message="Added.")
+    # After the commit, so the baseline never fails or slows the confirm's
+    # transaction (thought-appending design decision 5).
+    await measure_after_store(session, user)
+    return ConfirmOutcome(saved=True, thought_id=thought_id, message="Saved.")
+
+
+async def confirm_addition(
+    session: AsyncSession,
+    user: User,
+    conversation: Conversation,
+    proposal: Proposal,
+    indexes: list[int],
+    body: ConfirmIn,
+    settings: Settings,
+    http_client: httpx2.AsyncClient | None,
+) -> str:
+    """Add one card to a filed thought, without committing; returns its id.
+
+    The target is the body's add_to, else the part's: its own add_to, or the
+    match the "Similar" hint named. It must be the user's existing thought
+    (else 404, with the file-as-new message) and one this conversation has
+    seen (design decision 4, layer 3). The version is the body's based_on,
+    else the part's, so the hint, whose part has none, sends the one it shows.
+    """
+    if len(indexes) != 1:
+        raise ApiError(422, ErrorCode.VALIDATION_ERROR, "parts: an addition covers one part")
+    part = proposal.parts[indexes[0]]
+    target_id = body.add_to or (uuid.UUID(str(part["add_to"])) if part.get("add_to") else None)
+    if target_id is None:
+        raise ApiError(422, ErrorCode.VALIDATION_ERROR, "add_to: name the thought to add to")
+    # Two parts of one proposal never add to one thought. The proposal row
+    # is locked, so a concurrent confirm of another part cannot slip past.
+    if any(
+        other.get("thought_id") == str(target_id)
+        for index, other in enumerate(proposal.parts)
+        if index != indexes[0]
+    ):
+        raise ApiError(
+            409,
+            ErrorCode.PROPOSAL_PART_SAVED,
+            "Another part of this proposal was saved to that thought already. "
+            "File this one as a new thought instead.",
+        )
+    thought = await lock_thought(session, user, target_id)
+    if thought is None:
+        raise target_gone()
+    messages = await list_messages(session, conversation)
+    refs = await conversation_refs(
+        session, user.id, messages, await list_proposals(session, conversation)
+    )
+    if thought.id not in refs.numbered:
+        raise ApiError(
+            422,
+            ErrorCode.VALIDATION_ERROR,
+            "add_to: must name a thought this conversation has seen",
+        )
+    await add_to_thought(
+        session,
+        user,
+        thought,
+        proposal,
+        messages,
+        based_on=parse_version(body.based_on if body.based_on is not None else part.get("based_on")),
+        summary=body.summary,
+        tags=body.tags,
+        category=body.category,
+        settings=settings,
+        http_client=http_client,
+    )
+    return str(thought.id)

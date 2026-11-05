@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import func, select
@@ -17,6 +18,7 @@ from app.models import (
     ProviderKey,
     SearchIndex,
     Thought,
+    ThoughtAddition,
     ThoughtEmbedding,
     UsageEvent,
     User,
@@ -43,6 +45,7 @@ USER_OWNED = {
     ThoughtEmbedding: lambda user_id: ThoughtEmbedding.thought_id.in_(
         select(Thought.id).where(Thought.user_id == user_id)
     ),
+    ThoughtAddition: lambda user_id: ThoughtAddition.user_id == user_id,
 }
 
 
@@ -99,9 +102,19 @@ async def add_everything(session, user: User) -> None:
     )
     session.add_all([thought, index])
     await session.flush()
-    session.add(
-        ThoughtEmbedding(index_id=index.id, thought_id=thought.id, chunk=0, embedding=[0.1, 0.2])
-    )
+    proposal = (await session.execute(select(Proposal).where(Proposal.user_id == user.id))).scalar_one()
+    session.add_all([
+        ThoughtEmbedding(index_id=index.id, thought_id=thought.id, chunk=0, embedding=[0.1, 0.2]),
+        ThoughtAddition(
+            thought_id=thought.id,
+            user_id=user.id,
+            proposal_id=proposal.id,
+            from_position=0,
+            to_position=0,
+            after_updated_at=datetime.now(UTC),
+            before={"title": "t", "summary": "s", "tags": ["a"], "category": None, "raw_text": None},
+        ),
+    ])
     await session.commit()
 
 

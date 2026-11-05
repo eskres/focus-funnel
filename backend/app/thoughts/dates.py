@@ -121,3 +121,35 @@ def when_of(row: Any) -> dict[str, str | None] | None:
         "end": _written(row.ends_on, row.ends_at) if row.ends_on is not None else None,
         "time_zone": row.time_zone or DEFAULT_ZONE,
     }
+
+
+_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def _day_and_time(on: date, at: time | None) -> str:
+    written = f"{_WEEKDAYS[on.weekday()]} {on.isoformat()}"
+    return written if at is None else f"{written} {at.strftime('%H:%M')}"
+
+
+def thought_date_text(thought: Any) -> str | None:
+    """A thought's own date as the search result and the seen-thoughts note show it, or None for no date.
+
+    `Fri 2026-10-02 19:00`, `Tue 2026-11-03 to Fri 2026-11-06`, or, for an end
+    later the same day, `Fri 2026-10-02 19:00 to 21:00`. As written, in the
+    zone it was set in.
+    """
+    if thought.starts_on is None:
+        return None
+    start = _day_and_time(thought.starts_on, thought.starts_at)
+    if thought.ends_on is None:
+        return start
+    if thought.ends_on == thought.starts_on and thought.ends_at is not None:
+        return f"{start} to {thought.ends_at.strftime('%H:%M')}"
+    return f"{start} to {_day_and_time(thought.ends_on, thought.ends_at)}"
+
+
+def local_day(moment: datetime, zone: ZoneInfo) -> date:
+    """The day `moment` falls on in `zone`; a naive moment (SQLite) is UTC."""
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(zone).date()

@@ -21,6 +21,7 @@ from app.chat.config import get_chat_config
 from app.config import Settings
 from app.errors import ApiError, ErrorCode
 from app.models import Conversation, Proposal, SearchIndex, Thought, ThoughtEmbedding, User
+from app.thoughts.baseline import measure_after_store
 from app.thoughts.chunking import Piece, pieces
 from app.thoughts.dates import parse_when
 from app.thoughts.indexing import (
@@ -262,6 +263,8 @@ async def store_thought(
         **fields,
     )
     await session.commit()
+    # After the commit: the baseline is never part of the store's transaction.
+    await measure_after_store(session, user)
     await session.refresh(outcome.thought)
     return outcome
 
@@ -384,10 +387,10 @@ async def get_thought_with_origin(
 _UNSET: Any = object()
 
 
-async def update_thought(
+async def apply_update(
     session: AsyncSession,
     user: User,
-    thought_id: uuid.UUID,
+    thought: Thought,
     *,
     title: Any = _UNSET,
     summary: Any = _UNSET,
@@ -399,13 +402,15 @@ async def update_thought(
     conversation_id: uuid.UUID | None = None,
     http_client: httpx2.AsyncClient | None = None,
 ) -> StoreOutcome:
-    """Change some of a thought's fields, and index again only what changed.
+    """Change some of the user's thought's fields, and index again only what
+    changed, without committing, so the caller can commit it with other
+    changes. Raises validation_error only.
 
     A new title, summary, or raw text replaces all the thought's entries; new
     tags replace its head; a new category or date touches no entry. A when
-    of None clears the date.
+    of None clears the date. The thought is one the caller loaded for this
+    user, and may have locked.
     """
-    thought = await get_thought(session, user, thought_id)
 
     def pick(value: Any, current: Any) -> Any:
         return current if value is _UNSET else value
@@ -431,8 +436,7 @@ async def update_thought(
         for name, value in date_columns.values().items():
             setattr(thought, name, value)
     if not (content_changed or tags_changed):
-        await session.commit()
-        await session.refresh(thought)
+        await session.flush()
         return StoreOutcome(thought=thought, embedded=True)
 
     thought.search_tsv = search_vector(fields.title, fields.tags, fields.summary, fields.raw_text)
@@ -457,6 +461,33 @@ async def update_thought(
         settings=settings,
         conversation_id=conversation_id,
         http_client=http_client,
+    )
+    await session.flush()
+    return outcome
+
+
+async def update_thought(
+    session: AsyncSession,
+    user: User,
+    thought_id: uuid.UUID,
+    *,
+    settings: Settings,
+    conversation_id: uuid.UUID | None = None,
+    http_client: httpx2.AsyncClient | None = None,
+    **fields: Any,
+) -> StoreOutcome:
+    """Change some of a thought's fields with apply_update(), and commit.
+    Raises not_found for a missing thought or another user's, and
+    validation_error."""
+    thought = await get_thought(session, user, thought_id)
+    outcome = await apply_update(
+        session,
+        user,
+        thought,
+        settings=settings,
+        conversation_id=conversation_id,
+        http_client=http_client,
+        **fields,
     )
     await session.commit()
     await session.refresh(thought)

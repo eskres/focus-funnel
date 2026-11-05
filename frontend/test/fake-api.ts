@@ -54,6 +54,24 @@ export type WirePart = {
   saved_title?: string | null;
   /** True when the saved thought was deleted; left out, as an older server does. */
   deleted?: boolean;
+  /** An addition: the thought it adds to and its version; left out for a new thought. */
+  add_to?: string | null;
+  based_on?: string | null;
+  target?: WireTarget | { deleted: true } | null;
+  /** The strong match a new thought's "Similar" hint names. */
+  similar?: (WireTarget & { thought_id: string }) | null;
+  added?: boolean;
+  undone?: boolean;
+};
+
+/** A filed thought as a proposal part's `target` or `similar` carries it. */
+export type WireTarget = {
+  title: string;
+  summary: string;
+  tags: string[];
+  category: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export const wireProposal = (

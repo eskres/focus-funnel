@@ -5,7 +5,7 @@ import uuid
 
 from sqlalchemy import select
 
-from app.chat.prompt import build_context, held_proposal_note, system_prompt
+from app.chat.prompt import OFFER_NOTE, build_context, held_proposal_note, system_prompt
 from app.models import Conversation, Message, Proposal
 from tests.chat_helpers import (
     chat,
@@ -148,7 +148,20 @@ def test_the_offer_call_returns_and_holds_a_proposal(client, alice, fake_llm, te
     assert response.status_code == 200, response.text
     offered = response.json()["proposal"]
     assert offered["parts"] == [
-        {**PROPOSAL, "when": None, "when_choices": None, "thought_id": None, "saved_title": None, "deleted": False}
+        {
+            **PROPOSAL,
+            "when": None,
+            "when_choices": None,
+            "thought_id": None,
+            "saved_title": None,
+            "deleted": False,
+            "add_to": None,
+            "based_on": None,
+            "target": None,
+            "similar": None,
+            "added": False,
+            "undone": False,
+        }
     ]
     assert offered["position"] == 1
     request = fake_llm.chat_requests[0]
@@ -218,11 +231,10 @@ def test_a_later_discussion_is_offered_without_what_was_filed(
 
     assert offered["parts"][0]["thought_id"] is None
     [request] = fake_llm.chat_requests
-    assert system_notes(request)[-1].endswith(
-        "These thoughts were already filed from this conversation:\n- Oat milk\n"
-        "Do not propose them again. New facts or decisions about the same topic "
-        "may still be worth keeping."
-    )
+    # The filed thought's titles are not listed any more: the seen-thoughts
+    # note names the filed thoughts that still exist (thought-appending 2.2),
+    # and this one has no row, so the offer has only its own note.
+    assert system_notes(request) == [system_prompt(), OFFER_NOTE]
 
 
 def test_an_offer_the_model_declines_offers_nothing(client, alice, fake_llm, test_database_url):

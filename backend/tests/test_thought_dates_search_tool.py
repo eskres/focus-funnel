@@ -244,9 +244,10 @@ def test_what_is_on_this_week_through_the_chat(client, alice, fake_llm, test_dat
     content = fake_llm.chat_requests[-1]["messages"][-1]["content"]
     assert content == (
         "2 of your thoughts are dated in those days (date order):\n"
-        "1. Trip to Oslo · filed 2026-09-20 · on Wed 2026-09-30 to Sat 2026-10-03\n"
+        # With thought-appending, each result carries its ref.
+        "1. T1 · Trip to Oslo · filed 2026-09-20 · on Wed 2026-09-30 to Sat 2026-10-03\n"
         "   About trip to oslo.\n"
-        "2. Dinner with Sam · filed 2026-09-20 · on Fri 2026-10-02 19:00\n"
+        "2. T2 · Dinner with Sam · filed 2026-09-20 · on Fri 2026-10-02 19:00\n"
         "   About dinner with sam."
     )
     assert len(fake_llm.embed_requests) == embed_calls

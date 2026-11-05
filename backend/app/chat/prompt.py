@@ -2,6 +2,7 @@
 
 import json
 import math
+from collections.abc import Mapping, Sequence
 from datetime import date
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -10,7 +11,7 @@ from app.chat.commands import parse_message
 from app.errors import ApiError
 from app.models import Message
 from app.thoughts.categories import FIXED_CATEGORIES
-from app.thoughts.dates import DEFAULT_ZONE, today_in
+from app.thoughts.dates import DEFAULT_ZONE, local_day, thought_date_text, today_in
 
 SEARCH_TOOL = "search_thoughts"
 PROPOSE_TOOL = "propose_thought"
@@ -110,6 +111,17 @@ CATEGORY_DESCRIPTION = (
     "categories are for their own kinds."
 )
 TAGS_DESCRIPTION = "A few short tags."
+# Additions (thought-appending design decisions 2 and 3).
+ADD_TO_DESCRIPTION = (
+    "The ref, such as T2, of a thought this conversation has seen, to add this entry "
+    "to it instead of filing a new thought. Give it when the entry continues that "
+    "thought. The summary is then the whole new summary of that thought, and says "
+    "what changed and when; its title is kept and the title here is ignored. Its "
+    "date is kept too: give no when or when_choices with add_to."
+)
+NEW_DESCRIPTION = (
+    "true to keep this entry a new thought after similar thoughts were listed for it."
+)
 
 # The model gives a start and an end only; the server adds the user's zone
 # (thought-dates design decisions 2 and 5).
@@ -182,6 +194,8 @@ def propose_tool_schema(categories: list[str], known_tags: list[str]) -> dict[st
                 "maxItems": 2,
                 "description": WHEN_CHOICES_DESCRIPTION,
             },
+            "add_to": {"type": "string", "description": ADD_TO_DESCRIPTION},
+            "new": {"type": "boolean", "description": NEW_DESCRIPTION},
         },
         "required": ["title", "summary", "tags", "category"],
     }
@@ -243,7 +257,11 @@ def _date_text(when: dict[str, Any]) -> str:
 
 
 def date_line(part: dict[str, Any]) -> str:
-    """A part's date for the held-proposal note: one date, both choices, or none."""
+    """A part's date for the held-proposal note: one date, both choices, or
+    none. An addition keeps its thought's date (thought-appending design
+    decision 22), so it says so."""
+    if part.get("add_to"):
+        return "unchanged (an addition keeps its thought's date)"
     choices = part.get("when_choices")
     if choices:
         return " or ".join(_date_text(choice) for choice in choices) + " (not picked yet)"
@@ -252,8 +270,12 @@ def date_line(part: dict[str, Any]) -> str:
     return "none"
 
 
-def held_proposal_note(parts: list[dict[str, Any]]) -> str:
-    """The note for a held proposal: its parts the user has not saved."""
+def held_proposal_note(
+    parts: list[dict[str, Any]], refs: Mapping[str, str] | None = None
+) -> str:
+    """The note for a held proposal: its parts the user has not saved. An
+    addition's part also names the thought it adds to by its ref, from `refs`
+    (a ref by thought id), when that thought still exists."""
     blocks = [
         "Title: {title}\nSummary: {summary}\nTags: {tags}\nCategory: {category}\nDate: {date}".format(
             title=part.get("title", ""),
@@ -262,9 +284,65 @@ def held_proposal_note(parts: list[dict[str, Any]]) -> str:
             category=part.get("category") or "none",
             date=date_line(part),
         )
+        + _adds_to_line(part, refs)
         for part in unsaved_parts(parts)
     ]
     return HELD_PROPOSAL_NOTE.format(parts="\n\n".join(blocks))
+
+
+def _adds_to_line(part: dict[str, Any], refs: Mapping[str, str] | None) -> str:
+    ref = (refs or {}).get(str(part.get("add_to"))) if part.get("add_to") else None
+    return f"\nAdds to: {ref}" if ref else ""
+
+
+SEEN_THOUGHTS_NOTE = """\
+Thoughts this conversation has seen, most recently seen first, each with its \
+ref. To add to one instead of filing a new thought, set add_to to its ref in \
+propose_thought.
+{thoughts}"""
+
+
+def _cut(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(" ", 1)[0].rstrip(",;:.") + "…"
+
+
+def thought_entry(
+    ref: str, thought: Any, summary_chars: int, zone: ZoneInfo | None = None
+) -> str:
+    """A filed thought as the model reads it by ref: ref, title, filing date,
+    the thought's own date when it has one, tags, and category, then the
+    summary cut at `summary_chars`. The filing day is the user's local day in
+    `zone` (UTC when not given), and the own date reads as in the search
+    tool's text (thought-dates design decision 12)."""
+    filed = local_day(thought.created_at, zone or ZoneInfo(DEFAULT_ZONE))
+    heading = f"{ref} · {thought.title} · filed {filed.isoformat()}"
+    dated = thought_date_text(thought)
+    if dated:
+        heading += f" · on {dated}"
+    if thought.tags:
+        heading += " · " + " ".join(f"#{tag}" for tag in thought.tags)
+    if thought.category:
+        heading += f" · {thought.category}"
+    return heading + "\n   " + _cut(thought.summary, summary_chars)
+
+
+def seen_thoughts_note(
+    seen: Sequence[Any], limit: int, summary_chars: int, zone: ZoneInfo | None = None
+) -> str | None:
+    """The note naming the thoughts this conversation has seen, by ref and
+    never by id (thought-appending design decision 2): the first `limit` of
+    `seen`, which comes most recently seen first, each as thought_entry()
+    writes it, filed on its local day in `zone`. None when nothing was seen."""
+    entries = [
+        thought_entry(thought.ref, thought, summary_chars, zone)
+        for thought in list(seen)[:limit]
+    ]
+    if not entries:
+        return None
+    return SEEN_THOUGHTS_NOTE.format(thoughts="\n".join(entries))
 
 
 OFFER_NOTE = (
@@ -275,32 +353,32 @@ OFFER_NOTE = (
     "nothing is worth keeping, reply with one word, nothing, and call no tool."
 )
 
-FILED_NOTE = (
-    "These thoughts were already filed from this conversation:\n{titles}\n"
-    "Do not propose them again. New facts or decisions about the same topic "
-    "may still be worth keeping."
+# In the offer, after the seen-thoughts note. It replaces the list of titles
+# filed from this conversation that the offer once had.
+OFFER_SEEN_NOTE = (
+    "The thoughts this conversation has seen are filed already: do not propose them "
+    "again as new thoughts. When the conversation since adds new facts or decisions "
+    "about one of them, propose them as an addition to it, with add_to set to its ref."
 )
 
 
-def offer_note(filed: list[str]) -> str:
-    """The note for the call before archive or /compact, with the thoughts
-    this conversation already filed, if any."""
-    return OFFER_NOTE if not filed else OFFER_NOTE + "\n\n" + filed_note(filed)
-
-
-def filed_note(titles: list[str]) -> str:
-    """The note for an offered proposal: the thoughts this conversation already filed."""
-    return FILED_NOTE.format(titles="\n".join(f"- {title}" for title in titles))
+def offer_note(seen: bool) -> str:
+    """The note for the call before archive or /compact, and when the
+    seen-thoughts note lists any thought, how to treat them."""
+    return OFFER_NOTE + "\n\n" + OFFER_SEEN_NOTE if seen else OFFER_NOTE
 
 
 def drop_held_note(context: list[dict[str, Any]], held_parts: list[dict[str, Any]] | None) -> None:
     """Remove the held-proposal note once the turn has proposed, so the model
-    does not follow the note again in the next round."""
+    does not follow the note again in the next round. The note is found by its
+    first line, since an addition's part names its ref in it."""
     if not held_parts:
         return
-    note = {"role": "system", "content": held_proposal_note(held_parts)}
-    if note in context:
-        context.remove(note)
+    head = HELD_PROPOSAL_NOTE.split("\n", 1)[0]
+    for message in context:
+        if message.get("role") == "system" and (message.get("content") or "").startswith(head):
+            context.remove(message)
+            return
 
 
 def forced_tool(name: str) -> dict[str, Any]:
@@ -346,10 +424,14 @@ def build_context(
     messages: list[Message],
     held_parts: list[dict[str, Any]] | None = None,
     today: date | None = None,
+    *,
+    seen_note: str | None = None,
+    refs: Mapping[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """The system prompt, the latest summary if any, every message not
-    compacted, then the held-proposal note if a proposal with unsaved parts
-    is held. The note
+    compacted, the seen-thoughts note if any, then the held-proposal note if
+    a proposal with unsaved parts is held, naming an addition's thought by
+    its ref from `refs`. The held note
     comes last because the model follows it far more often there."""
     context: list[dict[str, Any]] = [{"role": "system", "content": system_prompt(today)}]
     summaries = [m for m in messages if m.role == "summary" and not m.compacted]
@@ -366,8 +448,10 @@ def build_context(
         converted = _as_model_message(message)
         if converted is not None:
             context.append(converted)
+    if seen_note:
+        context.append({"role": "system", "content": seen_note})
     if held_parts and unsaved_parts(held_parts):
-        context.append({"role": "system", "content": held_proposal_note(held_parts)})
+        context.append({"role": "system", "content": held_proposal_note(held_parts, refs)})
     return context
 
 

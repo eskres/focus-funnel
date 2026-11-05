@@ -29,6 +29,7 @@ from app.chat.usage import utc_now
 from app.config import Settings, get_settings
 from app.db import create_engine
 from app.models import SearchIndex, Thought, ThoughtEmbedding, User
+from app.thoughts.baseline import measure_baseline
 from app.thoughts.indexing import (
     ACTIVE,
     BUILDING,
@@ -167,6 +168,10 @@ async def finish_rebuild(
     if old is not None:
         await session.execute(delete(ThoughtEmbedding).where(ThoughtEmbedding.index_id == old.id))
     await session.commit()
+    # The new index learns its similarity baseline as it becomes active
+    # (thought-appending design decision 5). A failure keeps none and is logged.
+    await session.refresh(building)
+    await measure_baseline(session, user, building)
 
 
 async def rebuild_user(

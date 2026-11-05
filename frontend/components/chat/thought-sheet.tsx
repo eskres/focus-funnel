@@ -35,8 +35,10 @@ import {
   deleteThought,
   getThought,
   type Thought,
+  type ThoughtAddition,
   type ThoughtChange,
   type ThoughtOrigin,
+  undoAddition,
   updateThought,
 } from "@/lib/thoughts";
 
@@ -189,6 +191,11 @@ function ThoughtBody({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [undoing, setUndoing] = useState(false);
+  const additions = thought.additions ?? [];
+  // Only the newest addition can be undone, and only once: every undo changes
+  // the thought, so an older one could not be undone after it anyway.
+  const lastAddition = additions[0] && !additions[0].undone ? additions[0] : null;
   const rawText = thought.raw_text?.trim();
   const showRaw = Boolean(rawText) && rawText !== thought.summary.trim();
 
@@ -230,6 +237,14 @@ function ThoughtBody({
     onDeleted();
   }
 
+  /** A refusal (409, the thought changed since) throws, and the dialog shows why. */
+  async function undo() {
+    if (!lastAddition) return;
+    const restored = await undoAddition(thought.id, lastAddition);
+    setUndoing(false);
+    onSaved(restored);
+  }
+
   const note = text && emptyNote(text);
 
   return (
@@ -262,6 +277,11 @@ function ThoughtBody({
             <Button size="sm" variant="outline" onClick={() => setDeleting(true)}>
               Delete
             </Button>
+            {lastAddition && (
+              <Button size="sm" variant="outline" onClick={() => setUndoing(true)}>
+                Undo last addition
+              </Button>
+            )}
           </div>
           {(thought.category || thought.tags.length > 0) && (
             <div className="flex flex-wrap items-center gap-1" aria-label="Category and tags">
@@ -280,6 +300,7 @@ function ThoughtBody({
         </>
       )}
       {thought.origin && <Origin origin={thought.origin} />}
+      {additions.length > 0 && <Additions additions={additions} />}
       {showRaw && (
         <section aria-label="Raw text">
           <h3 className="mb-1 text-xs font-medium text-muted-foreground">Raw text</h3>
@@ -296,38 +317,92 @@ function ThoughtBody({
         description={<>“{thought.title}” is deleted for good. This cannot be undone.</>}
         failure="Could not delete the thought."
       />
+      {lastAddition && (
+        <DeleteDialog
+          title={thought.title}
+          open={undoing}
+          onCancel={() => setUndoing(false)}
+          onConfirm={undo}
+          heading="Undo the last addition?"
+          description={
+            <>
+              The summary, tags, and category go back to what they were before the addition from “
+              {lastAddition.conversation_title}”.
+            </>
+          }
+          failure="Could not undo the addition."
+          action="Undo"
+        />
+      )}
     </div>
   );
 }
 
 /**
- * Where the thought was saved from. The link is a real link, so it can be
- * copied; a plain click in the conversation it names stays on this page.
+ * A link to a conversation at one proposal card. It is a real link, so it can
+ * be copied; a plain click in the conversation it names stays on this page.
  */
-function Origin({ origin }: { origin: ThoughtOrigin }) {
+function CardLink({
+  conversationId,
+  proposalId,
+  children,
+}: {
+  conversationId: string;
+  proposalId: string;
+  children: string;
+}) {
   const router = useRouter();
-  const href = originHref(origin.conversation_id, origin.proposal_id);
+  const href = originHref(conversationId, proposalId);
 
   function open(event: MouseEvent<HTMLAnchorElement>) {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
     event.preventDefault();
-    if (isOpenConversation(origin.conversation_id)) {
-      openOriginHere(origin.conversation_id, origin.proposal_id);
+    if (isOpenConversation(conversationId)) {
+      openOriginHere(conversationId, proposalId);
     } else {
       router.push(href);
     }
   }
 
   return (
+    <a href={href} onClick={open} className="text-primary underline-offset-4 hover:underline">
+      {children}
+    </a>
+  );
+}
+
+/** Where the thought was saved from. */
+function Origin({ origin }: { origin: ThoughtOrigin }) {
+  return (
     <section aria-label="Origin">
       <h3 className="mb-1 text-xs font-medium text-muted-foreground">From</h3>
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-        <a href={href} onClick={open} className="text-primary underline-offset-4 hover:underline">
+        <CardLink conversationId={origin.conversation_id} proposalId={origin.proposal_id}>
           {origin.conversation_title}
-        </a>
+        </CardLink>
         <span className="text-muted-foreground">proposed {stamp(origin.proposed_at)}</span>
         {origin.archived && <Badge variant="outline">Archived</Badge>}
       </p>
+    </section>
+  );
+}
+
+/** Where the thought grew, newest first, each linked to its card. */
+function Additions({ additions }: { additions: ThoughtAddition[] }) {
+  return (
+    <section aria-label="Additions">
+      <h3 className="mb-1 text-xs font-medium text-muted-foreground">Added to from</h3>
+      <ul className="flex flex-col gap-1">
+        {additions.map((addition) => (
+          <li key={addition.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            <CardLink conversationId={addition.conversation_id} proposalId={addition.proposal_id}>
+              {addition.conversation_title}
+            </CardLink>
+            <span className="text-muted-foreground">added {stamp(addition.added_at)}</span>
+            {addition.undone && <Badge variant="outline">Undone</Badge>}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

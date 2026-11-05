@@ -15,7 +15,8 @@ import {
 /**
  * Asks before something is deleted for good. Opened only by the user. By
  * default it asks about a conversation; `heading`, `description`, and
- * `failure` word it for something else, such as a thought.
+ * `failure` word it for something else, such as a thought, and `action`
+ * names its button for another change that asks first, such as an undo.
  */
 export function DeleteDialog({
   title,
@@ -25,6 +26,7 @@ export function DeleteDialog({
   heading = "Delete this conversation?",
   description,
   failure = "Could not delete the conversation.",
+  action = "Delete",
 }: {
   /** The name of what is deleted. */
   title: string;
@@ -35,6 +37,8 @@ export function DeleteDialog({
   description?: ReactNode;
   /** Shown when the delete fails with no message of its own. */
   failure?: string;
+  /** The confirm button's label. */
+  action?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +83,7 @@ export function DeleteDialog({
             Cancel
           </Button>
           <Button variant="destructive" onClick={confirm} disabled={busy}>
-            Delete
+            {action}
           </Button>
         </DialogFooter>
       </DialogContent>

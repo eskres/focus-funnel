@@ -93,9 +93,18 @@ export type ConfirmRequest = {
   category: string | null;
   /**
    * The card's date with the browser's zone, or null for no date. Left out, the
-   * thought gets no date; a part with two date choices needs it.
+   * thought gets no date; a part with two date choices needs it. An addition
+   * keeps its thought's date, so the server ignores it with "add".
    */
   when?: When | null;
+  /**
+   * "add" adds the card to the filed thought `add_to`, at the version
+   * `based_on` the card shows (the server's `updated_at`, unchanged). Left
+   * out, the card is filed as a new thought.
+   */
+  mode?: "new" | "add";
+  add_to?: string;
+  based_on?: string;
 };
 
 export type ConfirmOutcome = { saved: boolean; thought_id: string; message: string };
