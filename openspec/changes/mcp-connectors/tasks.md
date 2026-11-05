@@ -23,9 +23,9 @@
 
 ## 4. MCP client
 
-- [ ] 4.1 Add the SDK to `pyproject.toml` with the version from task 1.1 and wrap it in `app/mcp_client.py` (connect with auth headers, list tools, call a tool, close) behind a small interface. Check with pytest against an in-process Streamable HTTP test server that listing and calling work and that auth headers arrive
-- [ ] 4.2 Map failures to `connector_unreachable`, `connector_auth_failed`, and `connector_protocol_error`, with the connect and call timeouts from `chat.yaml`. Check with pytest that a closed port, a 401, a server that answers with plain HTML, and a server that sleeps past `call_seconds` each give the right code within the timeout
-- [ ] 4.3 Add result conversion from design decision 8: text kept, `structuredContent` as compact JSON when there is no text, other content replaced by a note, `isError` prefixed, cut at `result_max_chars`, and wrapped in the data marking. Check with pytest for each content kind and for a cut result
+- [x] 4.1 Add the SDK to `pyproject.toml` with the version from task 1.1 and wrap it in `app/mcp_client.py` (connect with auth headers, list tools, call a tool, close) behind a small interface. Check with pytest against an in-process Streamable HTTP test server that listing and calling work and that auth headers arrive
+- [x] 4.2 Map failures to `connector_unreachable`, `connector_auth_failed`, and `connector_protocol_error`, with the connect and call timeouts from `chat.yaml`. Check with pytest that a closed port, a 401, a server that answers with plain HTML, and a server that sleeps past `call_seconds` each give the right code within the timeout
+- [x] 4.3 Add result conversion from design decision 8: text kept, `structuredContent` as compact JSON when there is no text, other content replaced by a note, `isError` prefixed, cut at `result_max_chars`, and wrapped in the data marking. Check with pytest for each content kind and for a cut result
 
 ## 5. Connector API
 
