@@ -567,7 +567,7 @@ async def probe_search(settings: Settings, runs: int) -> tuple[list[str], bool]:
         search = next((c for c in turn.calls if c["name"] == SEARCH_TOOL and c["valid"]), None)
         searched = not turn.error and turn.first_tool == SEARCH_TOOL and search is not None
         args = parse_search(tool_arguments(search["arguments"])) if search else None
-        query = args.query.lower() if args else ""
+        query = (args.query or "").lower() if args else ""
         keywords = bool(args) and "?" not in query and not query.startswith(QUESTION_WORDS) and any(
             word in query for word in case["words"]
         )

@@ -282,7 +282,11 @@ class Turn:
                 result = found.text
                 extra = {"sources": found.sources}
                 details = {"sources": found.sources}
-                summary = f"Searched your thoughts for “{search.query}”"
+                summary = (
+                    f"Looked up your thoughts dated {search.days_text}"
+                    if search.by_date_only
+                    else f"Searched your thoughts for “{search.query}”"
+                )
             elif name == PROPOSE_TOOL and self._proposed:
                 result = ALREADY_PROPOSED
                 summary = "Already proposed in this answer"

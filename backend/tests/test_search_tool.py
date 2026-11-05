@@ -80,7 +80,7 @@ def test_result_has_the_documented_form_and_sources_go_in_the_event_and_the_mess
     response, content = search_in_chat(client, alice, fake_llm, {"query": "oat milk"})
 
     assert content.startswith("2 of your thoughts match (best first):\n")
-    assert "1. Oat milk · 2026-09-20 · #groceries\n   Buy oat milk on the way home." in content
+    assert "1. Oat milk · filed 2026-09-20 · #groceries\n   Buy oat milk on the way home." in content
     assert thought_id not in content and other_id not in content
     [end] = [e for e in events_of(response, "tool") if e["phase"] == "end"]
     assert end["sources"] == [

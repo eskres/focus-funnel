@@ -182,6 +182,16 @@ The partial index `ix_thoughts_user_id_starts_on` is declared like the GIN index
 
 **Alternatives:** leave the date keys out of a part with no date (rejected: the conversation's answer model adds them as null anyway, so the event and the conversation would differ); refuse a confirm that picks a date outside the two choices (rejected in decision 2: the fields are the source of truth).
 
+### 12. Details of searching by the thought's date, settled while building them
+
+- Every search result entry now says `filed` before its filing day, so the two dates cannot be confused: `1. Oat milk · filed 2026-09-20 · #groceries`. A dated entry adds `on` and its date after it, before the tags. Both sides of a range carry their weekday, as a single date does (`on Tue 2026-11-03 to Fri 2026-11-06`), so the model can answer "what is on Friday" from either end; an end later the same day gives only its time (`on Mon 2026-10-05 09:30 to 11:00`). Undated entries have no `on` part. The sources under an answer stay as they were.
+- A date-only search answers "N of your thoughts are dated in those days (date order):", and "M more are dated in those days. Narrow the days or add tags to see them." when the limit cuts it. With nothing found it answers "No filed thoughts are dated in those days. Say so plainly, and do not answer as if the user had filed something." A search with a query and a date range keeps the usual header and note.
+- `parse_search()` refuses neither a query nor a `dated_*` field as "query must be a non-empty string, unless dated_from or dated_to is given". `dated_from` and `dated_to` must be written `YYYY-MM-DD` (checked by pattern first, as `when` is), and `dated_to` before `dated_from` is refused, so the model gets another round instead of an empty result.
+- `search_thoughts()` takes `query=None`; an empty or blank query counts as none. Without a query and without a `dated_*` day it raises `validation_error` "query: …", for callers other than the tool. The date-only listing keeps the tag, `since`, and `until` filters, ties on the same start break by filing time, and the hits carry no similarity, rank, or excerpt.
+- The chat's tool line for a date-only search reads "Looked up your thoughts dated 2026-09-28 to 2026-10-04" ("from …", "up to …", or "on …" for one side or one day).
+
+**Alternatives:** keep undated headings as they were and add only the `on` part (rejected: an unlabelled filing day next to an `on` date reads as two event dates); a weekday on the single date only, as decision 4's example shows (rejected: a range is just as often asked about by weekday).
+
 ## Risks / Trade-offs
 
 - [The model gives two choices for a clear day, or one date for an unclear day] → Task 2.5 measures both on the preferred model. A wrong single date still shows on the card, where the user checks it before confirming.

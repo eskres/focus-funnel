@@ -6,6 +6,11 @@ with the `english` configuration, the query's words OR-joined. The two
 rankings are merged by reciprocal rank fusion. A thought passes when its
 similarity reaches the model's threshold, or it holds a large enough share
 of the query's words. See openspec thought-storage design decision 5.
+
+A search can also filter by the thought's own date (`dated_from`, `dated_to`):
+only dated thoughts whose days overlap them pass. With such a filter and no
+query, the search lists the dated thoughts in date order, with no provider
+call (thought-dates design decision 4).
 """
 
 import logging
@@ -15,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 
 import httpx2
-from sqlalchemy import exists, select, text
+from sqlalchemy import exists, func, nulls_first, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.config import SearchConfig, get_chat_config
@@ -84,6 +89,9 @@ filtered AS (
       AND (CAST(:tags AS text[]) IS NULL OR tags && CAST(:tags AS text[]))
       AND (CAST(:since AS timestamptz) IS NULL OR created_at >= CAST(:since AS timestamptz))
       AND (CAST(:until AS timestamptz) IS NULL OR created_at < CAST(:until AS timestamptz))
+      AND (CAST(:dated_from AS date) IS NULL
+           OR coalesce(ends_on, starts_on) >= CAST(:dated_from AS date))
+      AND (CAST(:dated_to AS date) IS NULL OR starts_on <= CAST(:dated_to AS date))
 )"""
 
 _MEANING = """
@@ -202,10 +210,81 @@ def raw_text_excerpt(thought: Thought, hit_chunk: int | None, query: str, size: 
     return None
 
 
+def _dated_filters(user: User, *, tags, since, until, dated_from, dated_to, zone) -> list:
+    """The filtered CTE's conditions, as SQLAlchemy, for the date-only listing."""
+    conditions = [Thought.user_id == user.id, Thought.starts_on.is_not(None)]
+    if tags:
+        conditions.append(Thought.tags.overlap(tags))
+    if since is not None:
+        conditions.append(Thought.created_at >= _as_start(since, zone))
+    if until is not None:
+        conditions.append(Thought.created_at < _as_end(until, zone))
+    if dated_from is not None:
+        conditions.append(func.coalesce(Thought.ends_on, Thought.starts_on) >= dated_from)
+    if dated_to is not None:
+        conditions.append(Thought.starts_on <= dated_to)
+    return conditions
+
+
+async def list_dated(
+    session: AsyncSession,
+    user: User,
+    *,
+    config: SearchConfig,
+    tags: list[str] | None = None,
+    since: date | datetime | None = None,
+    until: date | datetime | None = None,
+    dated_from: date | None = None,
+    dated_to: date | None = None,
+    zone: tzinfo | None = None,
+) -> SearchResult:
+    """The dated thoughts that pass the filters, in date order: by start day, a
+    day with no time before one with a time, then by start time and filing time.
+
+    No query, so no ranking and no provider call.
+    """
+    conditions = _dated_filters(
+        user,
+        tags=clean_tags(tags) or None,
+        since=since,
+        until=until,
+        dated_from=dated_from,
+        dated_to=dated_to,
+        zone=zone,
+    )
+    rows = (
+        await session.execute(
+            select(Thought, func.count().over().label("total"))
+            .where(*conditions)
+            .order_by(
+                Thought.starts_on,
+                nulls_first(Thought.starts_at),
+                Thought.created_at,
+                Thought.id,
+            )
+            .limit(config.limit)
+        )
+    ).all()
+    if not rows:
+        return SearchResult()
+    hits = [
+        Hit(thought=row.Thought, similarity=None, keyword_rank=None, chunk=None) for row in rows
+    ]
+    return SearchResult(hits=hits, total=rows[0].total)
+
+
+def _no_query_and_no_days() -> ApiError:
+    return ApiError(
+        422,
+        ErrorCode.VALIDATION_ERROR,
+        "query: give the words to look for, or the days the thought is dated",
+    )
+
+
 async def search_thoughts(
     session: AsyncSession,
     user: User,
-    query: str,
+    query: str | None,
     *,
     settings: Settings,
     tags: list[str] | None = None,
@@ -216,22 +295,44 @@ async def search_thoughts(
     http_client: httpx2.AsyncClient | None = None,
     config: SearchConfig | None = None,
     zone: tzinfo | None = None,
+    dated_from: date | None = None,
+    dated_to: date | None = None,
 ) -> SearchResult:
     """The user's thoughts that match the query, best first. See the module docstring.
 
     `since` and `until` given as dates are the user's local days in `zone`
-    (UTC when not given).
+    (UTC when not given). `dated_from` and `dated_to` are days of the
+    thought's own date, compared as written. With either of them the query
+    may be None or empty: the search then lists the dated thoughts in date
+    order, with no embedding call and no backfill. Without them, a missing
+    query raises validation_error naming `query`.
 
     Never raises for a provider problem: the search then runs by words only
     and `words_only` says why.
     """
     config = config or get_chat_config().search
     tags = clean_tags(tags) or None
+    query = query.strip() if isinstance(query, str) else ""
+    dated = dated_from is not None or dated_to is not None
+    if not query and not dated:
+        raise _no_query_and_no_days()
     has_thoughts = select(Thought.id).where(Thought.user_id == user.id)
     if tags:
         has_thoughts = has_thoughts.where(Thought.tags.overlap(tags))
     if not (await session.execute(select(exists(has_thoughts)))).scalar():
         return SearchResult()
+    if not query:
+        return await list_dated(
+            session,
+            user,
+            config=config,
+            tags=tags,
+            since=since,
+            until=until,
+            dated_from=dated_from,
+            dated_to=dated_to,
+            zone=zone,
+        )
 
     active = await index_with_status(session, user.id, ACTIVE)
     backfill = await missing_thoughts(session, user.id, active, config.backfill_batch)
@@ -262,6 +363,8 @@ async def search_thoughts(
         newest_first=newest_first,
         config=config,
         zone=zone,
+        dated_from=dated_from,
+        dated_to=dated_to,
     )
     result.words_only = outcome.error
     result.embedding_provider = (
@@ -284,6 +387,8 @@ async def rank(
     newest_first: bool = False,
     use_words: bool = True,
     zone: tzinfo | None = None,
+    dated_from: date | None = None,
+    dated_to: date | None = None,
 ) -> SearchResult:
     """Run the ranking SQL for a query already embedded (or not, for words only).
 
@@ -296,6 +401,8 @@ async def rank(
         "tags": clean_tags(tags) or None,
         "since": _as_start(since, zone),
         "until": _as_end(until, zone),
+        "dated_from": dated_from,
+        "dated_to": dated_to,
         "query": query if use_words else "",
         "candidates": config.candidates,
         "rrf_k": config.rrf_k,

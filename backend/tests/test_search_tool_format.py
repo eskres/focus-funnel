@@ -45,7 +45,7 @@ def test_the_documented_form_without_ids(env):
     result = format_search_result(SearchResult(hits=[hit(t)], total=1), config, settings)
     assert result.text == (
         "1 of your thoughts match (best first):\n"
-        "1. Oat milk · 2026-09-20 · #groceries\n"
+        "1. Oat milk · filed 2026-09-20 · #groceries\n"
         "   Buy oat milk on the way home."
     )
     assert str(t.id) not in result.text
@@ -61,7 +61,7 @@ def test_no_tags_and_an_excerpt(env):
         SearchResult(hits=[hit(t, excerpt="…the flat near Alfama…")], total=1), config, settings
     ).text
     assert text.splitlines()[1:] == [
-        "1. Lisbon trip · 2026-09-20",
+        "1. Lisbon trip · filed 2026-09-20",
         "   A long weekend.",
         '   > "…the flat near Alfama…"',
     ]
