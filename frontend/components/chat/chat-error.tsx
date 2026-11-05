@@ -3,6 +3,7 @@ import { ProviderKeyAlert, providerKeyAlertCode } from "@/components/provider-ke
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
+  AnswerInterruptedError,
   ContextFullError,
   ConversationBusyError,
   OutputLimitReachedError,
@@ -17,10 +18,22 @@ const titles = new Map<unknown, string>([
   [ProviderRateLimitedError, "Too many requests"],
   [ContextFullError, "This conversation is full"],
   [ConversationBusyError, "Still answering"],
+  [AnswerInterruptedError, "The answer did not finish"],
+]);
+
+// What the chat says instead of the backend's message.
+const messages = new Map<unknown, string>([
+  // The server stopped or restarted while the answer ran.
+  [AnswerInterruptedError, "This answer did not finish. Send the message again to retry."],
 ]);
 
 // Errors a second try can fix.
-const retryable = [OutputLimitReachedError, ToolLoopLimitError, ProviderRateLimitedError];
+const retryable = [
+  OutputLimitReachedError,
+  ToolLoopLimitError,
+  ProviderRateLimitedError,
+  AnswerInterruptedError,
+];
 
 /**
  * Shown in place of an answer. Each error code points to the place that fixes
@@ -48,7 +61,7 @@ export function ChatError({
     <Alert variant="destructive">
       {title && <AlertTitle>{title}</AlertTitle>}
       <AlertDescription className="flex flex-col items-start gap-2">
-        <p>{error.message}</p>
+        <p>{messages.get(error.constructor) ?? error.message}</p>
         {canTryAgain && (
           <Button variant="outline" size="xs" disabled={!canRetry} onClick={onRetry}>
             Try again

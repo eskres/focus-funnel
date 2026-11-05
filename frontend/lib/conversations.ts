@@ -53,7 +53,14 @@ export type ConversationDetail = ConversationSummary & {
   messages: StoredMessage[];
   /** Every proposal of the conversation, in position order, with each part's saved state. */
   proposals: unknown[];
+  /**
+   * The answer running in this conversation, if any: it answers the user
+   * message at `after_position`. Follow it with `followTurn`.
+   */
+  turn?: RunningTurn | null;
 };
+
+export type RunningTurn = { after_position: number };
 
 /** The stored proposals, skipping any that does not fit. */
 export function storedProposals(conversation: ConversationDetail): Proposal[] {

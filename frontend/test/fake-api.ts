@@ -184,6 +184,7 @@ export const detail = (extra: Record<string, unknown> = {}) => ({
   context: { tokens: 0, estimated: true, context_length: null },
   messages: [],
   proposals: [],
+  turn: null,
   ...extra,
 });
 

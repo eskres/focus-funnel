@@ -27,8 +27,19 @@ import {
   type HeldOffer,
 } from "@/components/chat/proposal-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { ApiError, UnauthenticatedError, createApiError } from "@/lib/api";
-import { isCompactCommand, isDeleteCommand, streamChat, type ModelChoice } from "@/lib/chat";
+import {
+  ApiError,
+  BackendUnreachableError,
+  UnauthenticatedError,
+  createApiError,
+} from "@/lib/api";
+import {
+  followTurn,
+  isCompactCommand,
+  isDeleteCommand,
+  streamChat,
+  type ModelChoice,
+} from "@/lib/chat";
 import {
   acceptCompaction,
   deleteConversation,
@@ -48,7 +59,20 @@ import {
   type UsageWarning,
 } from "@/lib/models";
 import { redirectToLogin } from "@/lib/redirect-to-login";
-import type { CompactModel, Proposal } from "@/lib/sse";
+import type { CompactModel, Proposal, SseEvent } from "@/lib/sse";
+
+// How many times one answer is followed again after its stream breaks,
+// before the chat says it was cut short.
+const MAX_FOLLOWS = 3;
+
+/**
+ * True when the last stored message is a finished turn's answer: an assistant
+ * message with no tool calls, whether it completed, failed, or was cut.
+ */
+function endsAnswered(stored: StoredMessage[]): boolean {
+  const last = stored.at(-1);
+  return last?.role === "assistant" && !last.tool_calls?.length;
+}
 
 /**
  * Rebuilds the chat items from stored messages: one answer per user message,
@@ -207,6 +231,9 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
   const providerModels = useRef(new Map<string, Promise<ProviderModel[]>>());
   const nextId = useRef(1);
   const abortRef = useRef<AbortController | null>(null);
+  // The conversation's id as soon as it is known, for code that runs on after
+  // a `conversation` event changed it.
+  const currentId = useRef<string | undefined>(initialId);
 
   // Stop reading an answer when the user leaves the chat.
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -235,10 +262,9 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
       .then((conversation) => {
         if (cancelled) return;
         setTitle(conversation.title);
-        setMessages(
-          fromStored(conversation.messages, storedProposals(conversation), () => nextId.current++),
-        );
-        setMeter(toMeter(conversation.context));
+        // An answer still running is followed, with the input locked until it ends.
+        if (conversation.turn) void follow(initialId, conversation);
+        else showConversation(conversation);
         const stored = storedChoice(conversation);
         setOwn(stored);
         setChoice((current) => stored ?? current);
@@ -256,6 +282,8 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
     return () => {
       cancelled = true;
     };
+    // `follow` only uses state setters, refs, and the stable `refresh`; it runs once per load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialId]);
 
   // A model outside the loadout needs its effort choices from the server.
@@ -279,6 +307,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
   }
 
   function adopt(id: string) {
+    currentId.current = id;
     setConversationId(id);
     // Keep the address in step without leaving the page, so the answer keeps streaming.
     window.history.replaceState(null, "", `/app/${id}`);
@@ -348,6 +377,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
       proposals: undefined,
       sources: undefined,
       error: undefined,
+      unreached: undefined,
       status: "streaming",
     }));
     await runAnswer(answer.id, answer.prompt);
@@ -440,14 +470,216 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
     );
   }
 
+  /**
+   * Shows a loaded conversation. With a running turn, shows the stored
+   * messages through the user message it answers, then that answer in
+   * progress, and returns the answer's id. The answer starts with what the
+   * answer `keep` already shows, until following it replays its events.
+   */
+  function showConversation(conversation: ConversationDetail, keep?: number): number | null {
+    const after = conversation.turn?.after_position;
+    // The running turn's stored rounds and proposals come back in the replay.
+    const stored =
+      after === undefined
+        ? conversation.messages
+        : conversation.messages.filter((m) => m.position <= after);
+    const proposals = storedProposals(conversation).filter(
+      (p) => after === undefined || p.position <= after,
+    );
+    const items = fromStored(stored, proposals, () => nextId.current++);
+    setMeter(toMeter(conversation.context));
+    if (after === undefined) {
+      setMessages(items);
+      return null;
+    }
+    const answerId = nextId.current++;
+    const answer: AnswerMessage = {
+      id: answerId,
+      role: "assistant",
+      prompt: stored.findLast((m) => m.role === "user")?.content ?? "",
+      text: "",
+      tools: [],
+      status: "streaming",
+    };
+    setMessages((current) => {
+      const kept = current.find((m) => m.role === "assistant" && m.id === keep);
+      return [...items, kept ? { ...kept, id: answerId, status: "streaming" } : answer];
+    });
+    return answerId;
+  }
+
+  /** Applies one event of an answer's stream. True for the terminal `done` or `error`. */
+  function applyEvent(answerId: number, event: SseEvent): boolean {
+    switch (event.type) {
+      case "conversation":
+        adopt(event.id);
+        setTitle(event.title);
+        void refresh();
+        return false;
+      case "tool": {
+        const found = event.sources;
+        updateAnswer(answerId, (a) => ({
+          ...a,
+          tools: withTool(a.tools, event),
+          ...(found ? { sources: withSources(a.sources ?? [], found) } : {}),
+        }));
+        return false;
+      }
+      case "proposal": {
+        const { id, position, parts, replacedBy, replaces } = event;
+        setMessages((current) =>
+          current.map((m) => {
+            if (m.role !== "assistant") return m;
+            // The replaced proposal's cards collapse, wherever they are.
+            const proposals = m.proposals?.map((p) =>
+              p.id === replaces ? { ...p, replacedBy: id } : p,
+            );
+            return m.id === answerId
+              ? { ...m, proposals: [...(proposals ?? []), { id, position, parts, replacedBy }] }
+              : { ...m, proposals };
+          }),
+        );
+        return false;
+      }
+      case "delta":
+        updateAnswer(answerId, (a) => ({ ...a, text: a.text + event.text }));
+        return false;
+      case "usage":
+        setMeter((current) => ({
+          tokens: event.promptTokens,
+          estimated: false,
+          contextLength: event.contextLength ?? current?.contextLength ?? null,
+        }));
+        return false;
+      case "notice":
+        if (event.kind === "compact_suggested") setCompactSuggested(true);
+        if (event.kind === "usage_warning") setUsageWarning(readWarning(event.data));
+        return false;
+      case "error":
+        updateAnswer(answerId, (a) => ({
+          ...a,
+          status: "failed",
+          error: createApiError(event.code, event.message, 200),
+        }));
+        return true;
+      case "done":
+        updateAnswer(answerId, (a) => ({ ...a, status: "done" }));
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Reads an answer's events into the answer `answerId`. True when the stream
+   * ended with `done` or `error`. A replay (`replay`) starts the answer over at
+   * its first event, so text the chat already showed is not doubled.
+   */
+  async function readAnswer(
+    answerId: number,
+    events: AsyncIterable<SseEvent>,
+    replay = false,
+  ): Promise<boolean> {
+    let finished = false;
+    let first = replay;
+    for await (const event of events) {
+      if (first) {
+        first = false;
+        updateAnswer(answerId, (a) => ({
+          ...a,
+          text: "",
+          tools: [],
+          proposals: undefined,
+          sources: undefined,
+          error: undefined,
+        }));
+      }
+      if (applyEvent(answerId, event)) finished = true;
+    }
+    return finished;
+  }
+
+  /**
+   * After an answer's stream closed with neither `done` nor `error`: reloads
+   * the conversation and follows the answer again while it runs, or shows the
+   * stored answer once it has ended. The answer is marked cut short only when
+   * the server cannot be reached or the stored answer did not finish.
+   * `loaded` is a conversation already loaded with a running turn; it is shown
+   * before the first wait, so the chat never shows it without its answer.
+   */
+  async function recover(
+    id: string | undefined,
+    answerId: number | null,
+    signal: AbortSignal,
+    loaded?: ConversationDetail,
+  ) {
+    let conversation = loaded;
+    let unreached = !id;
+    for (let attempt = 0; id && attempt < MAX_FOLLOWS; attempt++) {
+      if (!conversation) {
+        try {
+          conversation = await getConversation(id);
+        } catch (error) {
+          if (signal.aborted) return;
+          if (error instanceof UnauthenticatedError) {
+            redirectToLogin(`/app/${id}`);
+            return;
+          }
+          unreached = true;
+          break;
+        }
+        if (signal.aborted) return;
+      }
+      if (!conversation.turn) {
+        // The answer ended while the chat was not following it. With no
+        // answer stored, keep what arrived and say it was cut short.
+        if (!endsAnswered(conversation.messages)) break;
+        showConversation(conversation);
+        return;
+      }
+      answerId = showConversation(conversation, answerId ?? undefined);
+      conversation = undefined;
+      try {
+        if (await readAnswer(answerId!, followTurn(id, signal), true)) return;
+      } catch (error) {
+        if (signal.aborted) return;
+        if (error instanceof UnauthenticatedError) {
+          redirectToLogin(`/app/${id}`);
+          return;
+        }
+        if (error instanceof ApiError && !(error instanceof BackendUnreachableError)) {
+          updateAnswer(answerId!, (a) => ({ ...a, status: "failed", error }));
+          return;
+        }
+        // Following broke: try again from the stored conversation.
+      }
+    }
+    if (answerId !== null) {
+      updateAnswer(answerId, (a) => ({ ...a, status: "cut", unreached }));
+    }
+  }
+
+  /** Shows a conversation the chat just loaded and follows its running answer. */
+  async function follow(id: string, loaded: ConversationDetail) {
+    setAnswering(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      await recover(id, null, controller.signal, loaded);
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+      if (!controller.signal.aborted) {
+        setAnswering(false);
+        void refresh();
+      }
+    }
+  }
+
   async function runAnswer(answerId: number, message: string) {
     setAnswering(true);
     const controller = new AbortController();
     abortRef.current = controller;
     const sentChoice = choiceChanged || !conversationId ? (choice ?? undefined) : undefined;
-    // Set when the stream ends with `done` or `error`. A stream that closes
-    // without either was cut short.
-    let finished = false;
 
     try {
       const events = streamChat(
@@ -455,72 +687,14 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         controller.signal,
         adopt,
       );
-      for await (const event of events) {
-        switch (event.type) {
-          case "conversation":
-            adopt(event.id);
-            setTitle(event.title);
-            void refresh();
-            break;
-          case "tool": {
-            const found = event.sources;
-            updateAnswer(answerId, (a) => ({
-              ...a,
-              tools: withTool(a.tools, event),
-              ...(found ? { sources: withSources(a.sources ?? [], found) } : {}),
-            }));
-            break;
-          }
-          case "proposal": {
-            const { id, position, parts, replacedBy, replaces } = event;
-            setMessages((current) =>
-              current.map((m) => {
-                if (m.role !== "assistant") return m;
-                // The replaced proposal's cards collapse, wherever they are.
-                const proposals = m.proposals?.map((p) =>
-                  p.id === replaces ? { ...p, replacedBy: id } : p,
-                );
-                return m.id === answerId
-                  ? { ...m, proposals: [...(proposals ?? []), { id, position, parts, replacedBy }] }
-                  : { ...m, proposals };
-              }),
-            );
-            break;
-          }
-          case "delta":
-            updateAnswer(answerId, (a) => ({ ...a, text: a.text + event.text }));
-            break;
-          case "usage":
-            setMeter((current) => ({
-              tokens: event.promptTokens,
-              estimated: false,
-              contextLength: event.contextLength ?? current?.contextLength ?? null,
-            }));
-            break;
-          case "notice":
-            if (event.kind === "compact_suggested") setCompactSuggested(true);
-            if (event.kind === "usage_warning") setUsageWarning(readWarning(event.data));
-            break;
-          case "error":
-            finished = true;
-            updateAnswer(answerId, (a) => ({
-              ...a,
-              status: "failed",
-              error: createApiError(event.code, event.message, 200),
-            }));
-            break;
-          case "done":
-            finished = true;
-            updateAnswer(answerId, (a) => ({ ...a, status: "done" }));
-            break;
-        }
-      }
+      // Set when the stream ends with `done` or `error`.
+      const finished = await readAnswer(answerId, events);
       if (sentChoice) {
         setOwn(sentChoice);
         setChoiceChanged(false);
       }
-      // The stream closed with neither `done` nor `error`.
-      if (!finished) updateAnswer(answerId, (a) => ({ ...a, status: "cut" }));
+      // The stream closed with neither: the answer may still be running.
+      if (!finished) await recover(currentId.current, answerId, controller.signal);
     } catch (error) {
       if (controller.signal.aborted) return;
       if (error instanceof UnauthenticatedError) {
@@ -531,7 +705,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         updateAnswer(answerId, (a) => ({ ...a, status: "failed", error }));
       } else {
         // Reading the stream failed part way through.
-        updateAnswer(answerId, (a) => ({ ...a, status: "cut" }));
+        await recover(currentId.current, answerId, controller.signal);
       }
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
