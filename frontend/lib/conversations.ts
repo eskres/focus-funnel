@@ -38,9 +38,16 @@ export type StoredMessage = {
   compacted: boolean;
   /**
    * `{proposal_id}` on a propose_thought result, `{sources}` on a search,
-   * `{action_id}` on a connector call that waits for approval.
+   * `{action_id}` on a connector call that waits for approval, `{failed,
+   * summary}` on a connector call that failed.
    */
-  details: { proposal_id?: string; sources?: unknown; action_id?: string } | null;
+  details: {
+    proposal_id?: string;
+    sources?: unknown;
+    action_id?: string;
+    failed?: boolean;
+    summary?: string;
+  } | null;
   created_at: string;
 };
 

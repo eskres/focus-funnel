@@ -432,6 +432,13 @@ def test_an_unreachable_server_is_a_tool_error(
     response = chat(quick, alice, "what is on?", conversation_id)
 
     assert_failed_but_finished(response, fake_llm, "could not be reached")
+    # The stored tool message keeps the failure for a reloaded chat.
+    stored = quick.get(f"/api/conversations/{conversation_id}", headers=alice).json()
+    tool_message = next(m for m in stored["messages"] if m["role"] == "tool")
+    assert tool_message["details"] == {
+        "failed": True,
+        "summary": "calendar: list_events failed: the connector could not be reached",
+    }
 
 
 def test_a_refused_auth_is_a_tool_error(quick, alice, real_server, fake_llm, test_database_url):

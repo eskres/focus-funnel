@@ -17,6 +17,7 @@ import {
   type AnswerMessage,
   type ChatMessage,
   type ToolIndication,
+  toolName,
 } from "@/components/chat/message-list";
 import { ModelPicker, type ModelOption } from "@/components/chat/model-picker";
 import { ConnectorPicker, type PickerConnector } from "@/components/chat/connector-picker";
@@ -69,6 +70,8 @@ function fromStored(
   const actionsById = new Map(actions.map((action) => [action.id, action]));
   // The answer each stored position belongs to, for proposals no tool message names.
   const answerAt: { position: number; answer: AnswerMessage }[] = [];
+  // Each tool call's indication, so its stored result can relabel it.
+  const toolsByCall = new Map<string, ToolIndication>();
   let answer: AnswerMessage | null = null;
   let prompt = "";
   for (const message of stored) {
@@ -82,8 +85,17 @@ function fromStored(
         answer.proposals = [...(answer.proposals ?? []), proposal];
         byId.delete(proposal.id);
       }
+      const called = toolsByCall.get(message.tool_call_id ?? "");
+      if (called && message.details?.failed) {
+        called.failed = true;
+        if (message.details.summary) called.summary = message.details.summary;
+      }
       const action = actionsById.get(message.details?.action_id ?? "");
-      if (action) answer.actions = [...(answer.actions ?? []), action];
+      if (action) {
+        answer.actions = [...(answer.actions ?? []), action];
+        // It asked for approval; the card says what happened, so "Used" would mislead.
+        if (called) called.summary = `Asked to use ${toolName(called.name)}`;
+      }
       answerAt.push({ position: message.position, answer });
       continue;
     }
@@ -112,7 +124,9 @@ function fromStored(
       items.push(answer);
     }
     for (const call of message.tool_calls ?? []) {
-      answer.tools.push({ name: call.function.name, state: "done" });
+      const tool: ToolIndication = { name: call.function.name, state: "done" };
+      answer.tools.push(tool);
+      toolsByCall.set(call.id, tool);
     }
     answer.text += message.content ?? "";
     answerAt.push({ position: message.position, answer });

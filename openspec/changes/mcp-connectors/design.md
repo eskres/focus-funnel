@@ -308,6 +308,12 @@ Tasks 10.1 and 10.2 settled what decision 13 left open for shipping the example:
 - **A shared calendar.** An operator connector is shared by every user, so the docs say the overlay fits an instance with one user, and that on a shared instance each person runs their own server and adds it as a user connector.
 - **Docs.** `docs/connectors.md` covers the switches, operator and user connectors, the warning (quoting the settings text), what `MCP_USER_CONNECTORS=true` exposes (requests to any address the backend can reach, conversation content in tool arguments, tool descriptions in the context), reads, acts, approval, expiry and always allow (with its exception once a turn has read connector data), the `chat.yaml` limits with the worst-case turn length, failures, and the Google Calendar steps. The README links it from the feature list and the configuration table. A test checks that the catalog's guide anchor (`#google-calendar`) is a heading in the docs.
 
+### 23. What the system check changed
+
+Tasks 11.1 to 11.4 ran the app (backend, built frontend, a fake OIDC issuer, a scripted OpenAI-compatible model, the stand-in and Google Calendar MCP servers) and found one gap, in a reloaded chat:
+
+- **Reloaded tool labels.** A stored tool call showed "Used calendar: create-event" after a reload even when it only asked for approval (and then expired or was declined), and "Used calendar: list-events" when the connector had failed. Now a failed connector call stores `details: {failed: true, summary}` on its tool message (the summary the live end event carried), so a reloaded chat shows the same red failure line, and a stored call that opened an action card reads "Asked to use calendar: create-event"; the card says what became of it. Nothing else reads these details, and older rows without them keep the plain "Used" label.
+
 ## Risks / Trade-offs
 
 - [Injected text in results talks the model into an action] → acts tools always need a card after connector data enters the turn; results are marked as data; the card shows the real arguments, not the model's description of them.
