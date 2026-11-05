@@ -62,6 +62,7 @@ def upgrade() -> None:
     sa.Column('user_id', sa.Uuid(), nullable=False),
     sa.Column('connector_id', sa.Uuid(), nullable=True),
     sa.Column('position', sa.Integer(), nullable=False),
+    sa.Column('connector_name', sa.String(length=64), nullable=False),
     sa.Column('tool', sa.String(length=255), nullable=False),
     sa.Column('arguments', JSON, nullable=False),
     sa.Column('status', sa.String(length=16), nullable=False),

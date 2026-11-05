@@ -117,6 +117,7 @@ async def add_everything(session, user: User) -> None:
                 user_id=user.id,
                 connector_id=connector.id,
                 position=2,
+                connector_name="calendar",
                 tool="create_event",
                 arguments={"title": "x"},
             ),

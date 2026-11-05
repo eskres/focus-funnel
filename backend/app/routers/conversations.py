@@ -11,6 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
+from app.chat.actions import action_payload, action_titles, list_actions
 from app.chat.compaction import store_compaction
 from app.chat.config import ChatConfig, get_chat_config
 from app.chat.context import meter
@@ -36,6 +37,7 @@ from app.db import get_session
 from app.errors import ApiError, ErrorCode
 from app.models import Conversation, Proposal, User
 from app.providers import get_provider_http_client
+from app.routers.actions import ActionOut
 from app.thoughts.categories import clean_name, user_categories
 from app.thoughts.store import add_thought
 
@@ -101,6 +103,8 @@ class ConversationDetail(ConversationSummary):
     context: ContextMeter
     messages: list[MessageOut]
     proposals: list[ProposalOut]
+    # Connector actions, for their cards (always empty while MCP_ENABLED is off).
+    actions: list[ActionOut] = []
 
 
 class CompactionIn(BaseModel):
@@ -171,9 +175,10 @@ async def detail(
         else None
     )
     held = held_parts(await held_proposal(session, conversation))
+    actions = await list_actions(session, conversation.id) if settings.mcp_enabled else []
     gauge = meter(
         conversation,
-        build_context(messages, held),
+        build_context(messages, held, actions=actions),
         info.context_length if info is not None else None,
     )
     return ConversationDetail(
@@ -201,6 +206,10 @@ async def detail(
         ],
         proposals=[
             ProposalOut(**proposal_payload(p)) for p in await list_proposals(session, conversation)
+        ],
+        actions=[
+            ActionOut(**action_payload(a, title))
+            for a, title in zip(actions, await action_titles(session, actions), strict=True)
         ],
     )
 

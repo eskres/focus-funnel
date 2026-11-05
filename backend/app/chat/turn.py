@@ -13,6 +13,7 @@ from typing import Any
 import httpx2
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat.actions import ACTION_SHOWN, ActionTarget, action_payload, new_action
 from app.chat.config import ChatConfig
 from app.chat.context import compact_suggestion
 from app.chat.conversations import next_position
@@ -140,6 +141,9 @@ class BuiltinTools:
     def needs_approval(self, name: str, turn: TurnToolState) -> bool:
         return False
 
+    def action_target(self, name: str) -> ActionTarget:
+        raise NotImplementedError("the built-in tools never need approval")
+
     async def call(self, name: str, arguments: dict[str, Any], turn: TurnToolState) -> ToolOutcome:
         if name == SEARCH_TOOL:
             search = parse_search(arguments)
@@ -189,14 +193,6 @@ class BuiltinTools:
 
     async def aclose(self) -> None:
         pass
-
-
-# Until task 7.1 stores actions for approval, an acts call that needs it does
-# not reach the server.
-NEEDS_APPROVAL = (
-    "Error: this tool changes something and needs the user's approval, which this app "
-    "cannot ask for yet. It did not run. Tell the user."
-)
 
 
 class Turn:
@@ -365,15 +361,35 @@ class Turn:
                 return provider
         raise ToolArgumentError(f"there is no tool named '{name}'")
 
+    async def _hold(
+        self, provider: ToolProvider, name: str, arguments: dict[str, Any]
+    ) -> ToolOutcome:
+        """Store the call as an action for the user to approve, instead of
+        calling the server (decision 7). The row is committed with the tool
+        message, whose position it takes."""
+        target = provider.action_target(name)
+        action = new_action(
+            self.conversation.id,
+            self.user.id,
+            target,
+            arguments,
+            await next_position(self.session, self.conversation),
+        )
+        self.session.add(action)
+        return ToolOutcome(
+            result=ACTION_SHOWN,
+            summary=f"{tool_label(name)} is waiting for your approval",
+            details={"action_id": str(action.id)},
+            events=[("action", action_payload(action, target.title))],
+        )
+
     async def _run_tool(self, tool_call: dict[str, Any], position: int) -> AsyncIterator[Event]:
         name = tool_call["function"]["name"]
         try:
             arguments = tool_arguments(tool_call["function"]["arguments"])
             provider = self._provider_for(name)
             if provider.needs_approval(name, self.tool_state):
-                outcome = ToolOutcome(
-                    result=NEEDS_APPROVAL, summary=f"{tool_label(name)} needs approval"
-                )
+                outcome = await self._hold(provider, name, arguments)
             else:
                 outcome = await provider.call(name, arguments, self.tool_state)
         except (ValueError, ToolArgumentError) as exc:

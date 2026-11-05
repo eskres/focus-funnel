@@ -47,6 +47,8 @@ class FakeSession:
         self.calls.append((name, arguments))
         if self.owner.call_error is not None:
             raise self.owner.call_error
+        if self.owner.answer is not None:
+            return await self.owner.answer(name, arguments)
         return ToolResult(content=[{"type": "text", "text": f"{name} said {arguments}"}])
 
     async def aclose(self) -> None:
@@ -67,6 +69,8 @@ class FakeConnect:
         self.sessions: list[FakeSession] = []
         self.connects: list[tuple[str, dict]] = []
         self.call_error: ConnectorError | None = None
+        # Answers calls instead of the echo, when set: async (name, arguments).
+        self.answer = None
 
     async def __call__(self, url, headers, *, connect_seconds, call_seconds):
         self.connects.append((url, headers))

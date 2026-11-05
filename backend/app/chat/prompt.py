@@ -5,9 +5,10 @@ import math
 from datetime import UTC, date, datetime
 from typing import Any
 
+from app.chat.actions import outcome_note
 from app.chat.commands import parse_message
 from app.errors import ApiError
-from app.models import Message
+from app.models import Message, ToolAction
 from app.thoughts.categories import FIXED_CATEGORIES
 
 SEARCH_TOOL = "search_thoughts"
@@ -276,12 +277,19 @@ def build_context(
     held_parts: list[dict[str, Any]] | None = None,
     today: date | None = None,
     connectors: bool = False,
+    actions: list[ToolAction] | None = None,
 ) -> list[dict[str, Any]]:
     """The system prompt, the latest summary if any, every message not
     compacted, then the held-proposal note if a proposal with unsaved parts
     is held. The note
     comes last because the model follows it far more often there. With
-    connectors on, the system prompt gains their paragraph."""
+    connectors on, the system prompt gains their paragraph.
+
+    A finished action's outcome (approved and what it returned, declined, or
+    expired) goes in as a note after the last tool message of its tool-call
+    group, because the tool results of one call group must follow it
+    directly. An action whose tool message is compacted gets no note.
+    """
     context: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt(today, connectors)}
     ]
@@ -293,12 +301,27 @@ def build_context(
                 "content": "Summary of the earlier conversation:\n" + (summaries[-1].content or ""),
             }
         )
+    notes: dict[int, list[str]] = {}
+    for action in actions or []:
+        note = outcome_note(action)
+        if note is not None:
+            notes.setdefault(action.position, []).append(note)
+    waiting: list[dict[str, Any]] = []
     for message in messages:
         if message.compacted or message.role == "summary":
             continue
         converted = _as_model_message(message)
-        if converted is not None:
-            context.append(converted)
+        if converted is None:
+            continue
+        if converted["role"] != "tool":
+            context.extend(waiting)
+            waiting = []
+        context.append(converted)
+        if converted["role"] == "tool":
+            waiting.extend(
+                {"role": "system", "content": note} for note in notes.pop(message.position, [])
+            )
+    context.extend(waiting)
     if held_parts and unsaved_parts(held_parts):
         context.append({"role": "system", "content": held_proposal_note(held_parts)})
     return context
