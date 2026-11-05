@@ -160,3 +160,35 @@ def test_app_startup_fails_without_settings(settings_env):
 def test_app_starts_with_valid_settings(settings_env, test_database_url):
     with TestClient(app):
         pass
+
+
+def test_setup_wizard_defaults_on(settings_env):
+    settings_env.delenv("SETUP_WIZARD")
+    assert Settings().setup_wizard is True
+
+
+def test_setup_wizard_can_be_turned_off(settings_env):
+    settings_env.setenv("SETUP_WIZARD", "false")
+    assert Settings().setup_wizard is False
+
+
+def test_empty_setup_wizard_counts_as_unset(settings_env):
+    settings_env.setenv("SETUP_WIZARD", "")
+    assert Settings().setup_wizard is True
+
+
+def test_demo_mode_refuses_an_explicit_setup_wizard(settings_env):
+    use_mode(settings_env, "demo")
+    settings_env.setenv("SETUP_WIZARD", "true")
+    with pytest.raises(ValidationError, match="SETUP_WIZARD"):
+        Settings()
+
+
+@pytest.mark.parametrize("value", [None, "", "false"])
+def test_demo_mode_turns_the_setup_wizard_off(settings_env, value):
+    use_mode(settings_env, "demo")
+    if value is None:
+        settings_env.delenv("SETUP_WIZARD")
+    else:
+        settings_env.setenv("SETUP_WIZARD", value)
+    assert Settings().setup_wizard is False

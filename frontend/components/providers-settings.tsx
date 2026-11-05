@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ApiError, apiFetch, UnauthenticatedError, ValidationError } from "@/lib/api";
+import { redirectToLogin } from "@/lib/redirect-to-login";
 
 export interface ProviderStatus {
   id: string;
@@ -65,20 +66,17 @@ function formatTime(iso: string | undefined): string {
     : date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
-function redirectToLogin() {
-  // /auth/login is a route handler, not a page, so it needs a full browser
-  // navigation rather than a client-side route change. It sends the user to
-  // the login of the server's auth mode.
-  window.location.assign(new URL("/auth/login?returnTo=/settings", window.location.origin));
-}
-
 /**
  * Fired on `window` when a key is saved or deleted, so other sections on the
  * page (the chat model chooser) can read the providers again.
  */
 export const PROVIDER_KEYS_CHANGED = "focus-funnel:provider-keys-changed";
 
-export function ProvidersSettings() {
+/**
+ * The provider keys. `returnTo` is the page a logged-out user comes back to
+ * after logging in: the settings page, or the setup wizard that embeds this.
+ */
+export function ProvidersSettings({ returnTo = "/settings" }: { returnTo?: string } = {}) {
   const [providers, setProviders] = useState<ProviderStatus[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -94,13 +92,13 @@ export function ProvidersSettings() {
       })
       .catch((e: unknown) => {
         if (cancelled) return;
-        if (e instanceof UnauthenticatedError) redirectToLogin();
+        if (e instanceof UnauthenticatedError) redirectToLogin(returnTo);
         else setLoadError(messageFor(e));
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [returnTo]);
 
   function updateProvider(updated: ProviderStatus) {
     setProviders((current) =>
@@ -120,7 +118,12 @@ export function ProvidersSettings() {
         </Alert>
       )}
       {providers?.map((provider) => (
-        <ProviderCard key={provider.id} provider={provider} onUpdated={updateProvider} />
+        <ProviderCard
+          key={provider.id}
+          provider={provider}
+          onUpdated={updateProvider}
+          returnTo={returnTo}
+        />
       ))}
     </div>
   );
@@ -129,9 +132,11 @@ export function ProvidersSettings() {
 function ProviderCard({
   provider,
   onUpdated,
+  returnTo,
 }: {
   provider: ProviderStatus;
   onUpdated: (updated: ProviderStatus) => void;
+  returnTo: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [apiKey, setApiKey] = useState("");
@@ -183,7 +188,7 @@ function ProviderCard({
     } catch (e) {
       // On failure the backend keeps any previously saved key, so the shown
       // status stays as it was.
-      if (e instanceof UnauthenticatedError) redirectToLogin();
+      if (e instanceof UnauthenticatedError) redirectToLogin(returnTo);
       else setError(messageFor(e));
     } finally {
       setBusy(false);
@@ -208,7 +213,7 @@ function ProviderCard({
       setBaseUrl("");
       setEditing(false);
     } catch (e) {
-      if (e instanceof UnauthenticatedError) redirectToLogin();
+      if (e instanceof UnauthenticatedError) redirectToLogin(returnTo);
       else setError(messageFor(e));
     } finally {
       setBusy(false);
@@ -226,7 +231,7 @@ function ProviderCard({
       const count = result.models.length;
       setTestResult(count === 1 ? "1 model available." : `${count} models available.`);
     } catch (e) {
-      if (e instanceof UnauthenticatedError) redirectToLogin();
+      if (e instanceof UnauthenticatedError) redirectToLogin(returnTo);
       else setError(messageFor(e));
     } finally {
       setBusy(false);

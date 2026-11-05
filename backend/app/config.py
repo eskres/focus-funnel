@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Lets an operator turn off the custom provider (an arbitrary base URL).
     # Demo mode forces it off.
     allow_custom_provider: bool = True
+    # Opens the first-run setup wizard (with a token printed at start) until
+    # the operator finishes it. Demo mode forces it off.
+    setup_wizard: bool = True
 
     # The embedding model that builds new search indexes, called with each
     # user's own key for this provider. An existing index keeps the model it
@@ -146,6 +149,11 @@ class Settings(BaseSettings):
             if "mcp_enabled" in self.model_fields_set and self.mcp_enabled:
                 raise ValueError("Remove MCP_ENABLED=true: demo mode turns connectors off")
             self.mcp_enabled = False
+            if "setup_wizard" in self.model_fields_set and self.setup_wizard:
+                raise ValueError(
+                    "Remove SETUP_WIZARD=true: demo mode has no setup to open"
+                )
+            self.setup_wizard = False
         return self
 
     @property

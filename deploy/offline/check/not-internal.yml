@@ -1,0 +1,6 @@
+# A fixture for scripts/offline-check.sh: an ordinary network, so the smoke
+# test's first step must fail with "the network is not internal".
+#   scripts/offline-check.sh -f deploy/offline/check/not-internal.yml
+networks:
+  default:
+    internal: false

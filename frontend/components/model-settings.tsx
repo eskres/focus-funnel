@@ -41,17 +41,33 @@ function messageFor(error: unknown): string {
   return error instanceof ApiError ? error.message : "Something went wrong. Try again.";
 }
 
-/** A provider the user can choose models from: one with a saved key, or a saved keyless one. */
+/**
+ * A provider the user can choose models from: one with a saved key, or a
+ * keyless one. A keyless preset needs no saved row (the server sends it a
+ * placeholder key), but the custom provider does, because its base URL lives
+ * there.
+ */
 function usable(provider: ProviderStatus): boolean {
-  return provider.key_saved || (!provider.key_required && Boolean(provider.key_saved_at));
+  return (
+    provider.key_saved ||
+    (!provider.key_required && (!provider.is_custom || Boolean(provider.key_saved_at)))
+  );
 }
+
+/**
+ * Fired on `window` after the model settings are saved, so other parts of the
+ * page (the setup wizard's status) can read them again.
+ */
+export const MODEL_SETTINGS_CHANGED = "focus-funnel:model-settings-changed";
 
 /**
  * The chat model settings: a loadout of up to five models, one marked as the
  * default, an effort for each, and one temperature. There is deliberately no
- * reply length field: the server applies its own limit.
+ * reply length field: the server applies its own limit. `returnTo` is the
+ * page a logged-out user comes back to after logging in: the settings page,
+ * or the setup wizard that embeds this.
  */
-export function ModelSettingsSection() {
+export function ModelSettingsSection({ returnTo = "/settings" }: { returnTo?: string } = {}) {
   const [settings, setSettings] = useState<ModelSettings | null>(null);
   const [providers, setProviders] = useState<ProviderStatus[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -98,7 +114,7 @@ export function ModelSettingsSection() {
       (error: unknown) => {
         if (cancelled) return;
         if (error instanceof UnauthenticatedError) {
-          redirectToLogin("/settings");
+          redirectToLogin(returnTo);
           return;
         }
         setLoadError(messageFor(error));
@@ -107,7 +123,7 @@ export function ModelSettingsSection() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [returnTo]);
 
   // A key saved or deleted in the providers section changes what can be chosen.
   useEffect(() => {
@@ -238,9 +254,10 @@ export function ModelSettingsSection() {
       );
       applySettings(result, nextKey);
       setSaved(true);
+      window.dispatchEvent(new Event(MODEL_SETTINGS_CHANGED));
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
-        redirectToLogin("/settings");
+        redirectToLogin(returnTo);
         return;
       }
       // The form keeps what the user entered, and the stored settings are unchanged.

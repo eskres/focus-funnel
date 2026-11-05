@@ -1,0 +1,69 @@
+# The offline check (scripts/offline-check.sh; openspec self-hosting-setup
+# design decision 16). Do not use it for an install: it runs demo mode with
+# fixed test-only secrets, on a network with no way out, and keeps nothing.
+#
+# Every compose call of the check passes --env-file
+# deploy/offline/check/check.env, so the project's .env is never read, and
+# the settings below are written out instead of taken from the environment.
+networks:
+  default:
+    # No route out of the compose network. This is what the check proves the
+    # app runs without.
+    internal: true
+
+services:
+  postgres:
+    volumes: !reset []
+    tmpfs:
+      - /var/lib/postgresql
+    environment:
+      POSTGRES_USER: focus_funnel
+      POSTGRES_PASSWORD: offline-check
+      POSTGRES_DB: focus_funnel
+
+  backend:
+    env_file: !reset []
+    volumes:
+      - ./deploy/offline/check:/check:ro
+    environment:
+      AUTH_MODE: demo
+      DATABASE_URL: postgresql+asyncpg://focus_funnel:offline-check@postgres:5432/focus_funnel
+      # Test-only: 32 zero bytes. Nothing the check stores outlives it.
+      KEY_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      PROVIDERS_CONFIG_PATH: /check/providers.yaml
+      EMBEDDING_PROVIDER: stub
+      EMBEDDING_MODEL: stub-embed
+      EMBEDDING_DIMENSIONS: native
+    depends_on:
+      stub-provider:
+        condition: service_started
+
+  frontend:
+    env_file: !reset []
+    # An internal network cannot publish a port; the smoke test runs inside it.
+    ports: !reset []
+    environment:
+      AUTH_MODE: demo
+      BACKEND_URL: http://backend:8000
+      # Test-only, as above.
+      SESSION_SECRET: offline-check-session-secret-not-for-use-0000000000000000
+
+  # The stand-in model server and the smoke test run from the backend image,
+  # so the check needs no other image.
+  stub-provider:
+    image: focus-funnel-backend:${FOCUS_FUNNEL_TAG:-local}
+    entrypoint: ["python", "/check/stub_provider.py"]
+    command: []
+    volumes:
+      - ./deploy/offline/check:/check:ro
+
+  smoke:
+    image: focus-funnel-backend:${FOCUS_FUNNEL_TAG:-local}
+    profiles: [smoke]
+    entrypoint: ["python", "/check/smoke.py"]
+    command: []
+    volumes:
+      - ./deploy/offline/check:/check:ro
+    depends_on:
+      - frontend
+      - stub-provider

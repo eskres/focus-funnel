@@ -6,6 +6,7 @@ from app.models.chat_settings import ChatModel, UserSettings
 from app.models.connector import Connector, ConversationConnector, ToolAction
 from app.models.conversation import Conversation, Message, Proposal
 from app.models.provider_key import ProviderKey
+from app.models.setup_state import SetupState
 from app.models.thought import SearchIndex, Thought, ThoughtEmbedding
 from app.models.thought_addition import ThoughtAddition
 from app.models.usage_event import UsageEvent
@@ -21,6 +22,7 @@ __all__ = [
     "Proposal",
     "ProviderKey",
     "SearchIndex",
+    "SetupState",
     "Thought",
     "ThoughtAddition",
     "ThoughtEmbedding",

@@ -165,13 +165,27 @@ class OidcDiscovery:
         url = f"{self.issuer.rstrip('/')}/.well-known/openid-configuration"
         return replace_origin(url, self.issuer, self.internal_url)
 
+    def _client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(timeout=JWKS_TIMEOUT_SECONDS, transport=self._transport)
+
+    async def fetch_document(self, client: httpx.AsyncClient | None = None) -> dict[str, Any]:
+        """The issuer's discovery document, fetched from discovery_url.
+
+        Raises an httpx error when it cannot be fetched or is not a JSON object.
+        """
+        if client is None:
+            async with self._client() as own_client:
+                return await self.fetch_document(own_client)
+        response = await client.get(self.discovery_url)
+        response.raise_for_status()
+        document = response.json()
+        if not isinstance(document, dict):
+            raise httpx.DecodingError("The discovery document is not a JSON object.")
+        return document
+
     async def fetch_jwks(self) -> dict[str, Any]:
-        async with httpx.AsyncClient(
-            timeout=JWKS_TIMEOUT_SECONDS, transport=self._transport
-        ) as client:
-            response = await client.get(self.discovery_url)
-            response.raise_for_status()
-            document = response.json()
+        async with self._client() as client:
+            document = await self.fetch_document(client)
             listed = document.get("id_token_signing_alg_values_supported")
             if isinstance(listed, list):
                 self.algorithms = frozenset(str(alg) for alg in listed)

@@ -1,0 +1,28 @@
+# An install with no internet (docs/offline.md): a local Ollama server serves
+# chat and search, and the backend offers only that server.
+#   docker compose -f docker-compose.yml -f docker-compose.offline.yml \
+#     -f docker-compose.pocket-id.yml up -d --no-build --pull never
+# Pull the models on an online machine into the same .data/ollama first.
+services:
+  ollama:
+    image: ollama/ollama:0.40.14
+    volumes:
+      - ./.data/ollama:/root/.ollama
+    # No published port: only the backend calls it, on the compose network.
+
+  backend:
+    volumes:
+      - ./deploy/offline/providers.yaml:/srv/offline/providers.yaml:ro
+    environment:
+      PROVIDERS_CONFIG_PATH: /srv/offline/providers.yaml
+      EMBEDDING_PROVIDER: ollama
+      EMBEDDING_MODEL: ${OFFLINE_EMBEDDING_MODEL:-nomic-embed-text:v1.5}
+      # The search index has no fixed dimension; native sends no `dimensions`.
+      EMBEDDING_DIMENSIONS: native
+      # The provider list offers only the local server. Set
+      # ALLOW_CUSTOM_PROVIDER=true in .env to let users add another server on
+      # your network.
+      ALLOW_CUSTOM_PROVIDER: ${ALLOW_CUSTOM_PROVIDER:-false}
+    depends_on:
+      ollama:
+        condition: service_started
