@@ -461,6 +461,23 @@ def test_a_discovery_document_with_another_issuer_fails(database, capsys):
     assert "OIDC_ISSUER" in line
 
 
+@pytest.mark.parametrize(
+    ("configured", "named"),
+    [(f"{TEST_ISSUER}/", TEST_ISSUER), (TEST_ISSUER, f"{TEST_ISSUER}/")],
+)
+def test_an_issuer_differing_only_by_a_trailing_slash_fails(
+    database, env, capsys, configured, named
+):
+    # The backend checks a token's iss against OIDC_ISSUER exactly, so a
+    # trailing slash on one side only fails every login.
+    env.setenv("OIDC_ISSUER", configured)
+    code, out = run_doctor(capsys, login=discovery(named))
+    assert code == 1
+    line = lines(out)["login_provider"][0]
+    assert line.startswith("failed ")
+    assert "OIDC_ISSUER" in line
+
+
 def test_a_discovery_fetch_that_cannot_connect_names_the_url(database, capsys):
     seen: list[str] = []
     code, out = run_doctor(capsys, login=login_raising(seen=seen))

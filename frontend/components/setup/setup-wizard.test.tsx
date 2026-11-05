@@ -12,6 +12,11 @@ import { SETUP_TOKEN_KEY, SetupWizard } from "./setup-wizard";
 vi.mock("@/lib/redirect-to-login", () => ({ redirectToLogin: vi.fn() }));
 
 const TOKEN = "setup-token-0123456789abcdefghij";
+const USER = "0b6f8a52-5d0e-4f43-9a51-4d7c1b2e9f01";
+const OTHER_USER = "7c1d2e3f-4a5b-4c6d-8e7f-901234567890";
+
+/** The token as the wizard keeps it in sessionStorage: tied to the user who entered it. */
+const kept = (token: string, user = USER) => JSON.stringify({ user, token });
 const TOKEN_REFUSED =
   "The setup token is missing or not valid. Use the token the backend printed in its log at its last start.";
 
@@ -115,6 +120,7 @@ const closed = () => errorResponse(404, "not_found", "Not found.");
 
 /** The settings routes the embedded provider and model sections call. */
 const SETTINGS_ROUTES = {
+  "GET /api/me": json(200, { id: USER, created_at: "2026-11-01T09:00:00Z" }),
   "GET /api/providers": json(200, { providers: [nvidia], custom_provider_allowed: false }),
   "GET /api/settings/models": json(200, loadout()),
 };
@@ -145,7 +151,7 @@ async function enterToken(value = TOKEN) {
 
 /** Opens the wizard with the token kept in this tab, as after a reload. */
 async function openWithStoredToken() {
-  sessionStorage.setItem(SETUP_TOKEN_KEY, TOKEN);
+  sessionStorage.setItem(SETUP_TOKEN_KEY, kept(TOKEN));
   render(<SetupWizard />);
   await screen.findByRole("heading", { name: "1. Login" });
   // The steps can be on screen before React runs their effects, so an event
@@ -193,7 +199,7 @@ describe("SetupWizard", () => {
 
       expect(await screen.findByRole("heading", { name: "1. Login" })).toBeInTheDocument();
       expect(setupTokensSent(fetchMock)).toEqual([null, TOKEN]);
-      expect(sessionStorage.getItem(SETUP_TOKEN_KEY)).toBe(TOKEN);
+      expect(sessionStorage.getItem(SETUP_TOKEN_KEY)).toBe(kept(TOKEN));
     });
 
     it("uses the token kept in this tab without asking again", async () => {
@@ -203,6 +209,30 @@ describe("SetupWizard", () => {
 
       expect(screen.queryByLabelText("Setup token")).not.toBeInTheDocument();
       expect(setupTokensSent(fetchMock)).toEqual([TOKEN]);
+    });
+
+    it("does not send a token another user kept in this tab, and forgets it", async () => {
+      // The operator entered the token and logged out without finishing; the
+      // next user who logs in in the same tab must not inherit it.
+      const { fetchMock } = api(tokenRefused());
+      sessionStorage.setItem(SETUP_TOKEN_KEY, kept(TOKEN, OTHER_USER));
+      render(<SetupWizard />);
+
+      expect(await screen.findByLabelText("Setup token")).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(setupTokensSent(fetchMock)).toEqual([null]);
+      expect(sessionStorage.getItem(SETUP_TOKEN_KEY)).toBeNull();
+    });
+
+    it("does not send a kept token when the user cannot be read", async () => {
+      const { fetchMock } = api(tokenRefused(), {
+        "GET /api/me": errorResponse(500, "internal_error", "Something went wrong."),
+      });
+      sessionStorage.setItem(SETUP_TOKEN_KEY, kept(TOKEN));
+      render(<SetupWizard />);
+
+      expect(await screen.findByLabelText("Setup token")).toBeInTheDocument();
+      expect(setupTokensSent(fetchMock)).toEqual([null]);
     });
 
     it("shows a refused token, forgets it, and asks for it again", async () => {
@@ -221,7 +251,7 @@ describe("SetupWizard", () => {
 
     it("forgets a kept token the server refuses and asks for it again", async () => {
       api(tokenRefused());
-      sessionStorage.setItem(SETUP_TOKEN_KEY, "an-old-token");
+      sessionStorage.setItem(SETUP_TOKEN_KEY, kept("an-old-token"));
       render(<SetupWizard />);
 
       expect(await screen.findByRole("alert")).toHaveTextContent(TOKEN_REFUSED);
@@ -231,7 +261,7 @@ describe("SetupWizard", () => {
 
     it("says setup is not open, with links to Settings and the app, when the server answers 404", async () => {
       api(closed());
-      sessionStorage.setItem(SETUP_TOKEN_KEY, TOKEN);
+      sessionStorage.setItem(SETUP_TOKEN_KEY, kept(TOKEN));
       render(<SetupWizard />);
 
       expect(await screen.findByText("Setup is not open on this server.")).toBeInTheDocument();
@@ -494,7 +524,71 @@ describe("SetupWizard", () => {
       await findAlert("Choose a default model in the model step.");
       await waitFor(() => expect(screen.getByRole("button", { name: "Finish" })).toBeDisabled());
       expect(statusCalls(calls)).toBe(2);
-      expect(sessionStorage.getItem(SETUP_TOKEN_KEY)).toBe(TOKEN);
+      expect(sessionStorage.getItem(SETUP_TOKEN_KEY)).toBe(kept(TOKEN));
+    });
+  });
+  describe("a login that runs out inside a step", () => {
+    it("brings the user back to /setup after a provider key save answers 401", async () => {
+      api(json(200, status()), {
+        "PUT /api/providers/nvidia/key": errorResponse(401, "unauthenticated", "Log in to continue."),
+      });
+      await openWithStoredToken();
+
+      const provider = step("2. Provider");
+      fireEvent.change(await within(provider).findByPlaceholderText("Paste your NVIDIA API key"), {
+        target: { value: "nv-secret-abcd" },
+      });
+      fireEvent.click(within(provider).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(redirectToLogin).toHaveBeenCalledWith("/setup"));
+      expect(redirectToLogin).not.toHaveBeenCalledWith("/settings");
+    });
+
+    it("brings the user back to /setup when the model step's settings answer 401", async () => {
+      api(json(200, status()), {
+        "GET /api/settings/models": errorResponse(401, "unauthenticated", "Log in to continue."),
+      });
+      sessionStorage.setItem(SETUP_TOKEN_KEY, kept(TOKEN));
+      render(<SetupWizard />);
+
+      await waitFor(() => expect(redirectToLogin).toHaveBeenCalledWith("/setup"));
+      expect(redirectToLogin).not.toHaveBeenCalledWith("/settings");
+    });
+  });
+
+  describe("a status read still on its way when Finish succeeds", () => {
+    // A save just before Finish starts a status read; when it comes back after
+    // Finish, it must not bring the steps back or say setup is not open.
+    it.each([
+      ["a status read before Finish", () => json(200, status(READY))],
+      ["a 404 read after Finish", closed],
+    ])("keeps 'Setup is complete.' when it answers with %s", async (_name, answer) => {
+      let release: (response: Response) => void = () => {};
+      const pending = new Promise<Response>((resolve) => {
+        release = resolve;
+      });
+      const { calls } = api([json(200, status(READY)), () => pending], {
+        "POST /api/setup/complete": new Response(null, { status: 204 }),
+      });
+      await openWithStoredToken();
+
+      act(() => {
+        window.dispatchEvent(new Event(MODEL_SETTINGS_CHANGED));
+      });
+      await waitFor(() => expect(statusCalls(calls)).toBe(2));
+
+      fireEvent.click(screen.getByRole("button", { name: "Finish" }));
+      expect(await screen.findByText("Setup is complete.")).toBeInTheDocument();
+
+      await act(async () => {
+        release(answer());
+        await pending;
+      });
+
+      expect(screen.getByText("Setup is complete.")).toBeInTheDocument();
+      expect(screen.queryByText("Setup is not open on this server.")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Finish" })).not.toBeInTheDocument();
+      expect(sessionStorage.getItem(SETUP_TOKEN_KEY)).toBeNull();
     });
   });
 });

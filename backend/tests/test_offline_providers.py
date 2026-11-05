@@ -33,6 +33,34 @@ def overlay_backend_environment() -> dict[str, str]:
     }
 
 
+def overlay_mounted_file(container_path: str) -> Path:
+    """The checkout file docker-compose.offline.yml mounts read-only at the path.
+
+    A mount source that does not exist would not fail `docker compose config`:
+    compose would create an empty directory there, and the backend would fail
+    to start reading it.
+    """
+    volumes = yaml.safe_load(OFFLINE_OVERLAY.read_text())["services"]["backend"].get(
+        "volumes", []
+    )
+    mounts = [str(volume).split(":") for volume in volumes]
+    matching = [
+        mount for mount in mounts if len(mount) > 1 and mount[1] == container_path
+    ]
+    assert len(matching) == 1, f"no single mount at {container_path}: {volumes}"
+    source, _target, *options = matching[0]
+    assert options == ["ro"], f"{container_path} is not mounted read-only"
+    path = (OFFLINE_OVERLAY.parent / source).resolve()
+    assert path.is_file(), f"the mount source {source} is not a file in the checkout"
+    return path
+
+
+def test_the_overlay_mounts_the_offline_file_at_providers_config_path():
+    environment = overlay_backend_environment()
+    mounted = overlay_mounted_file(environment["PROVIDERS_CONFIG_PATH"])
+    assert mounted == OFFLINE_PROVIDERS.resolve()
+
+
 def test_the_loader_accepts_the_offline_file_with_one_keyless_preset():
     config = load_providers_config(OFFLINE_PROVIDERS)
     assert list(config.providers) == ["ollama"]
@@ -71,8 +99,11 @@ def test_the_offline_overlay_offers_only_ollama_and_search_needs_no_key(
     assert environment["EMBEDDING_PROVIDER"] == "ollama"
     for name, value in environment.items():
         setup_env.setenv(name, value)
-    # The overlay mounts the file at that path inside the container.
-    setup_env.setenv("PROVIDERS_CONFIG_PATH", str(OFFLINE_PROVIDERS))
+    # The checkout file the overlay mounts at that path inside the container.
+    setup_env.setenv(
+        "PROVIDERS_CONFIG_PATH",
+        str(overlay_mounted_file(environment["PROVIDERS_CONFIG_PATH"])),
+    )
     try:
         with start(jwks_cache) as client:
             token = printed_token(capsys.readouterr().err)

@@ -23,6 +23,7 @@ import {
   SetupTokenInvalidError,
   UnauthenticatedError,
 } from "@/lib/api";
+import { getMe } from "@/lib/demo";
 import { redirectToLogin } from "@/lib/redirect-to-login";
 import {
   finishSetup,
@@ -32,8 +33,16 @@ import {
   type SetupStatus,
 } from "@/lib/setup";
 
-/** Where the setup token is kept: this browser tab only, until setup ends. */
+/**
+ * Where the setup token is kept: this browser tab only, until setup ends. It
+ * is kept with the id of the user who entered it, so another user who logs in
+ * in the same tab (after a logout, or after the session ran out) is asked for
+ * the token rather than sent the one kept here.
+ */
 export const SETUP_TOKEN_KEY = "focus-funnel:setup-token";
+
+/** Where a logged-out user comes back to after logging in. */
+const SETUP_PATH = "/setup";
 
 const SOMETHING_WENT_WRONG = "Something went wrong. Try again.";
 
@@ -44,19 +53,31 @@ type Phase =
   | { kind: "open"; status: SetupStatus }
   | { kind: "done" };
 
+type KeptToken = { user: string; token: string };
+
 // sessionStorage can throw (storage turned off); the wizard then asks for the
 // token again after a reload, which is all that is lost.
-function readToken(): string | null {
+
+/** The token kept in this tab for this user; one kept for another user is forgotten. */
+function readToken(user: string | null): string | null {
+  if (user === null) return null;
   try {
-    return window.sessionStorage.getItem(SETUP_TOKEN_KEY);
+    const raw = window.sessionStorage.getItem(SETUP_TOKEN_KEY);
+    if (raw === null) return null;
+    const kept = JSON.parse(raw) as Partial<KeptToken> | null;
+    if (kept?.user === user && typeof kept.token === "string") return kept.token;
   } catch {
-    return null;
+    // Unreadable: forgotten below.
   }
+  forgetToken();
+  return null;
 }
 
-function storeToken(token: string) {
+function storeToken(user: string | null, token: string) {
+  // Without the user's id the token is kept in memory only.
+  if (user === null) return;
   try {
-    window.sessionStorage.setItem(SETUP_TOKEN_KEY, token);
+    window.sessionStorage.setItem(SETUP_TOKEN_KEY, JSON.stringify({ user, token } satisfies KeptToken));
   } catch {
     // Kept in memory only.
   }
@@ -68,6 +89,14 @@ function forgetToken() {
   } catch {
     // Nothing stored.
   }
+}
+
+/** The logged-in user's id, or null when it cannot be read. */
+function currentUser(): Promise<string | null> {
+  return getMe().then(
+    (me) => me.id,
+    () => null,
+  );
 }
 
 function messageFor(error: unknown): string {
@@ -102,9 +131,10 @@ const STATES: Record<SetupItemState, { label: string; Icon: LucideIcon; classNam
 /**
  * The first-run setup wizard: the setup token the backend printed, then four
  * steps (login, provider, model, server) built from `GET /api/setup/status`,
- * and Finish. The provider and model steps embed the settings sections
- * unchanged, so what they save is the operator's own key and loadout; the
- * status is read again after each successful save.
+ * and Finish. The provider and model steps embed the settings sections, so
+ * what they save is the operator's own key and loadout (a login that runs out
+ * there comes back to /setup); the status is read again after each successful
+ * save.
  */
 export function SetupWizard() {
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
@@ -114,22 +144,27 @@ export function SetupWizard() {
   const [finishing, setFinishing] = useState(false);
   const [finishError, setFinishError] = useState<string | null>(null);
   const token = useRef<string | null>(null);
-  // Only the newest status request may change the page.
+  // The logged-in user's id, which the kept token is tied to.
+  const user = useRef<string | null>(null);
+  // Only the newest status request may change the page; Finish and a refusal
+  // also bump it, so a status request already on its way cannot undo them.
   const latest = useRef(0);
 
   /** Handles a refusal from a setup route; returns true when it was one. */
   const handleRefusal = useCallback((error: unknown, sentToken: boolean): boolean => {
     if (error instanceof UnauthenticatedError) {
-      redirectToLogin("/setup");
+      redirectToLogin(SETUP_PATH);
       return true;
     }
     if (error instanceof NotFoundError) {
+      latest.current++;
       token.current = null;
       forgetToken();
       setPhase({ kind: "closed" });
       return true;
     }
     if (error instanceof SetupTokenInvalidError) {
+      latest.current++;
       token.current = null;
       forgetToken();
       setPhase({ kind: "token", error: sentToken ? error.message : null });
@@ -156,7 +191,7 @@ export function SetupWizard() {
             return;
           }
           token.current = value;
-          storeToken(value);
+          storeToken(user.current, value);
           setPhase({ kind: "open", status });
         },
         (error: unknown) => {
@@ -170,10 +205,15 @@ export function SetupWizard() {
     [handleRefusal],
   );
 
-  // On the first render: the token kept in this tab, or a check without one
-  // that tells "setup is closed" (404) from "a token is needed" (403).
+  // On the first render: the token this user kept in this tab, or a check
+  // without one that tells "setup is closed" (404) from "a token is needed"
+  // (403). A failed user lookup leaves the kept token unused; the status call
+  // then shows the failure (a 401 sends the user to log in).
   useEffect(() => {
-    void load(readToken());
+    void currentUser().then((id) => {
+      user.current = id;
+      return load(readToken(id));
+    });
   }, [load]);
 
   // A saved key or model changes the status.
@@ -214,6 +254,7 @@ export function SetupWizard() {
     setFinishError(null);
     try {
       await finishSetup(value);
+      latest.current++;
       token.current = null;
       forgetToken();
       setPhase({ kind: "done" });
@@ -351,12 +392,12 @@ function OpenSetup({
 
       <Step id="setup-provider" title="2. Provider">
         <ItemList items={pick("search_key")} />
-        <ProvidersSettings />
+        <ProvidersSettings returnTo={SETUP_PATH} />
       </Step>
 
       <Step id="setup-model" title="3. Model">
         <ItemList items={pick("chat_model")} />
-        <ModelSettingsSection />
+        <ModelSettingsSection returnTo={SETUP_PATH} />
       </Step>
 
       <Step id="setup-server" title="4. Server">

@@ -509,7 +509,9 @@ async def check_login_provider(
                 names,
             )
         named = document.get("issuer")
-        if not isinstance(named, str) or named.rstrip("/") != issuer.rstrip("/"):
+        # Exact, as the backend's token check compares `iss` with OIDC_ISSUER:
+        # a trailing slash on one side only fails every login.
+        if not isinstance(named, str) or named != issuer:
             shown = redact_url(named) if isinstance(named, str) else "no issuer"
             return item(
                 "login_provider",

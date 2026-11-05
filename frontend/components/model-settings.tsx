@@ -63,9 +63,11 @@ export const MODEL_SETTINGS_CHANGED = "focus-funnel:model-settings-changed";
 /**
  * The chat model settings: a loadout of up to five models, one marked as the
  * default, an effort for each, and one temperature. There is deliberately no
- * reply length field: the server applies its own limit.
+ * reply length field: the server applies its own limit. `returnTo` is the
+ * page a logged-out user comes back to after logging in: the settings page,
+ * or the setup wizard that embeds this.
  */
-export function ModelSettingsSection() {
+export function ModelSettingsSection({ returnTo = "/settings" }: { returnTo?: string } = {}) {
   const [settings, setSettings] = useState<ModelSettings | null>(null);
   const [providers, setProviders] = useState<ProviderStatus[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -112,7 +114,7 @@ export function ModelSettingsSection() {
       (error: unknown) => {
         if (cancelled) return;
         if (error instanceof UnauthenticatedError) {
-          redirectToLogin("/settings");
+          redirectToLogin(returnTo);
           return;
         }
         setLoadError(messageFor(error));
@@ -121,7 +123,7 @@ export function ModelSettingsSection() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [returnTo]);
 
   // A key saved or deleted in the providers section changes what can be chosen.
   useEffect(() => {
@@ -255,7 +257,7 @@ export function ModelSettingsSection() {
       window.dispatchEvent(new Event(MODEL_SETTINGS_CHANGED));
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
-        redirectToLogin("/settings");
+        redirectToLogin(returnTo);
         return;
       }
       // The form keeps what the user entered, and the stored settings are unchanged.
