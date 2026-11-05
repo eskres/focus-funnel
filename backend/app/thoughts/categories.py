@@ -42,6 +42,22 @@ async def user_categories(session: AsyncSession, user: User) -> list[str]:
     return [*FIXED_CATEGORIES, *await added_categories(session, user)]
 
 
+async def check_category(
+    session: AsyncSession, user: User, value: str | None, *, keep: str | None = None
+) -> str | None:
+    """A category a thought may have: cleaned, empty as none, and one of the
+    user's categories or `keep`, the thought's current one, which may be a
+    removed category the thought still has."""
+    category = clean_name(value) if value is not None else None
+    if not category:
+        return None
+    if category != keep and category not in await user_categories(session, user):
+        raise ApiError(
+            422, ErrorCode.VALIDATION_ERROR, f"category: '{category}' is not one of your categories"
+        )
+    return category
+
+
 def category_exists(name: str) -> ApiError:
     return ApiError(409, ErrorCode.CATEGORY_EXISTS, f"The category '{name}' exists already.")
 

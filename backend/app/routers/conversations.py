@@ -30,13 +30,14 @@ from app.chat.proposal import (
     list_proposals,
     offer_proposal,
     proposal_payload,
+    saved_titles,
 )
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.errors import ApiError, ErrorCode
 from app.models import Conversation, Proposal, User
 from app.providers import get_provider_http_client
-from app.thoughts.categories import clean_name, user_categories
+from app.thoughts.categories import check_category
 from app.thoughts.store import add_thought
 
 router = APIRouter(prefix="/api/conversations")
@@ -75,6 +76,11 @@ class ProposalPart(BaseModel):
     category: str | None
     # Set once the part is saved.
     thought_id: uuid.UUID | None
+    # The saved thought's current title; null before the part is saved, and
+    # once the thought is deleted.
+    saved_title: str | None = None
+    # True when the part was saved and its thought has since been deleted.
+    deleted: bool = False
 
 
 class ProposalOut(BaseModel):
@@ -171,6 +177,8 @@ async def detail(
         else None
     )
     held = held_parts(await held_proposal(session, conversation))
+    proposals = await list_proposals(session, conversation)
+    titles = await saved_titles(session, user, proposals)
     gauge = meter(
         conversation,
         build_context(messages, held),
@@ -199,9 +207,7 @@ async def detail(
             )
             for m in messages
         ],
-        proposals=[
-            ProposalOut(**proposal_payload(p)) for p in await list_proposals(session, conversation)
-        ],
+        proposals=[ProposalOut(**proposal_payload(p, titles)) for p in proposals],
     )
 
 
@@ -357,11 +363,16 @@ async def offer_held_proposal(
     conversation = await get_conversation(session, user, conversation_id)
     held = await held_proposal(session, conversation)
     if held_parts(held) is not None:
-        return OfferedProposal(proposal=ProposalOut(**proposal_payload(held)))
+        titles = await saved_titles(session, user, [held])
+        return OfferedProposal(proposal=ProposalOut(**proposal_payload(held, titles)))
     await claim_turn(session, conversation)
     try:
         offered = await offer_proposal(session, user, conversation, config, settings, http_client)
-        payload = proposal_payload(offered) if offered is not None else None
+        payload = (
+            proposal_payload(offered, await saved_titles(session, user, [offered]))
+            if offered is not None
+            else None
+        )
     finally:
         await session.rollback()
         await release_turn(session, conversation_id)
@@ -420,13 +431,7 @@ async def confirm_proposal(
     if any(saved - {None}):
         raise part_already_saved()
 
-    category = clean_name(body.category) if body.category is not None else None
-    if category == "":
-        category = None
-    if category is not None and category not in await user_categories(session, user):
-        raise ApiError(
-            422, ErrorCode.VALIDATION_ERROR, f"category: '{category}' is not one of your categories"
-        )
+    category = await check_category(session, user, body.category)
 
     outcome = await add_thought(
         session,
