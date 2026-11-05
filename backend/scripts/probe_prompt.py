@@ -1,6 +1,6 @@
 """Probe the chat's system prompt and tools against a real model.
 
-Nine probes, each with its data set in scripts/probe_data/:
+Ten probes, each with its data set in scripts/probe_data/:
 
   tools    labelled messages: does the model pick the tool the label names?
   topic    a held proposal, then an unrelated or a related message: does the
@@ -20,6 +20,12 @@ Nine probes, each with its data set in scripts/probe_data/:
   dates    /push messages and questions on a fixed day: does the part get the
            right date, two choices for an ambiguous day and one for a clear
            one, and does "what is on this week" search the thought's dates?
+  status   finished tasks (thought-status): does the model mark the right
+           thought done by its ref, search open thoughts first for one it has
+           not seen, keep the held proposal and the new parts in the same
+           call, and never say a thought was marked done before the user
+           confirms? Each case gets canned search results, candidate rounds
+           (built with the app's own formatter), and refusals.
 
 `topic` and `repeat` together are the discussion probes.
 
@@ -43,6 +49,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import yaml
 from openai import AsyncOpenAI
@@ -56,18 +63,28 @@ from app.chat.prompt import (
     build_context,
     drop_held_note,
     forced_tool,
+    held_note_of,
+    offer_note,
+    seen_thoughts_note,
     tool_arguments,
     tools_for,
 )
+from app.chat.proposal import mark_ids, mark_refusal
+from app.chat.refs import Refs
+from app.chat.similar import Candidate, Check, PartCheck, candidates_note, word_query
 from app.chat.tools import (
+    ALREADY_PROPOSED,
     NO_MATCH,
     PROPOSAL_SHOWN,
+    PROPOSAL_SHOWN_STATUS,
     ToolArgumentError,
+    format_search_result,
     parse_proposal,
     parse_search,
 )
-from app.models import Message
+from app.models import Message, Thought
 from app.thoughts.categories import FIXED_CATEGORIES
+from app.thoughts.search import Hit, SearchResult
 
 DATA = Path(__file__).parent / "probe_data"
 BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
@@ -146,7 +163,8 @@ def transcript(turns: list[dict[str, Any]]) -> list[Message]:
     A turn is {user: text}, {assistant: text}, or {proposal: arguments,
     reply: text}, which is stored as the chat stores a proposal: a tool call,
     its result, and the model's short reply. The arguments are one part
-    ({title, summary, tags}) or {thoughts: [...]}.
+    ({title, summary, tags}) or {thoughts: [...]}. With `result: status`, the
+    result is the one after a proposal with a mark.
     """
     messages: list[Message] = []
     for turn in turns:
@@ -163,7 +181,8 @@ def transcript(turns: list[dict[str, Any]]) -> list[Message]:
                 "function": {"name": PROPOSE_TOOL, "arguments": json.dumps(turn["proposal"])},
             }
             messages.append(_message(position, "assistant", None, tool_calls=[call]))
-            messages.append(_message(position + 1, "tool", PROPOSAL_SHOWN, tool_call_id=call_id))
+            shown = PROPOSAL_SHOWN_STATUS if turn.get("result") == "status" else PROPOSAL_SHOWN
+            messages.append(_message(position + 1, "tool", shown, tool_call_id=call_id))
             messages.append(_message(position + 2, "assistant", turn.get("reply", "")))
         else:
             raise ValueError(f"unknown turn: {turn}")
@@ -233,6 +252,7 @@ async def run_turn(
     (the real UTC date when not given)."""
     turn = Turn(held=held)
     context = build_context(messages, held, today)
+    held_note = held_note_of(context, held)
     async with settings.limit:
         for round_number in range(settings.tool_rounds):
             started = time.monotonic()
@@ -279,7 +299,8 @@ async def run_turn(
             )
             for call, recorded in zip(tool_calls, turn.calls[-len(tool_calls) :]):
                 if call.function.name == PROPOSE_TOOL and recorded["valid"]:
-                    drop_held_note(context, held)
+                    drop_held_note(context, held_note)
+                    held_note = None
                 context.append(
                     {
                         "role": "tool",
@@ -882,6 +903,434 @@ async def probe_dates(settings: Settings, runs: int) -> tuple[list[str], bool]:
     return lines, share >= 0.8
 
 
+# ---------------------------------------------------------------- status
+
+# A reply that says a thought was marked done before the user confirmed it.
+CLAIMS_DONE = re.compile(
+    r"\b((?<!be )(?<!to be )marked (it |that |this |the task )?(as )?(done|complete|completed|finished)|"
+    r"i.ve marked|i have marked|i marked|"
+    r"(is|are) now (done|complete|completed|closed|finished|marked)|"
+    r"(has|have) been (marked|closed|completed)|"
+    r"i.ve (closed|completed|checked off|ticked off)|i (closed|checked off|ticked off))",
+    re.IGNORECASE,
+)
+
+
+def claims_done(text: str) -> bool:
+    return bool(CLAIMS_DONE.search(text or ""))
+
+
+def _day(value: Any) -> datetime:
+    return datetime.combine(date.fromisoformat(str(value)), datetime.min.time(), tzinfo=UTC)
+
+
+def _about(part: dict[str, Any], word: str) -> bool:
+    text = f"{part.get('title', '')} {part.get('summary', '')}".lower()
+    return word.lower() in text
+
+
+@dataclass
+class StatusCall:
+    """One tool call of a status case, and what the probe answered."""
+
+    name: str
+    arguments: str
+    # The JSON arguments, or None when they are not an object.
+    args: dict[str, Any] | None
+    # search, invalid, refused, candidates, shown, already, other
+    outcome: str
+    result: str
+
+
+@dataclass
+class StatusRun:
+    calls: list[StatusCall] = field(default_factory=list)
+    text: str = ""
+    error: str | None = None
+    # The shown proposal: the index of its call, its marks (thought keys),
+    # and its other parts as the server reads them.
+    accepted: int | None = None
+    marks: list[str] = field(default_factory=list)
+    parts: list[dict[str, Any]] = field(default_factory=list)
+    # Every request the probe sent, for the tests.
+    requests: list[list[dict[str, Any]]] = field(default_factory=list)
+
+
+class StatusWorld:
+    """What the server knows in one status case: the user's thoughts, the
+    conversation's refs, and how it answers each tool call. Search results,
+    candidate rounds, and refusals are built with the app's own formatters
+    (format_search_result, candidates_note, mark_refusal), so the probe
+    measures the text the model really reads."""
+
+    def __init__(self, data: dict[str, Any], case: dict[str, Any]):
+        self.case = case
+        self.zone = ZoneInfo("UTC")
+        self.today = date.fromisoformat(str(data["today"]))
+        self.config = load_chat_config()
+        self.categories = list(FIXED_CATEGORIES)
+        seen_status = case.get("seen_status", {})
+        self.thoughts: dict[str, Thought] = {}
+        for key, spec in data["thoughts"].items():
+            filed = _day(spec["filed"])
+            status = seen_status.get(key, spec.get("status", "open"))
+            changed = spec.get("status_changed_at")
+            self.thoughts[key] = Thought(
+                id=uuid.uuid5(uuid.NAMESPACE_URL, f"probe-status/{key}"),
+                title=spec["title"],
+                summary=spec["summary"],
+                tags=list(spec.get("tags", [])),
+                category=spec.get("category"),
+                created_at=filed,
+                updated_at=filed,
+                status=status,
+                status_changed_at=_day(changed) if changed else (_day(data["today"]) if status != "open" else None),
+            )
+        self.keys = {thought.id: key for key, thought in self.thoughts.items()}
+        # The statuses a mark check reads now (the note may be older).
+        self.statuses = {
+            thought.id: case.get("db_status", {}).get(key, thought.status)
+            for key, thought in self.thoughts.items()
+        }
+        self.refs = Refs([], {}, [])
+        for key in case.get("seen", []):
+            self.refs.see(self.thoughts[key])
+        self.refs.recent = list(reversed(self.refs.numbered))
+        self.checked = False
+        self.proposed = False
+
+    @property
+    def tools(self) -> list[dict[str, Any]]:
+        return tools_for(self.categories, [], marks=not self.case.get("offer"))
+
+    def seen_note(self) -> str | None:
+        seen = self.refs.seen()
+        return seen_thoughts_note(seen, len(seen), self.config.filing.seen_summary_chars, self.zone)
+
+    def held(self) -> list[dict[str, Any]] | None:
+        held = self.case.get("held")
+        if not held:
+            return None
+        return [part.as_dict() for part in parse_proposal({"thoughts": held}, self.categories)]
+
+    def search(self, raw: str) -> tuple[str, str]:
+        try:
+            arguments = parse_search(tool_arguments(raw))
+        except (ValueError, ToolArgumentError) as exc:
+            return "invalid", f"Error: {exc}. Call the tool again with valid arguments."
+        hits = [
+            Hit(thought=self.thoughts[key], similarity=None, keyword_rank=None, chunk=None)
+            for key in self.case.get("search", [])
+        ]
+        found = format_search_result(
+            SearchResult(hits=hits, total=len(hits), embedding_provider="nebius"),
+            self.config.search,
+            None,  # type: ignore[arg-type]  # read only for a words-only note
+            newest_first=arguments.listed and not arguments.dated,
+            by_date=arguments.by_date_only,
+            filtered=arguments.status is not None or arguments.category is not None,
+            zone=self.zone,
+            refs=self.refs,
+        )
+        return "search", found.text
+
+    def candidates(self, parts: list[Any], last_round: bool) -> str | None:
+        """A candidate round for the call's new parts, as layer 2 writes it,
+        or None when no part has a candidate (or the turn already had one)."""
+        wanted = self.case.get("candidates")
+        if not wanted or self.checked or last_round:
+            return None
+        marked = set()
+        for part in parts:
+            if part.mark is not None:
+                seen = self.refs.resolve(part.mark)
+                if seen is not None:
+                    marked.add(seen.id)
+        checks = []
+        for part in parts:
+            if part.mark is not None or part.add_to is not None or part.new:
+                checks.append(PartCheck())
+                continue
+            words = word_query(part.title, part.tags).lower()
+            found = [
+                Candidate(thought=self.thoughts[key], similarity=None)
+                for word, keys in wanted.items()
+                if word.lower() in words
+                for key in keys
+                if self.thoughts[key].id not in marked
+            ]
+            checks.append(PartCheck(candidates=found[:3]))
+        check = Check(parts=checks, refs=self.refs)
+        if not check.has_candidates:
+            return None
+        self.checked = True
+        text, _ = candidates_note(
+            parts, check, self.refs, self.config.filing.seen_summary_chars, self.zone
+        )
+        return text
+
+    def propose(self, raw: str, run: StatusRun, last_round: bool) -> tuple[str, str]:
+        if self.proposed:
+            return "already", ALREADY_PROPOSED
+        try:
+            parts = parse_proposal(
+                tool_arguments(raw), self.categories, offered=bool(self.case.get("offer"))
+            )
+        except (ValueError, ToolArgumentError) as exc:
+            return "invalid", f"Error: {exc}. Call the tool again with valid arguments."
+        marks = [part.mark for part in parts if part.mark is not None]
+        ids = mark_ids(self.refs, marks)
+        refusal = mark_refusal(
+            marks,
+            ids,
+            {thought_id: status for thought_id, status in self.statuses.items()},
+            sum(1 for part in parts if part.mark is None),
+        )
+        if refusal is not None:
+            return "refused", refusal
+        candidates = self.candidates(parts, last_round)
+        if candidates is not None:
+            return "candidates", candidates
+        self.proposed = True
+        run.accepted = len(run.calls)
+        run.marks = [self.keys[ids[mark]] for mark in marks]
+        run.parts = [part.as_dict() | {"new": part.new} for part in parts if part.mark is None]
+        return "shown", PROPOSAL_SHOWN_STATUS if marks else PROPOSAL_SHOWN
+
+    def context(self) -> tuple[list[dict[str, Any]], dict[str, Any] | None, str | None]:
+        """The context of the turn's first live round, its held note, and the
+        tool its first round must call."""
+        held = self.held()
+        messages = transcript(self.case["turns"])
+        context = build_context(
+            messages, held, self.today, seen_note=self.seen_note(), refs=self.refs.by_id()
+        )
+        note = held_note_of(context, held)
+        forced = PROPOSE_TOOL if self.case.get("push") else None
+        if self.case.get("offer"):
+            context.append({"role": "system", "content": offer_note(self.seen_note() is not None)})
+        prior = self.case.get("prior_call")
+        if prior is not None:
+            # The turn's first call, already answered with a candidate round:
+            # the next round must propose again, as after any candidate round.
+            raw = json.dumps(prior)
+            parts = parse_proposal(prior, self.categories)
+            result = self.candidates(parts, last_round=False)
+            assert result is not None, f"{self.case['id']}: the prior call has no candidate"
+            call_id = "call_prior"
+            context.append(
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {"name": PROPOSE_TOOL, "arguments": raw},
+                        }
+                    ],
+                }
+            )
+            context.append({"role": "tool", "tool_call_id": call_id, "content": result})
+            forced = PROPOSE_TOOL
+        return context, note, forced
+
+
+async def run_status_case(
+    settings: Settings, data: dict[str, Any], case: dict[str, Any]
+) -> StatusRun:
+    """Run one status case as the chat runs a turn: up to the round limit,
+    answering each call as the server would. The offer's case is one asked
+    call with no round after it."""
+    world = StatusWorld(data, case)
+    run = StatusRun()
+    context, held_note, forced = world.context()
+    rounds = 1 if case.get("offer") else settings.tool_rounds
+    async with settings.limit:
+        for round_number in range(rounds):
+            last_round = round_number == rounds - 1
+            extra: dict[str, Any] = {"tools": world.tools}
+            if forced is not None:
+                extra["tool_choice"] = forced_tool(forced)
+                forced = None
+            run.requests.append([dict(message) for message in context])
+            try:
+                completion = await _create(settings, context, **extra)
+            except Exception as exc:  # a probe reports failures, it does not stop on them
+                run.error = f"{type(exc).__name__}: {exc}"
+                return run
+            message = completion.choices[0].message
+            tool_calls = message.tool_calls or []
+            if not tool_calls:
+                run.text = message.content or ""
+                return run
+            context.append(
+                {
+                    "role": "assistant",
+                    "content": message.content or "",
+                    "tool_calls": [
+                        {
+                            "id": call.id,
+                            "type": "function",
+                            "function": {
+                                "name": call.function.name,
+                                "arguments": call.function.arguments,
+                            },
+                        }
+                        for call in tool_calls
+                    ],
+                }
+            )
+            for call in tool_calls:
+                raw = call.function.arguments
+                try:
+                    args = tool_arguments(raw)
+                except ValueError:
+                    args = None
+                if call.function.name == SEARCH_TOOL:
+                    outcome, result = world.search(raw)
+                elif call.function.name == PROPOSE_TOOL:
+                    outcome, result = world.propose(raw, run, last_round)
+                    if outcome == "candidates":
+                        forced = PROPOSE_TOOL
+                    if outcome == "shown":
+                        drop_held_note(context, held_note)
+                        held_note = None
+                else:
+                    outcome, result = "other", f"Error: there is no tool named '{call.function.name}'"
+                run.calls.append(StatusCall(call.function.name, raw, args, outcome, result))
+                context.append({"role": "tool", "tool_call_id": call.id, "content": result})
+        if not case.get("offer"):
+            run.error = "tool_loop_limit"
+        return run
+
+
+def _call_parts(call: StatusCall) -> list[dict[str, Any]]:
+    thoughts = (call.args or {}).get("thoughts")
+    parts = [p for p in thoughts if isinstance(p, dict)] if isinstance(thoughts, list) else []
+    if call.args and "title" in call.args and "thoughts" not in call.args:
+        parts.append(call.args)
+    return parts
+
+
+def _call_marks(call: StatusCall) -> list[Any]:
+    marks = (call.args or {}).get("marks")
+    return marks if isinstance(marks, list) else []
+
+
+def status_failures(case: dict[str, Any], run: StatusRun) -> list[str]:
+    """Why the run fails its case's `expect`, or nothing when it passes."""
+    expect = case["expect"]
+    failures: list[str] = []
+    if run.error and run.error != "tool_loop_limit":
+        return [f"error: {run.error}"]
+    first = expect.get("first")
+    if first is not None:
+        call = run.calls[0] if run.calls else None
+        if call is None or call.name != first["name"]:
+            failures.append(f"first call is {call.name if call else 'none'}, not {first['name']}")
+        else:
+            args = call.args or {}
+            if "status" in first and args.get("status") != first["status"]:
+                failures.append(f"first search status is {args.get('status')!r}")
+            if "category" in first and str(args.get("category") or "").lower() != first["category"]:
+                failures.append(f"first search category is {args.get('category')!r}")
+            if first.get("no_status") and args.get("status") is not None:
+                failures.append("first search has a status")
+    accepted = expect.get("accepted")
+    if accepted is not None:
+        if run.accepted is None:
+            failures.append("no proposal shown")
+        else:
+            if sorted(run.marks) != sorted(accepted.get("marks", [])):
+                failures.append(f"marks {run.marks}, not {accepted.get('marks', [])}")
+            for word in accepted.get("about", []):
+                about = [part for part in run.parts if _about(part, word)]
+                if not about:
+                    failures.append(f"no part about {word}")
+                elif accepted.get("new") and not any(part.get("new") for part in about):
+                    failures.append(f"the part about {word} is not new: true")
+            for word in accepted.get("not_about", []):
+                if any(_about(part, word) for part in run.parts):
+                    failures.append(f"a part about {word}")
+            if accepted.get("no_additions") and any(part.get("add_to_ref") for part in run.parts):
+                failures.append("an addition")
+            if "index" in accepted and run.accepted != accepted["index"]:
+                failures.append(f"shown by call {run.accepted + 1}, not {accepted['index'] + 1}")
+    proposals = [call for call in run.calls if call.name == PROPOSE_TOOL]
+    if expect.get("no_marks") and any(_call_marks(call) for call in proposals):
+        failures.append("a call carries a mark")
+    for word in expect.get("no_part_about", []):
+        if any(_about(part, word) for call in proposals for part in _call_parts(call)):
+            failures.append(f"a call proposes a part about {word}")
+    if expect.get("reply") and not run.text.strip():
+        failures.append("no reply")
+    if expect.get("no_claim") and claims_done(run.text):
+        failures.append("the reply says it was marked done")
+    return failures
+
+
+def _status_cell(run: StatusRun) -> str:
+    if not run.calls:
+        return "none"
+    cells = []
+    for call in run.calls:
+        args = call.args or {}
+        if call.name == SEARCH_TOOL:
+            cell = f"search({args.get('status') or '-'}/{args.get('category') or '-'})"
+        else:
+            marks = [m.get("ref") if isinstance(m, dict) else m for m in _call_marks(call)]
+            cell = f"propose({len(_call_parts(call))}+{','.join(map(str, marks)) or '0'})"
+        cells.append(f"{cell}:{call.outcome}")
+    return " → ".join(cells)
+
+
+async def probe_status(settings: Settings, runs: int) -> tuple[list[str], bool]:
+    data = yaml.safe_load((DATA / "status.yaml").read_text())
+    cases = data["cases"]
+    jobs = [(run, case) for run in range(runs) for case in cases]
+    results = await asyncio.gather(*(run_status_case(settings, data, case) for _, case in jobs))
+
+    lines = _header("Status probe", settings, runs)
+    lines += [
+        f"Each case runs on {data['today']}, with canned search results, candidate "
+        "rounds, and refusals.",
+        "",
+    ]
+    lines += ["| Run | Case | Result | Calls | Reply |"]
+    lines += ["|---|---|---|---|---|"]
+    per_case: dict[str, list[bool]] = {}
+    claims: list[str] = []
+    after_mark = 0
+    for (run, case), result in zip(jobs, results):
+        failures = status_failures(case, result)
+        per_case.setdefault(case["id"], []).append(not failures)
+        if result.marks:
+            after_mark += 1
+            if claims_done(result.text):
+                claims.append(f"run {run + 1} {case['id']}: {_short(result.text, 80)}")
+        lines.append(
+            f"| {run + 1} | {case['id']} | {'✓' if not failures else '✗ ' + _short('; '.join(failures), 60)} | "
+            f"{_short(_status_cell(result), 70)} | {_short(result.error or result.text, 60)} |"
+        )
+    lines += ["", "## Summary", ""]
+    passed = True
+    for case in cases:
+        right = per_case[case["id"]]
+        share = sum(right) / len(right)
+        passed &= sum(right) >= 0.8 * len(right)
+        lines.append(f"- {case['id']} ({case['scenario']}): {sum(right)} of {len(right)} ({share:.0%})")
+    total = [ok for right in per_case.values() for ok in right]
+    lines.append(f"- All cases: {sum(total)} of {len(total)} ({sum(total) / len(total):.0%})")
+    lines.append(
+        f"- Replies after a mark that say it was marked done: {len(claims)} of {after_mark}"
+    )
+    for claim in claims:
+        lines.append(f"  - {claim}")
+    passed &= len(claims) <= 0.05 * max(after_mark, 1)
+    return lines, passed
+
+
 PROBES = {
     "tools": probe_tools,
     "topic": probe_topic,
@@ -892,6 +1341,7 @@ PROBES = {
     "filing": probe_filing,
     "nomatch": probe_nomatch,
     "dates": probe_dates,
+    "status": probe_status,
 }
 
 

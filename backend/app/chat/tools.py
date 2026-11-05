@@ -57,10 +57,27 @@ PROPOSAL_SHOWN = (
     "propose_thought again in this turn. Now reply to the user's latest message. "
     "If it held only what you proposed, reply in one short sentence."
 )
+# After a proposal with a mark (thought-status design decision 5).
+PROPOSAL_SHOWN_STATUS = (
+    "The proposal is now shown to the user as cards they can check and confirm. "
+    "Nothing changes until they confirm, so do not say a task is marked done, done, "
+    "closed, or finished, or that anything is saved, noted, added, or recorded: say "
+    "the change is ready for them to confirm. Do not call propose_thought again in "
+    "this turn. Now reply to the user's latest message. If it held only what you "
+    "proposed, reply in one short sentence."
+)
+# The keys a mark may not carry (thought-status design decision 5).
+MARK_EXTRAS = ("add_to", "new", "summary", "when", "when_choices")
 
 
 class ToolArgumentError(ValueError):
     """The model called a tool with arguments that do not fit it."""
+
+
+class ToolRefusal(ToolArgumentError):
+    """A proposal call the server refuses for its marks (thought-status design
+    decision 6). Its message goes back to the model as it is, with no
+    "call the tool again" suffix: some refusals ask it to tell the user."""
 
 
 @dataclass(frozen=True)
@@ -76,10 +93,17 @@ class ProposalPart:
     # and whether the model keeps the part new after a candidate round.
     add_to: str | None = None
     new: bool = False
+    # The ref of a seen thought to mark done (thought-status design decision
+    # 5). A mark has no other field: its title and category come from the
+    # thought when it is resolved.
+    mark: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """The part as stored on a proposal row, not yet saved. An addition's
-        ref is kept as `add_to_ref`, which write_proposal() resolves."""
+        ref is kept as `add_to_ref`, and a mark's as `mark_ref`, which
+        write_proposal() resolves."""
+        if self.mark is not None:
+            return {"mark_ref": self.mark}
         stored: dict[str, Any] = {
             "title": self.title,
             "summary": self.summary,
@@ -178,24 +202,78 @@ def _add_to(value: Any, where: str) -> str | None:
     return normal_ref(value) or value.strip()
 
 
+def _parse_marks(value: Any) -> list[ProposalPart]:
+    """The marks of a call, one per ref, in the order of the call. A mark
+    carries only a ref; one that also carries an addition, a summary, or a
+    date is refused, so nothing it holds is lost without a word."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ToolArgumentError('marks must be a list of objects such as {"ref": "T3"}')
+    marks: list[ProposalPart] = []
+    named: set[str] = set()
+    for index, item in enumerate(value):
+        where = f"marks[{index}]"
+        if not isinstance(item, dict):
+            raise ToolArgumentError(f"{where} must be an object such as {{\"ref\": \"T3\"}}")
+        if any(item.get(key) not in (None, "", False, [], {}) for key in MARK_EXTRAS):
+            raise ToolArgumentError(
+                f"{where}: a mark only names a ref; send an addition as its own entry in thoughts"
+            )
+        ref = item.get("ref")
+        if not isinstance(ref, str) or not ref.strip():
+            raise ToolArgumentError(f"{where}.ref must be a ref such as T3")
+        ref = normal_ref(ref) or ref.strip()
+        # Two marks with one ref hold the same data: the second is dropped.
+        if ref in named:
+            continue
+        named.add(ref)
+        marks.append(ProposalPart(title="", summary="", tags=[], category=None, mark=ref))
+    return marks
+
+
 def parse_proposal(
-    arguments: dict[str, Any], categories: list[str], zone: ZoneInfo | None = None
+    arguments: dict[str, Any],
+    categories: list[str],
+    zone: ZoneInfo | None = None,
+    *,
+    offered: bool = False,
 ) -> list[ProposalPart]:
     """The parts of a propose_thought call, each date stamped with the turn's zone.
 
-    The call's shape is {"thoughts": [...]}. A call with title, summary, and
-    tags at the top, as the tool once took, is read as one part.
+    The call's shape is {"thoughts": [...], "marks": [{"ref": "T3"}]}: the new
+    thoughts and additions, then the marks (thought-status design decision 5).
+    A call with title, summary, and tags at the top, as the tool once took,
+    is read as one part. A missing `thoughts` reads as none.
+
+    `offered` is the offer's asked call before archive and /compact: its
+    `marks` key is ignored whatever its shape, and a call with no thought
+    gives no part (design decision 6).
     """
     zone = zone or ZoneInfo(DEFAULT_ZONE)
+    if offered:
+        arguments = {key: value for key, value in arguments.items() if key != "marks"}
+        if not arguments.get("thoughts") and "title" not in arguments:
+            return []
     if "thoughts" not in arguments and "title" in arguments:
-        return [_parse_part(arguments, "", categories, zone)]
-    items = arguments.get("thoughts")
-    if not isinstance(items, list) or not 1 <= len(items) <= MAX_PARTS:
-        raise ToolArgumentError(f"thoughts must be a list of 1 to {MAX_PARTS} thoughts")
-    parts = [
-        _parse_part(item, f"thoughts[{index}].", categories, zone)
-        for index, item in enumerate(items)
-    ]
+        parts = [_parse_part(arguments, "", categories, zone)]
+    else:
+        items = arguments.get("thoughts")
+        if items is None:
+            items = []
+        if not isinstance(items, list) or len(items) > MAX_PARTS:
+            raise ToolArgumentError(f"thoughts must be a list of up to {MAX_PARTS} thoughts")
+        parts = [
+            _parse_part(item, f"thoughts[{index}].", categories, zone)
+            for index, item in enumerate(items)
+        ]
+    marks = [] if offered else _parse_marks(arguments.get("marks"))
+    if not parts and not marks:
+        raise ToolArgumentError("propose_thought needs at least one entry in thoughts or marks")
+    if len(parts) + len(marks) > MAX_PARTS:
+        raise ToolArgumentError(
+            f"propose_thought takes at most {MAX_PARTS} entries in thoughts and marks together"
+        )
     # Two parts of one proposal never add to the same thought.
     named: set[str] = set()
     for part in parts:
@@ -207,7 +285,7 @@ def parse_proposal(
                 "what they add into one thought"
             )
         named.add(part.add_to)
-    return parts
+    return parts + marks
 
 
 @dataclass(frozen=True)

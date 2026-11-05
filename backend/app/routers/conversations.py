@@ -27,7 +27,7 @@ from app.chat.conversations import (
     switch_model,
 )
 from app.chat.model_info import model_info
-from app.chat.prompt import build_context
+from app.chat.prompt import build_context, unsaved_parts
 from app.chat.proposal import (
     filing_for,
     held_parts,
@@ -66,7 +66,7 @@ from app.thoughts.baseline import measure_after_store
 from app.thoughts.categories import check_category
 from app.thoughts.dates import FIELD as WHEN_FIELD
 from app.thoughts.dates import zone_from
-from app.thoughts.store import add_thought
+from app.thoughts.store import add_thought, set_status
 
 router = APIRouter(prefix="/api/conversations")
 
@@ -93,8 +93,9 @@ class MessageOut(BaseModel):
     error_code: str | None
     compacted: bool
     # {"proposal_id"} on a propose_thought result, {"sources"} on a search,
-    # {"action_id"} on a call waiting for approval, {"failed", "summary"} on a
-    # connector call that failed.
+    # {"action_id"} on a call waiting for approval, {"failed"} on a connector
+    # call that failed; every tool message also has its chat line, "summary"
+    # (thought-status design decision 5).
     details: dict[str, Any] | None
     created_at: datetime
 
@@ -120,8 +121,12 @@ class ProposalPart(BaseModel):
     # server wrote it, so the client sends it back unchanged.
     add_to: uuid.UUID | None = None
     based_on: str | None = None
-    # For an addition, the thought it adds to as it is now: title, summary,
-    # tags, category, created_at, and updated_at, or {"deleted": true}.
+    # A status part (thought-status design decision 10): the thought it marks
+    # done. Its title and category are the thought's when it was proposed.
+    mark: uuid.UUID | None = None
+    # For an addition or a status part, the thought it adds to or marks as it
+    # is now: title, summary, tags, category, created_at, and updated_at, or
+    # {"deleted": true}.
     target: dict[str, Any] | None = None
     # For a new idea, the strong match the card names, with the same fields
     # and its thought_id, or null.
@@ -651,14 +656,25 @@ async def confirm_proposal(
         raise ApiError(422, ErrorCode.VALIDATION_ERROR, f"parts: must be indexes from 0 to {count - 1}")
     if len(indexes) > 1 and len(indexes) != count:
         raise ApiError(422, ErrorCode.VALIDATION_ERROR, "parts: name one part, or every part to merge them")
+    marking = any(proposal.parts[index].get("mark") for index in indexes)
+    if marking and len(indexes) > 1:
+        raise ApiError(
+            422, ErrorCode.VALIDATION_ERROR, "parts: a status change is confirmed on its own"
+        )
 
     saved = {proposal.parts[index].get("thought_id") for index in indexes}
     if len(saved) == 1 and None not in saved:
-        return ConfirmOutcome(saved=True, thought_id=saved.pop(), message="Saved.")
+        return ConfirmOutcome(
+            saved=True, thought_id=saved.pop(), message="Marked done." if marking else "Saved."
+        )
     if any(saved - {None}):
         raise part_already_saved()
 
-    if body.mode == "add":
+    if marking:
+        # A status part (thought-status design decision 7): the body's fields
+        # and mode are ignored, nothing is embedded, and no thought is stored.
+        thought_id = await confirm_mark(session, user, proposal.parts[indexes[0]])
+    elif body.mode == "add":
         # An addition never changes its thought's date (thought-appending
         # design decision 22), so a part's date choices need no pick here.
         thought_id = await confirm_addition(
@@ -700,11 +716,12 @@ async def confirm_proposal(
         else part
         for index, part in enumerate(proposal.parts)
     ]
-    if conversation.held_proposal_id == proposal.id and not any(
-        part.get("thought_id") is None for part in proposal.parts
-    ):
+    # A mark never holds a proposal (thought-status design decision 9).
+    if conversation.held_proposal_id == proposal.id and not unsaved_parts(proposal.parts):
         conversation.held_proposal_id = None
     await session.commit()
+    if marking:
+        return ConfirmOutcome(saved=True, thought_id=thought_id, message="Marked done.")
     if body.mode == "add":
         # An addition adds no thought, so the baseline cannot be due.
         return ConfirmOutcome(saved=True, thought_id=thought_id, message="Added.")
@@ -712,6 +729,28 @@ async def confirm_proposal(
     # transaction (thought-appending design decision 5).
     await measure_after_store(session, user)
     return ConfirmOutcome(saved=True, thought_id=thought_id, message="Saved.")
+
+
+def mark_gone() -> ApiError:
+    return ApiError(404, ErrorCode.NOT_FOUND, "This thought no longer exists.")
+
+
+async def confirm_mark(session: AsyncSession, user: User, part: dict[str, Any]) -> str:
+    """Mark a status part's thought done, without committing; returns its id.
+
+    A deleted thought and another user's give the same 404. A thought that
+    is done already is confirmed with no change."""
+    try:
+        thought_id = uuid.UUID(str(part["mark"]))
+    except ValueError:
+        raise mark_gone() from None
+    try:
+        await set_status(session, user, thought_id, "done")
+    except ApiError as exc:
+        if exc.code == ErrorCode.NOT_FOUND:
+            raise mark_gone() from None
+        raise
+    return str(thought_id)
 
 
 async def confirm_addition(
@@ -740,8 +779,10 @@ async def confirm_addition(
         raise ApiError(422, ErrorCode.VALIDATION_ERROR, "add_to: name the thought to add to")
     # Two parts of one proposal never add to one thought. The proposal row
     # is locked, so a concurrent confirm of another part cannot slip past.
+    # A confirmed mark on the same thought filed nothing (thought-status
+    # design decision 6), so it does not count.
     if any(
-        other.get("thought_id") == str(target_id)
+        other.get("thought_id") == str(target_id) and not other.get("mark")
         for index, other in enumerate(proposal.parts)
         if index != indexes[0]
     ):

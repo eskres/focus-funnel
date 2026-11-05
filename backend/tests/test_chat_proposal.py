@@ -157,6 +157,7 @@ def test_the_offer_call_returns_and_holds_a_proposal(client, alice, fake_llm, te
             "deleted": False,
             "add_to": None,
             "based_on": None,
+            "mark": None,
             "target": None,
             "similar": None,
             "added": False,

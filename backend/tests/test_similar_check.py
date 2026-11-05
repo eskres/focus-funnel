@@ -8,7 +8,6 @@ import json
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import pytest
 from sqlalchemy import select, update
@@ -489,11 +488,9 @@ def test_no_candidate_writes_the_proposal_at_once(client, alice, test_database_u
 
 
 def four_rounds(settings_env, tmp_path) -> None:
-    shipped = Path(__file__).parent.parent / "app" / "chat" / "chat.yaml"
-    path = tmp_path / "chat.yaml"
-    path.write_text(shipped.read_text().replace("tool_rounds: 3", "tool_rounds: 4"))
-    settings_env.setenv("CHAT_CONFIG_PATH", str(path))
-    get_chat_config.cache_clear()
+    """Four tool rounds: the shipped chat.yaml has them since thought-status
+    (design decision 11), so this only checks that it still does."""
+    assert get_chat_config().tool_rounds == 4
 
 
 def test_a_candidate_round_does_not_trip_the_one_proposal_rule_and_a_third_call_does(
@@ -533,7 +530,8 @@ def test_the_round_limit_still_ends_a_looping_model(client, alice, test_database
 
     response = chat(client, alice, "on cartography and old maps", conversation_id)
 
-    assert len(fake.chat_requests) == get_chat_config().tool_rounds == 3
+    # chat.yaml: tool_rounds 4 (thought-status design decision 11).
+    assert len(fake.chat_requests) == get_chat_config().tool_rounds == 4
     [error] = events_of(response, "error")
     assert error["error"]["code"] == "tool_loop_limit"
     messages, proposals = stored_rows(test_database_url, conversation_id)
@@ -554,12 +552,13 @@ def test_a_proposal_in_the_last_round_is_shown_without_a_candidate_round(
     fake.queue(
         search_round("maps", "call_1"),
         search_round("atlas", "call_2"),
-        propose_round(podcast_args(), call_id="call_3"),
+        search_round("old maps", "call_3"),
+        propose_round(podcast_args(), call_id="call_4"),
     )
 
     response = chat(client, alice, "on cartography and old maps", conversation_id)
 
-    assert len(fake.chat_requests) == get_chat_config().tool_rounds == 3
+    assert len(fake.chat_requests) == get_chat_config().tool_rounds == 4
     assert tool_summaries(response)[-1] == "Proposed a thought to file"
     [proposal] = events_of(response, "proposal")
     [stored] = proposal["parts"]

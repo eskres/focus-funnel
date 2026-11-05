@@ -143,7 +143,10 @@ def test_an_acts_call_is_stored_as_an_action_and_never_reaches_the_server(
     tool_message = next(m for m in detail["messages"] if m["role"] == "tool")
     assert tool_message["position"] == event["position"]
     assert tool_message["content"] == ACTION_SHOWN
-    assert tool_message["details"] == {"action_id": event["id"]}
+    assert tool_message["details"] == {
+        "action_id": event["id"],
+        "summary": "calendar: create_event is waiting for your approval",
+    }
     assert detail["actions"] == [event]
 
 

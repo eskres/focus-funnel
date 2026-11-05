@@ -9,6 +9,7 @@ the last saved proposal, the model is asked for one, and may decline.
 
 import logging
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -35,11 +36,13 @@ from app.chat.refs import (
     SeenThought,
     conversation_refs,
     date_fields,
+    normal_ref,
     resolve_additions,
     saved_ids,
+    status_fields,
 )
 from app.chat.similar import Check, candidates_note, check_parts, with_similar
-from app.chat.tools import ProposalPart, ToolArgumentError, parse_proposal
+from app.chat.tools import ProposalPart, ToolArgumentError, ToolRefusal, parse_proposal
 from app.chat.usage import completion_usage, record_usage
 from app.config import Settings
 from app.errors import model_not_set
@@ -63,6 +66,12 @@ class Filing:
     @property
     def tools(self) -> list[dict[str, Any]]:
         return tools_for(self.categories, self.known_tags)
+
+    @property
+    def offer_tools(self) -> list[dict[str, Any]]:
+        """The tools of the offer's asked calls: no marks (thought-status design
+        decision 6)."""
+        return tools_for(self.categories, self.known_tags, marks=False)
 
 
 async def filing_for(session: AsyncSession, user: User, config: ChatConfig) -> Filing:
@@ -120,10 +129,17 @@ def fit_raw_text(messages: list[Message]) -> RawText:
     return RawText("\n\n".join(text for _, text in kept), kept[0][0], last_position)
 
 
+def filed_part(part: dict[str, Any]) -> bool:
+    """A part that filed a thought or added to one: saved, and not a mark,
+    which files nothing (thought-status design decision 8)."""
+    return bool(part.get("thought_id")) and not part.get("mark")
+
+
 def discussion_start(proposals: list[Proposal]) -> int:
-    """The position after the latest proposal with a saved part, or 0."""
+    """The position after the latest proposal with a part that filed or
+    added to a thought, or 0. A confirmed mark does not count."""
     for proposal in reversed(proposals):
-        if any(part.get("thought_id") for part in proposal.parts):
+        if any(filed_part(part) for part in proposal.parts):
             return proposal.to_position + 1
     return 0
 
@@ -171,6 +187,123 @@ async def raw_text_for(
     return fit_raw_text(discussion)
 
 
+UNSEEN_MARK = (
+    "Error: {ref} is not a thought this conversation has seen. Search for it with "
+    "status open, then call propose_thought with the ref the search gives."
+)
+GONE_MARK = (
+    "Error: {ref} no longer exists. Do not propose marking it done; tell the user it "
+    "was deleted."
+)
+NOT_OPEN_MARK = (
+    "Error: {ref} is already {status}. Do not propose marking it done; tell the user it "
+    "is already {status}."
+)
+
+
+def _ref_list(refs: list[str]) -> str:
+    return refs[0] if len(refs) == 1 else ", ".join(refs[:-1]) + " and " + refs[-1]
+
+
+def mark_ids(refs: Refs, marks: Sequence[str]) -> dict[str, uuid.UUID | None]:
+    """The thought id each mark's ref names, or None for a ref this
+    conversation has not seen (text that is not a ref, or a number past the
+    refs). A deleted thought keeps its number, so its id is still known."""
+    ids: dict[str, uuid.UUID | None] = {}
+    for ref in marks:
+        normal = normal_ref(ref)
+        number = int(normal[1:]) if normal else 0
+        ids[ref] = refs.numbered[number - 1] if 1 <= number <= len(refs.numbered) else None
+    return ids
+
+
+def mark_refusal(
+    marks: Sequence[str],
+    ids: dict[str, uuid.UUID | None],
+    statuses: dict[uuid.UUID, str],
+    others: int,
+) -> str | None:
+    """The tool result for a call's marks, or None when every mark can apply
+    (thought-status design decision 6). `statuses` holds the status of each
+    of the user's thoughts that exists. One line per mark that cannot apply,
+    in the order of the call, then, when the call had `others` (entries in
+    thoughts) or a mark that passed, the closing line naming every refused
+    ref."""
+    lines: list[str] = []
+    refused: list[str] = []
+    unseen = False
+    for ref in marks:
+        thought_id = ids[ref]
+        if thought_id is None:
+            lines.append(UNSEEN_MARK.format(ref=ref))
+            unseen = True
+        elif thought_id not in statuses:
+            lines.append(GONE_MARK.format(ref=ref))
+        elif statuses[thought_id] != "open":
+            lines.append(NOT_OPEN_MARK.format(ref=ref, status=statuses[thought_id]))
+        else:
+            continue
+        refused.append(ref)
+    if not refused:
+        return None
+    if others or len(refused) < len(marks):
+        closing = (
+            "Nothing was proposed. Call propose_thought again with the call's other "
+            f"parts, without {_ref_list(refused)}"
+        )
+        closing += ", and with the ref the search gives, in one call." if unseen else "."
+        lines.append(closing)
+    return "\n".join(lines)
+
+
+async def resolve_marks(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    refs: Refs,
+    marks: Sequence[str],
+    others: int,
+) -> list[dict[str, Any]]:
+    """The marks of a call as stored, in order, or a ToolRefusal (thought-status
+    design decisions 5 and 6).
+
+    One query reads every mark's thought, filtered by its owner, so another
+    user's thought reads as gone before its status is looked at. A ref this
+    conversation has not seen, a thought that is gone, and one whose status
+    is not open each get one line (mark_refusal()). A stored mark has the
+    thought's title and category now, for the card only.
+    """
+    if not marks:
+        return []
+    ids = mark_ids(refs, marks)
+    known = [thought_id for thought_id in ids.values() if thought_id is not None]
+    statuses: dict[uuid.UUID, str] = {}
+    if known:
+        rows = await session.execute(
+            select(Thought.id, Thought.status).where(
+                Thought.id.in_(known), Thought.user_id == user_id
+            )
+        )
+        statuses = {row.id: row.status for row in rows}
+    refusal = mark_refusal(marks, ids, statuses, others)
+    if refusal is not None:
+        raise ToolRefusal(refusal)
+    resolved: list[dict[str, Any]] = []
+    for ref in marks:
+        thought_id = ids[ref]
+        seen = refs.thoughts.get(thought_id)
+        resolved.append(
+            {
+                "mark": str(thought_id),
+                "title": seen.title if seen is not None else "",
+                "summary": "",
+                "tags": [],
+                "category": seen.category if seen is not None else None,
+                "thought_id": None,
+            }
+        )
+    return resolved
+
+
 async def write_proposal(
     session: AsyncSession,
     conversation: Conversation,
@@ -183,13 +316,32 @@ async def write_proposal(
     """Write a proposal and hold it. Returns it, and the id of the held
     proposal it replaced, if any. A part's ref is resolved now, into an
     addition to a seen thought or a new thought (design decision 3), from
-    `refs` when the caller has them. The caller commits."""
+    `refs` when the caller has them. A part's `mark_ref` is resolved into a
+    stored mark, or the call is refused with a ToolRefusal and nothing is
+    written (thought-status design decision 6). Marks come after the other
+    parts. A proposal whose parts are all marks is not held and replaces no
+    held proposal (thought-status design decision 9). The caller commits."""
     messages = await list_messages(session, conversation)
-    raw = await raw_text_for(session, conversation, messages, push=push)
-    if any(part.get("add_to_ref") is not None for part in parts):
+    if any(
+        part.get("add_to_ref") is not None or part.get("mark_ref") is not None for part in parts
+    ):
         if refs is None:
             refs = await refs_for(session, conversation, messages)
+        if any(part.get("mark_ref") is not None for part in parts):
+            marks = await resolve_marks(
+                session,
+                conversation.user_id,
+                refs,
+                [part["mark_ref"] for part in parts if part.get("mark_ref") is not None],
+                sum(1 for part in parts if part.get("mark_ref") is None and not part.get("mark")),
+            )
+            resolved = iter(marks)
+            parts = [next(resolved) if part.get("mark_ref") is not None else part for part in parts]
         parts = resolve_additions(parts, refs)
+    parts = [part for part in parts if not part.get("mark")] + [
+        part for part in parts if part.get("mark")
+    ]
+    raw = await raw_text_for(session, conversation, messages, push=push)
     proposal = Proposal(
         id=uuid.uuid4(),
         conversation_id=conversation.id,
@@ -205,11 +357,12 @@ async def write_proposal(
     # The conversation points at the row, so the row goes in first.
     await session.flush()
     replaced = None
-    if held_parts(held) is not None:
-        # The card of the proposal it replaces shows as replaced, and can still be confirmed.
-        held.replaced_by_id = proposal.id
-        replaced = held.id
-    conversation.held_proposal_id = proposal.id
+    if unsaved_parts(parts):
+        if held_parts(held) is not None:
+            # The card of the proposal it replaces shows as replaced, and can still be confirmed.
+            held.replaced_by_id = proposal.id
+            replaced = held.id
+        conversation.held_proposal_id = proposal.id
     return proposal, replaced
 
 
@@ -225,7 +378,7 @@ class PartLookup:
 
 
 def _named_ids(proposals: list[Proposal]) -> list[uuid.UUID]:
-    """Every thought id these proposals' parts name: saved, added to, or similar."""
+    """Every thought id these proposals' parts name: saved, added to, marked, or similar."""
     ids: set[uuid.UUID] = set()
     for proposal in proposals:
         for part in proposal.parts:
@@ -233,6 +386,7 @@ def _named_ids(proposals: list[Proposal]) -> list[uuid.UUID]:
             for value in (
                 part.get("thought_id"),
                 part.get("add_to"),
+                part.get("mark"),
                 similar.get("thought_id") if isinstance(similar, dict) else None,
             ):
                 if value:
@@ -269,6 +423,7 @@ async def part_lookup(session: AsyncSession, user: User, proposals: list[Proposa
                 created_at=thought.created_at,
                 updated_at=thought.updated_at,
                 **date_fields(thought),
+                **status_fields(thought),
             )
     return PartLookup(thoughts, await _additions_of(session, user, proposals))
 
@@ -299,8 +454,8 @@ def proposal_payload(proposal: Proposal, lookup: PartLookup | None = None) -> di
 
     From `lookup`, each part also carries its thought's current title
     (`saved_title`) and whether that thought was deleted (`deleted`); for an
-    addition, `target`, the thought it adds to as it is now, or
-    `{"deleted": true}`; for a new idea with a strong match, `similar`, that
+    addition or a mark, `target`, the thought it adds to or marks as it is
+    now, or `{"deleted": true}`; for a new idea with a strong match, `similar`, that
     match as it is now, or null once it is gone; and once saved as an
     addition, `added`, and `undone` once that addition was undone. Without a
     lookup a part has none of these.
@@ -313,9 +468,10 @@ def proposal_payload(proposal: Proposal, lookup: PartLookup | None = None) -> di
         known = thoughts is not None and thought_id is not None
         saved = thoughts.get(str(thought_id)) if known else None
         add_to = part.get("add_to")
+        mark = part.get("mark")
         target = None
-        if thoughts is not None and add_to:
-            current = thoughts.get(str(add_to))
+        if thoughts is not None and (add_to or mark):
+            current = thoughts.get(str(add_to or mark))
             target = _thought_fields(current) if current else {"deleted": True}
         similar = part.get("similar")
         match = None
@@ -332,6 +488,8 @@ def proposal_payload(proposal: Proposal, lookup: PartLookup | None = None) -> di
             # An addition's thought and version, null for a new thought.
             "add_to": add_to,
             "based_on": part.get("based_on"),
+            # A status part: the thought it marks done (thought-status decision 10).
+            "mark": mark,
             "target": target,
             "similar": match,
             "added": addition is not None,
@@ -358,8 +516,9 @@ async def asked_proposal(
     or None when it calls no tool or its arguments do not make a proposal.
 
     Not forced: a forced call makes the model propose something even when
-    only small talk is left."""
-    completion = await call.complete(context, tools=filing.tools)
+    only small talk is left. The tool takes no marks, and any mark the model
+    sends is ignored unchecked (thought-status design decision 6)."""
+    completion = await call.complete(context, tools=filing.offer_tools)
     await record_usage(session, call, "proposal", *completion_usage(completion), conversation_id)
     choices = completion.choices or []
     tool_calls = (choices[0].message.tool_calls if choices else None) or []
@@ -367,11 +526,16 @@ async def asked_proposal(
         if tool_call.function.name != PROPOSE_TOOL:
             continue
         try:
-            return parse_proposal(
-                tool_arguments(tool_call.function.arguments), filing.categories, zone
+            parts = parse_proposal(
+                tool_arguments(tool_call.function.arguments),
+                filing.categories,
+                zone,
+                offered=True,
             )
         except (ValueError, ToolArgumentError):
             logger.info("The offered proposal call returned arguments that do not fit")
+            continue
+        return parts or None
     return None
 
 
