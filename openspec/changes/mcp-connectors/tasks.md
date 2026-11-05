@@ -59,9 +59,9 @@
 
 ## 9. Connectors settings
 
-- [ ] 9.1 Add `connectors-settings.tsx` with the warning dialog, the connector list, the catalog, the add and edit form, and Test. Check with Vitest against mocked responses that the warning blocks the first add until accepted, that picking the catalog entry fills the form, that auth shows only its last 4 characters, that a failed test shows the plain-words reason, and that operator connectors offer no edit or delete and no add when users may not add
-- [ ] 9.2 Add the tool list with the switch, the reads or acts select, and always allow behind a confirmation. Check with Vitest that the select never offers reads for a tool marked acts by the server, that unavailable tools cannot be switched on, and that always allow asks first
-- [ ] 9.3 Hide the section when connectors are off. Check with Vitest that the settings page shows no Connectors section when `GET /api/connectors` responds 404
+- [x] 9.1 Add `connectors-settings.tsx` with the warning dialog, the connector list, the catalog, the add and edit form, and Test. Check with Vitest against mocked responses that the warning blocks the first add until accepted, that picking the catalog entry fills the form, that auth shows only its last 4 characters, that a failed test shows the plain-words reason, and that operator connectors offer no edit or delete and no add when users may not add
+- [x] 9.2 Add the tool list with the switch, the reads or acts select, and always allow behind a confirmation. Check with Vitest that the select never offers reads for a tool marked acts by the server, that unavailable tools cannot be switched on, and that always allow asks first
+- [x] 9.3 Hide the section when connectors are off. Check with Vitest that the settings page shows no Connectors section when `GET /api/connectors` responds 404
 
 ## 10. Deployment and docs
 
