@@ -40,8 +40,9 @@ export type StoredMessage = {
   compacted: boolean;
   /**
    * `{proposal_id}` on a propose_thought result, `{sources}` on a search,
-   * `{action_id}` on a connector call that waits for approval, `{failed,
-   * summary}` on a connector call that failed.
+   * `{action_id}` on a connector call that waits for approval, `{failed}` on
+   * a connector call that failed. Each tool message from this server also
+   * holds the `summary` its tool line showed in the stream.
    */
   details: {
     proposal_id?: string;
@@ -117,13 +118,17 @@ export type ConversationChange = {
   reasoning_effort?: string | null;
 };
 
-/** A card as the user left it, and the parts it covers: one, or every part after a merge. */
+/**
+ * A card as the user left it, and the parts it covers: one, or every part
+ * after a merge. A status part sends only `parts`: the server ignores the
+ * fields for it and marks the thought done.
+ */
 export type ConfirmRequest = {
   parts: number[];
-  title: string;
-  summary: string;
-  tags: string[];
-  category: string | null;
+  title?: string;
+  summary?: string;
+  tags?: string[];
+  category?: string | null;
   /**
    * The card's date with the browser's zone, or null for no date. Left out, the
    * thought gets no date; a part with two date choices needs it. An addition

@@ -296,8 +296,9 @@ UPCOMING_LIMIT = 200
 async def list_upcoming(
     session: AsyncSession, user: User, from_day: date, limit: int = UPCOMING_LIMIT
 ) -> tuple[list[Any], bool]:
-    """The user's dated thoughts that end, or start when they have no end, on
-    `from_day` or later, in date order, and whether more than `limit` exist.
+    """The user's open dated thoughts that end, or start when they have no end,
+    on `from_day` or later, in date order, and whether more than `limit` exist.
+    A done thought is left out (thought-status design decision 14).
 
     Date order is by start day, a day with no time before one with a time, then
     by start time and filing time (thought-dates design decision 8). `from_day`
@@ -317,6 +318,7 @@ async def list_upcoming(
             )
             .where(
                 Thought.user_id == user.id,
+                Thought.status == "open",
                 Thought.starts_on.is_not(None),
                 func.coalesce(Thought.ends_on, Thought.starts_on) >= from_day,
             )

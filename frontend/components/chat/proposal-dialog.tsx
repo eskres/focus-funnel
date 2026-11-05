@@ -26,12 +26,14 @@ export type HeldOffer = {
 /**
  * The proposal to show before an action, or null when there is none. A
  * failed offer does not block the action: nothing is lost, since nothing
- * was saved.
+ * was saved. A status part is never offered: it loses nothing unconfirmed.
  */
 export async function heldProposalFor(conversationId: string): Promise<Proposal | null> {
   try {
     const offered = await offerProposal(conversationId);
-    return offered && offered.parts.some((part) => part.thoughtId === null) ? offered : null;
+    return offered && offered.parts.some((part) => part.thoughtId === null && part.mark === null)
+      ? offered
+      : null;
   } catch {
     return null;
   }

@@ -15,9 +15,11 @@ import {
   loadout,
   loadoutEntry,
   openStream,
+  proposalEvent,
   storedMessage,
   streamOf,
   toolEvent,
+  wireProposal,
 } from "@/test/fake-api";
 
 import { Chat } from "./chat";
@@ -338,6 +340,124 @@ describe("Chat", () => {
       const indication = within(list).getByTestId("tool-indication");
       expect(indication).toHaveTextContent(failure);
       expect(indication).toHaveAttribute("data-failed", "true");
+    });
+  });
+
+  describe("tool summaries", () => {
+    // A search with no query, a refused mark, and a proposal of only marks
+    // (thought-status design decision 5).
+    const LISTED = "Listed your open thoughts in task";
+    const REFUSED = "Could not propose that change";
+    const MARKED = "Proposed marking a thought done";
+    const plumber = {
+      title: "Call the plumber",
+      summary: "",
+      tags: [],
+      category: "task",
+      mark: "t9",
+      target: {
+        title: "Call the plumber",
+        summary: "Ask about the leak.",
+        tags: [],
+        category: "task",
+        created_at: "2026-09-20T08:00:00Z",
+        updated_at: "2026-09-20T08:00:00Z",
+      },
+    };
+    const call = (id: string, name: string) => ({
+      id,
+      type: "function",
+      function: { name, arguments: "{}" },
+    });
+
+    function indications() {
+      return screen.getAllByTestId("tool-indication").map((element) => element.textContent);
+    }
+
+    it("shows the server's summary for each tool line in the live stream", async () => {
+      fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "POST /api/chat": () =>
+          streamOf(
+            toolEvent("search_thoughts", "start"),
+            toolEvent("search_thoughts", "end", LISTED, []),
+            toolEvent("propose_thought", "start"),
+            toolEvent("propose_thought", "end", REFUSED),
+            toolEvent("propose_thought", "start"),
+            proposalEvent("p1", [plumber], 6),
+            toolEvent("propose_thought", "end", MARKED),
+            delta("Ready to mark it done."),
+            done,
+          ),
+      });
+      render(<Chat />);
+
+      send("I called the plumber");
+      await screen.findByText("Ready to mark it done.");
+      expect(indications()).toEqual([LISTED, REFUSED, MARKED]);
+    });
+
+    it("shows the same summaries in a reloaded conversation, from each tool message's details", async () => {
+      fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "GET /api/conversations/c1": json(
+          200,
+          conversation({
+            messages: [
+              storedMessage(0, "user", "I called the plumber"),
+              storedMessage(1, "assistant", null, { tool_calls: [call("s", "search_thoughts")] }),
+              storedMessage(2, "tool", "1 of your thoughts match", {
+                tool_call_id: "s",
+                details: { sources: [], summary: LISTED },
+              }),
+              storedMessage(3, "assistant", null, { tool_calls: [call("r", "propose_thought")] }),
+              storedMessage(4, "tool", "Error: T9 is not a thought this conversation has seen.", {
+                tool_call_id: "r",
+                details: { summary: REFUSED },
+              }),
+              storedMessage(5, "assistant", null, { tool_calls: [call("m", "propose_thought")] }),
+              storedMessage(6, "tool", "The proposal is shown.", {
+                tool_call_id: "m",
+                details: { proposal_id: "p1", summary: MARKED },
+              }),
+              storedMessage(7, "assistant", "Ready to mark it done."),
+            ],
+            proposals: [wireProposal("p1", [plumber], 6)],
+          }),
+        ),
+      });
+      render(<Chat conversationId="c1" />);
+
+      await screen.findByText("Ready to mark it done.");
+      expect(indications()).toEqual([LISTED, REFUSED, MARKED]);
+      expect(screen.getByRole("group", { name: "Mark done: Call the plumber" })).toBeInTheDocument();
+    });
+
+    it("keeps the name's label for an older tool message with no stored summary", async () => {
+      fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "GET /api/conversations/c1": json(
+          200,
+          conversation({
+            messages: [
+              storedMessage(0, "user", "buy oat milk"),
+              storedMessage(1, "assistant", null, { tool_calls: [call("p", "propose_thought")] }),
+              storedMessage(2, "tool", "The proposal is shown.", {
+                tool_call_id: "p",
+                details: { proposal_id: "p1" },
+              }),
+              storedMessage(3, "assistant", "Here it is."),
+            ],
+            proposals: [
+              wireProposal("p1", [{ title: "Oat milk", summary: "Buy it.", tags: [], category: "task" }], 2),
+            ],
+          }),
+        ),
+      });
+      render(<Chat conversationId="c1" />);
+
+      await screen.findByText("Here it is.");
+      expect(indications()).toEqual(["Proposed a thought to file"]);
     });
   });
 
