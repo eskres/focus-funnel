@@ -55,6 +55,23 @@ describe("updateThought", () => {
     expect(seen).toEqual([{ id: "t1", title: "Dentist in June" }]);
   });
 
+  it("sends a status change alone as PATCH {status} and announces it", async () => {
+    const answer = { ...THOUGHT, status: "done", status_changed_at: "2026-09-23T09:00:00Z" };
+    const { calls } = fakeApi({ "PATCH /api/thoughts/t1": json(200, answer) });
+    const { seen, stop } = listen();
+
+    const thought = await updateThought("t1", { status: "done" });
+    stop();
+
+    expect(thought).toEqual(answer);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({ method: "PATCH", path: "/api/thoughts/t1", body: { status: "done" } });
+    // The body is exactly {"status":"done"}, with no other field.
+    const init = vi.mocked(fetch).mock.calls[0][1] as RequestInit;
+    expect(init.body).toBe('{"status":"done"}');
+    expect(seen).toEqual([{ id: "t1", title: "Dentist in May" }]);
+  });
+
   it("throws the server's message and announces nothing when the change is refused", async () => {
     fakeApi({ "PATCH /api/thoughts/t1": errorResponse(422, "validation_error", "title: must not be empty") });
     const { seen, stop } = listen();

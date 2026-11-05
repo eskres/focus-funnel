@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { DateFields, type DateText, dateTextOf, whenOfText } from "@/components/chat/date-fields";
 import { ThoughtLink } from "@/components/chat/thought-link";
 import { type FieldText, hasEmptyField, parseTags, ThoughtFields } from "@/components/chat/thought-fields";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -24,6 +25,8 @@ import { afterParts, beforeParts, type DiffPart, wordDiff } from "@/lib/word-dif
  * An addition names the thought it adds to (`addTo`), the version the card
  * was made from (`basedOn`), and that thought as it is now (`target`); a new
  * thought may name a strong match (`similar`) the user can add to instead.
+ * A status part names the thought it marks done (`mark`), with that thought
+ * as it is now in `target`.
  */
 type Card = {
   parts: number[];
@@ -42,6 +45,7 @@ type Card = {
   similar: ProposalPart["similar"];
   added: boolean;
   undone: boolean;
+  mark: string | null;
 };
 
 function cardOf(part: ProposalPart, index: number): Card {
@@ -62,6 +66,7 @@ function cardOf(part: ProposalPart, index: number): Card {
     similar: part.similar,
     added: part.added,
     undone: part.undone,
+    mark: part.mark,
   };
 }
 
@@ -87,13 +92,14 @@ export function mergeParts(parts: ProposalPart[]): Card {
     // Merged parts are saved as one thought, so the first part says how it is now.
     savedTitle: parts[0].savedTitle,
     deleted: parts[0].deleted,
-    // An addition is never merged.
+    // An addition or a status part is never merged.
     addTo: null,
     basedOn: null,
     target: null,
     similar: null,
     added: false,
     undone: false,
+    mark: null,
   };
 }
 
@@ -138,20 +144,28 @@ export function ProposalGroup({
   const [saved, setSaved] = useState<(string | null)[]>(() =>
     proposal.parts.map((part) => part.thoughtId),
   );
-  // Parts saved as one thought were merged.
+  // Parts saved as one thought were merged. A proposal with an addition or a
+  // status part is never merged, though an addition and a mark on the same
+  // thought both end with its id.
   const [merged, setMerged] = useState(
-    () => saved.length >= 2 && saved[0] !== null && saved.every((id) => id === saved[0]),
+    () =>
+      saved.length >= 2 &&
+      saved[0] !== null &&
+      saved.every((id) => id === saved[0]) &&
+      proposal.parts.every((part) => !part.mark && !part.addTo),
   );
+  // A status part is never offered again, so the held proposal's copy leaves it out.
   const cards = merged
     ? [{ ...mergeParts(proposal.parts), thoughtId: saved[0] }]
     : proposal.parts
         .map((part, index) => ({ ...cardOf(part, index), thoughtId: saved[index] }))
-        .filter((card) => !onlyUnsaved || !card.thoughtId);
-  // A replaced proposal keeps its unsaved cards folded away until the user asks.
+        .filter((card) => !onlyUnsaved || (!card.thoughtId && !card.mark));
+  // A replaced proposal keeps its unsaved cards folded away until the user
+  // asks. A status card is not replaced: it stays shown and can be confirmed.
   const [unfolded, setUnfolded] = useState(false);
   const folded = Boolean(proposal.replacedBy) && !unfolded;
-  const waiting = cards.filter((card) => !card.thoughtId).length;
-  const shown = folded ? cards.filter((card) => card.thoughtId) : cards;
+  const waiting = cards.filter((card) => !card.thoughtId && !card.mark).length;
+  const shown = folded ? cards.filter((card) => card.thoughtId || card.mark) : cards;
   // The cards the user turned into additions with the "Similar" hint.
   const [adding, setAdding] = useState<number[]>([]);
   // An addition adds one card to one thought, so a proposal with one is not merged.
@@ -160,8 +174,9 @@ export function ProposalGroup({
     !merged &&
     proposal.parts.length >= 2 &&
     saved.every((id) => id === null) &&
-    proposal.parts.every((part) => !part.addTo) &&
+    proposal.parts.every((part) => !part.addTo && !part.mark) &&
     adding.length === 0;
+  const statusOnly = proposal.parts.every((part) => part.mark);
 
   function onSaved(parts: number[], thoughtId: string) {
     setSaved((current) => current.map((id, index) => (parts.includes(index) ? thoughtId : id)));
@@ -175,7 +190,13 @@ export function ProposalGroup({
 
   return (
     <section
-      aria-label={cards.length > 1 ? "Proposals to file" : "Proposal to file"}
+      aria-label={
+        statusOnly
+          ? "Proposed status change"
+          : cards.length > 1
+            ? "Proposals to file"
+            : "Proposal to file"
+      }
       data-proposal-id={anchor ? proposal.id : undefined}
       data-marked={marked || undefined}
       className={cn(
@@ -183,16 +204,26 @@ export function ProposalGroup({
         marked && "ring-2 ring-primary ring-offset-4 ring-offset-background",
       )}
     >
-      {shown.map((card) => (
-        <ProposalCard
-          key={`${merged ? "merged" : "part"}-${card.parts.join(",")}`}
-          conversationId={conversationId}
-          proposalId={proposal.id}
-          card={card}
-          onSaved={onSaved}
-          onAdding={onAdding}
-        />
-      ))}
+      {shown.map((card) =>
+        card.mark ? (
+          <StatusCard
+            key={`mark-${card.parts.join(",")}`}
+            conversationId={conversationId}
+            proposalId={proposal.id}
+            card={card}
+            onSaved={onSaved}
+          />
+        ) : (
+          <ProposalCard
+            key={`${merged ? "merged" : "part"}-${card.parts.join(",")}`}
+            conversationId={conversationId}
+            proposalId={proposal.id}
+            card={card}
+            onSaved={onSaved}
+            onAdding={onAdding}
+          />
+        ),
+      )}
       {folded && waiting > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed p-2 text-xs text-muted-foreground">
           <span>
@@ -213,6 +244,156 @@ export function ProposalGroup({
   );
 }
 
+
+/**
+ * The saved thought as it is now: its title once it changed, whether it is
+ * gone, and, for an addition, whether it was added and undone since. An edit,
+ * delete, or undo in the thought sheet shows here at once.
+ */
+function useSavedThought(card: Card, proposalId: string) {
+  const state = useState({
+    title: card.savedTitle,
+    deleted: card.deleted,
+    added: card.added,
+    undone: card.undone,
+  });
+  const setNow = state[1];
+  const thoughtId = card.thoughtId;
+
+  useEffect(() => {
+    if (!thoughtId) return;
+    function follow(event: Event) {
+      const change = (event as CustomEvent<ThoughtChanged>).detail;
+      if (change?.id !== thoughtId) return;
+      setNow((current) =>
+        "deleted" in change
+          ? { ...current, deleted: true }
+          : {
+              ...current,
+              title: change.title,
+              deleted: false,
+              undone: current.undone || change.undone === proposalId,
+            },
+      );
+    }
+    window.addEventListener(THOUGHT_CHANGED_EVENT, follow);
+    return () => window.removeEventListener(THOUGHT_CHANGED_EVENT, follow);
+  }, [thoughtId, proposalId, setNow]);
+
+  return state;
+}
+
+/**
+ * A card that marks a filed thought done: no fields, one button. It names the
+ * thought as it is now, or by the title stored in the part once it is gone.
+ * Only a 404 says the thought no longer exists; any other failure keeps the
+ * button, since the thought may well exist.
+ */
+function StatusCard({
+  conversationId,
+  proposalId,
+  card,
+  onSaved,
+}: {
+  conversationId: string | undefined;
+  proposalId: string;
+  card: Card;
+  onSaved: (parts: number[], thoughtId: string) => void;
+}) {
+  const [now, setNow] = useSavedThought(card, proposalId);
+  const [gone, setGone] = useState(() => card.target !== null && "deleted" in card.target);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const thoughtId = card.thoughtId;
+  const target = isTarget(card.target) ? card.target : null;
+  const title = target?.title || card.title;
+  const category = target ? target.category : card.category;
+
+  async function confirm() {
+    if (!conversationId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const outcome = await confirmProposal(conversationId, proposalId, { parts: card.parts });
+      setNow((current) => ({ ...current, title: current.title || title, deleted: false }));
+      onSaved(card.parts, outcome.thought_id);
+    } catch (err) {
+      if (err instanceof NotFoundError) setGone(true);
+      else setError(err instanceof Error ? err.message : "Could not mark the thought done.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // The deleted state checks `deleted` before the title, which the server
+  // sends as null for a gone thought.
+  const shownTitle = now.title || title;
+
+  if (thoughtId && now.deleted) {
+    return (
+      <div
+        role="group"
+        aria-label={`Deleted: ${shownTitle}`}
+        className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed p-3 text-sm"
+      >
+        <span role="status" className="text-muted-foreground">
+          Deleted:
+        </span>
+        <span className="text-muted-foreground">{shownTitle}</span>
+      </div>
+    );
+  }
+
+  if (thoughtId) {
+    return (
+      <div
+        role="group"
+        aria-label={`Marked done: ${shownTitle}`}
+        className="flex flex-wrap items-center gap-2 rounded-lg border p-3 text-sm"
+      >
+        <span role="status" className="text-muted-foreground">
+          Marked done:
+        </span>
+        <span className="font-medium">{shownTitle}</span>
+        <ThoughtLink id={thoughtId} className="text-xs">
+          Open
+        </ThoughtLink>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      role="group"
+      aria-label={`Mark done: ${title}`}
+      className="flex flex-col gap-2 rounded-lg border p-3 text-sm"
+    >
+      {gone ? (
+        <p role="status" className="text-muted-foreground">
+          This thought no longer exists.
+        </p>
+      ) : (
+        <>
+          <p className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground">Mark done:</span>
+            <span className="font-medium">{title}</span>
+            {category && <Badge>{category}</Badge>}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={confirm} disabled={busy || !conversationId}>
+              Mark done
+            </Button>
+            {error && (
+              <p role="alert" className="text-xs text-destructive">
+                {error}
+              </p>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 /** The fields as the card first shows them: an addition starts from the thought it adds to. */
 function startText(card: Card): FieldText {
@@ -258,40 +439,12 @@ function ProposalCard({
   const [pick, setPick] = useState<number | "none" | null>(null);
   // An addition keeps its thought's date, so it has no date to pick.
   const mustPick = !addition && Boolean(card.whenChoices) && pick === null;
-  // The saved thought as it is now: its title once it changed, whether it is
-  // gone, and, for an addition, whether it was added and undone since.
-  const [now, setNow] = useState({
-    title: card.savedTitle,
-    deleted: card.deleted,
-    added: card.added,
-    undone: card.undone,
-  });
+  const [now, setNow] = useSavedThought(card, proposalId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const thoughtId = card.thoughtId;
   const target = addition && isTarget(addition.target) ? addition.target : null;
   const empty = addition ? !text.summary.trim() : hasEmptyField(text);
-
-  // An edit, delete, or undo in the thought sheet shows here at once.
-  useEffect(() => {
-    if (!thoughtId) return;
-    function follow(event: Event) {
-      const change = (event as CustomEvent<ThoughtChanged>).detail;
-      if (change?.id !== thoughtId) return;
-      setNow((current) =>
-        "deleted" in change
-          ? { ...current, deleted: true }
-          : {
-              ...current,
-              title: change.title,
-              deleted: false,
-              undone: current.undone || change.undone === proposalId,
-            },
-      );
-    }
-    window.addEventListener(THOUGHT_CHANGED_EVENT, follow);
-    return () => window.removeEventListener(THOUGHT_CHANGED_EVENT, follow);
-  }, [thoughtId, proposalId]);
 
   function choose(choice: number | "none") {
     setPick(choice);

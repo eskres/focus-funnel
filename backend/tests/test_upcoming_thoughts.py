@@ -173,3 +173,69 @@ def test_upcoming_is_not_read_as_a_thought_id(client, alice, test_database_url):
 def test_signed_out_is_refused(client):
     response = client.get("/api/thoughts/upcoming", params={"from": TODAY})
     assert response.status_code == 401
+
+
+# thought-status task 4.4: the page lists only open thoughts (design decision 14).
+
+
+def test_a_done_task_is_left_out(client, alice, test_database_url):
+    """Done task left out: an open task dated 2 October is listed, a done one dated 1 October is not."""
+    user_id = user_id_for(client, alice)
+    add_thoughts(
+        test_database_url,
+        user_id,
+        row(title="Call the plumber", category="task", starts_on=date(2026, 10, 2)),
+        row(
+            title="Renew the passport",
+            category="task",
+            starts_on=date(2026, 10, 1),
+            status="done",
+            status_changed_at=datetime(2026, 9, 29, 9, 0, tzinfo=UTC),
+        ),
+    )
+
+    assert titles(upcoming(client, alice)) == ["Call the plumber"]
+
+
+def test_a_reopened_task_is_listed_again(client, alice, test_database_url):
+    """Reopened: a done task dated tomorrow is listed again once it is set back to open."""
+    user_id = user_id_for(client, alice)
+    [plumber] = add_thoughts(
+        test_database_url,
+        user_id,
+        row(
+            title="Call the plumber",
+            category="task",
+            starts_on=date(2026, 10, 1),
+            status="done",
+            status_changed_at=datetime(2026, 9, 29, 9, 0, tzinfo=UTC),
+        ),
+    )
+    assert titles(upcoming(client, alice)) == []
+
+    response = client.patch(f"/api/thoughts/{plumber}", headers=alice, json={"status": "open"})
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "open"
+
+    answer = upcoming(client, alice)
+    assert titles(answer) == ["Call the plumber"]
+    assert answer["items"][0]["id"] == plumber
+
+
+def test_marking_done_leaves_it_out_and_the_other_dated_thoughts_stay(client, alice, test_database_url):
+    """A thought marked done drops out; the open ones keep their date order."""
+    user_id = user_id_for(client, alice)
+    plumber, dinner = add_thoughts(
+        test_database_url,
+        user_id,
+        row(title="Call the plumber", category="task", starts_on=date(2026, 10, 2)),
+        row(title="Dinner with Sam", starts_on=date(2026, 10, 2), starts_at=time(19, 0)),
+    )
+    assert titles(upcoming(client, alice)) == ["Call the plumber", "Dinner with Sam"]
+
+    response = client.patch(f"/api/thoughts/{plumber}", headers=alice, json={"status": "done"})
+    assert response.status_code == 200, response.text
+
+    answer = upcoming(client, alice)
+    assert titles(answer) == ["Dinner with Sam"]
+    assert answer["items"][0]["id"] == dinner

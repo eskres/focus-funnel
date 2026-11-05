@@ -192,6 +192,10 @@ function ThoughtBody({
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [undoing, setUndoing] = useState(false);
+  // The Done box while its change runs, then null: it shows the thought's status.
+  const [marking, setMarking] = useState<boolean | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const done = marking ?? thought.status === "done";
   const additions = thought.additions ?? [];
   // Only the newest addition can be undone, and only once: every undo changes
   // the thought, so an older one could not be undone after it anyway.
@@ -235,6 +239,23 @@ function ThoughtBody({
     await deleteThought(thought.id);
     setDeleting(false);
     onDeleted();
+  }
+
+  /**
+   * Saves the Done box at once, with nothing else in the change. A failure
+   * puts the box back and says why.
+   */
+  async function toggleDone(checked: boolean) {
+    setMarking(checked);
+    setStatusError(null);
+    try {
+      const saved = await updateThought(thought.id, { status: checked ? "done" : "open" });
+      onSaved(saved);
+    } catch (err) {
+      setStatusError(err instanceof Error ? err.message : "Could not change the thought.");
+    } finally {
+      setMarking(null);
+    }
   }
 
   /** A refusal (409, the thought changed since) throws, and the dialog shows why. */
@@ -282,7 +303,28 @@ function ThoughtBody({
                 Undo last addition
               </Button>
             )}
+            {/* A native box: the UI kit has none. It saves at once, apart from any edit. */}
+            <label className="flex items-center gap-1.5 text-sm">
+              <input
+                type="checkbox"
+                className="size-4 accent-primary"
+                checked={done}
+                disabled={marking !== null}
+                onChange={(event) => toggleDone(event.target.checked)}
+              />
+              Done
+            </label>
+            {done && marking === null && thought.status_changed_at && (
+              <span className="text-sm text-muted-foreground">
+                Done on {stamp(thought.status_changed_at)}
+              </span>
+            )}
           </div>
+          {statusError && (
+            <p role="alert" className="text-xs text-destructive">
+              {statusError}
+            </p>
+          )}
           {(thought.category || thought.tags.length > 0) && (
             <div className="flex flex-wrap items-center gap-1" aria-label="Category and tags">
               {thought.category && <Badge>{thought.category}</Badge>}

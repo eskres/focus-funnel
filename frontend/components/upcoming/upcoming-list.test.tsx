@@ -187,6 +187,39 @@ describe("the Upcoming page", () => {
     );
   });
 
+  it("drops an item marked done in the sheet once the sheet closes", async () => {
+    // thought-status task 4.4: the server lists only open thoughts.
+    let marked = false;
+    const doneCall = { ...thought(TODAY_CALL), status: "done", status_changed_at: "2026-09-30T17:00:00Z" };
+    const { calls } = fakeApi({
+      [UPCOMING]: () => json(200, { items: marked ? [DINNER] : [TODAY_CALL, DINNER], more: false }),
+      "GET /api/thoughts/t-call": () =>
+        json(200, marked ? doneCall : { ...thought(TODAY_CALL), status: "open", status_changed_at: null }),
+      "PATCH /api/thoughts/t-call": () => {
+        marked = true;
+        return json(200, doneCall);
+      },
+    });
+    await openPage();
+
+    fireEvent.click(itemButton("Call the plumber"));
+    const sheet = await screen.findByRole("dialog", { name: "Call the plumber" });
+    const box = await within(sheet).findByRole("checkbox", { name: "Done" });
+    fireEvent.click(box);
+    await waitFor(() => expect(box).toBeEnabled());
+    expect(box).toBeChecked();
+    expect(calls.filter((c) => c.method === "PATCH").map((c) => c.body)).toEqual([{ status: "done" }]);
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Call the plumber/ })).not.toBeInTheDocument());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(itemButton("Dinner with Sam")).toBeInTheDocument();
+    expect(calls.filter((c) => c.path.startsWith("/api/thoughts/upcoming")).at(-1)?.path).toBe(
+      "/api/thoughts/upcoming?from=2026-09-30",
+    );
+  });
+
   it("loads the list again when the sheet closes, with no change made", async () => {
     const { calls } = fakeApi({
       [UPCOMING]: json(200, { items: [DINNER], more: false }),

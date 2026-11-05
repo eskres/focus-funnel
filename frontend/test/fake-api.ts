@@ -64,6 +64,8 @@ export type WirePart = {
   similar?: (WireTarget & { thought_id: string }) | null;
   added?: boolean;
   undone?: boolean;
+  /** A status part: the thought it marks done; left out for a new thought or an addition. */
+  mark?: string | null;
 };
 
 /** A filed thought as a proposal part's `target` or `similar` carries it. */

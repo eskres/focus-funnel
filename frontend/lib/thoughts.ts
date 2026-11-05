@@ -40,7 +40,14 @@ export type Thought = {
   origin?: ThoughtOrigin | null;
   /** Newest first; missing from an older server. */
   additions?: ThoughtAddition[];
+  /** Missing from an older server, which reads as open. */
+  status?: ThoughtStatus;
+  /** When the status last changed; null, or missing, when it never did. */
+  status_changed_at?: string | null;
 };
+
+/** Whether the thought is still to do. */
+export type ThoughtStatus = "open" | "done";
 
 const thoughtPath = (id: string) => `/api/thoughts/${encodeURIComponent(id)}`;
 
@@ -50,10 +57,11 @@ export function getThought(id: string): Promise<Thought> {
 
 /**
  * The fields of a thought the user can change. Raw text is not one of them.
- * A `when` of null clears the date.
+ * A `when` of null clears the date. A `status` change keeps the "changed" date.
  */
 export type ThoughtChange = Partial<Pick<Thought, "title" | "summary" | "tags" | "category">> & {
   when?: When | null;
+  status?: ThoughtStatus;
 };
 
 /**

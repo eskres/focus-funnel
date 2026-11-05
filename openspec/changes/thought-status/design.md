@@ -370,6 +370,15 @@ A mark is parsed as a `ProposalPart` with `mark` set to its ref (written as the 
 
 `tests/status_fakes.py` sets its fakes with monkeypatch: `canned_search(monkeypatch, thought_id)` replaces the turn's `search_tool_result`, and `fake_similar(monkeypatch, candidates)` replaces both `similar.search_by_vector` and `similar.check_runs` (layer 1 is gated to Postgres before any lookup). `seed_active_index()` gives the user an active index, so layer 1 sends its embedding request to the fake provider and the "no embedding call" checks are not vacuous.
 
+### 23. Build note: the frontend
+
+- `Thought.status` and `status_changed_at` are optional in `lib/thoughts.ts`, like the other fields an older server leaves out, and a missing status reads as open. `ThoughtStatus` is `"open" | "done"`.
+- A status card sends only `{parts: [index]}` on confirm: `ConfirmRequest`'s title, summary, tags, and category became optional, since the server ignores them for a status part.
+- The status card is its own component, `StatusCard`, which `ProposalGroup` renders for a part with `mark`; it shares the saved-thought state and its `ff:thought-changed` listener with `ProposalCard` through `useSavedThought()`. Before confirm it names the thought by `target` (its title and category now), falling back to the stored part; after a delete, by the stored title. A card whose thought is gone (a `target` that says deleted, or a 404 on confirm) keeps the group name `Mark done: <title>` and shows `This thought no longer exists.` with no button and no link.
+- A rejected fetch is not wrapped by `apiFetch()`, so the "client's message" a status card shows is the error's own message (for example `Failed to fetch`).
+- `fromStored()` takes every tool message's `details.summary` when present, then marks a connector failure, and the "Asked to use" label for an action still comes after it.
+- The sheet's `Done on <date>` sits beside the box in the view-mode row and uses the same stamp as the filed and changed dates. The box shows the new state while its `PATCH` runs and is disabled; it is rendered only in view mode, so it is gone in edit mode.
+
 ## Risks / Trade-offs
 
 - [The model marks the wrong thought done] → The card names the thought by its current title, and nothing changes until the user confirms. The sheet's toggle sets it back.
