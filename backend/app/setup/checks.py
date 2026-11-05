@@ -123,28 +123,25 @@ def _database_item(state: State, message: str) -> SetupItem:
     )
 
 
-async def database_item(
-    connect: Connect, *, timeout: float = DATABASE_TIMEOUT_SECONDS
-) -> SetupItem:
-    """Whether the database answers and, on Postgres, has a recent enough pgvector.
+def database_timeout_item(timeout: float = DATABASE_TIMEOUT_SECONDS) -> SetupItem:
+    return _database_item(
+        "failed",
+        f"The database did not answer within {timeout:g} seconds (TimeoutError). "
+        "Check that Postgres is running and DATABASE_URL points at it.",
+    )
 
-    SQLite (used by the tests only) is checked for an answer alone, as the
-    startup pgvector check does.
-    """
-    try:
-        dialect, version = await asyncio.wait_for(_probe_database(connect), timeout)
-    except TimeoutError:
-        return _database_item(
-            "failed",
-            f"The database did not answer within {timeout:g} seconds (TimeoutError). "
-            "Check that Postgres is running and DATABASE_URL points at it.",
-        )
-    except Exception as exc:  # noqa: BLE001 - every cause is reported, by class only
-        return _database_item(
-            "failed",
-            f"Could not connect to the database ({type(exc).__name__}). "
-            "Check that Postgres is running and DATABASE_URL is right.",
-        )
+
+def database_error_item(exc: BaseException) -> SetupItem:
+    # The class name only: a driver's message can hold the URL and its password.
+    return _database_item(
+        "failed",
+        f"Could not connect to the database ({type(exc).__name__}). "
+        "Check that Postgres is running and DATABASE_URL is right.",
+    )
+
+
+def database_answer_item(dialect: str, version: str | None) -> SetupItem:
+    """The item for a database that answered, given its pgvector version."""
     if dialect != "postgresql":
         return _database_item("ok", "The database answers.")
     minimum = ".".join(map(str, MIN_PGVECTOR))
@@ -161,6 +158,49 @@ async def database_item(
             "or later. Upgrade pgvector and run ALTER EXTENSION vector UPDATE.",
         )
     return _database_item("ok", f"Postgres answers and has pgvector {version}.")
+
+
+def database_not_migrated_item(available: str | None) -> SetupItem:
+    """The item for a Postgres not migrated yet, whose 'vector' extension is not created.
+
+    The first migration creates the extension, so what matters before then is
+    whether the server can install it (pg_available_extensions).
+    """
+    minimum = ".".join(map(str, MIN_PGVECTOR))
+    if available is None:
+        return _database_item(
+            "failed",
+            "Postgres answers, but the pgvector extension ('vector') is not available on "
+            "this server. Use a Postgres with pgvector, such as the pgvector/pgvector image.",
+        )
+    if _version(available) < MIN_PGVECTOR:
+        return _database_item(
+            "failed",
+            f"Postgres answers, but its pgvector is version {available}; search needs "
+            f"{minimum} or later. Use a newer pgvector/pgvector image.",
+        )
+    return _database_item(
+        "warning",
+        f"Postgres answers and has pgvector {available} available. The database is not "
+        "migrated yet; the backend creates the extension when it starts.",
+    )
+
+
+async def database_item(
+    connect: Connect, *, timeout: float = DATABASE_TIMEOUT_SECONDS
+) -> SetupItem:
+    """Whether the database answers and, on Postgres, has a recent enough pgvector.
+
+    SQLite (used by the tests only) is checked for an answer alone, as the
+    startup pgvector check does.
+    """
+    try:
+        dialect, version = await asyncio.wait_for(_probe_database(connect), timeout)
+    except TimeoutError:
+        return database_timeout_item(timeout)
+    except Exception as exc:  # noqa: BLE001 - every cause is reported, by class only
+        return database_error_item(exc)
+    return database_answer_item(dialect, version)
 
 
 # settings
@@ -254,7 +294,7 @@ def custom_provider_item(settings: Settings, providers: ProvidersConfig) -> Setu
     )
 
 
-def _load_connector_config() -> Any:
+def load_connector_config() -> Any:
     # The connectors loader comes with the mcp-connectors change; it is read
     # only when connectors are on.
     from app.connector_config import (
@@ -265,7 +305,7 @@ def _load_connector_config() -> Any:
 
 
 def connectors_item(
-    settings: Any, load_config: Callable[[], Any] = _load_connector_config
+    settings: Any, load_config: Callable[[], Any] = load_connector_config
 ) -> SetupItem:
     """Off, or on with the operator connector count and whether users may add their own.
 

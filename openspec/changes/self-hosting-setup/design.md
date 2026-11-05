@@ -309,6 +309,18 @@ The steps render the status as it comes: each item's name, state, message, and `
 
 *Alternatives:* show the token form first and learn that setup is closed only after a token is entered (rejected: a user without a token, which is everyone after setup, could never see the closed message); a separate unauthenticated "is setup open" route (rejected: it would tell anyone whether an instance is unconfigured, which the 404 rule avoids).
 
+### 20. Doctor details left open by decision 11
+
+Decision 11 fixes the steps and their rules; these fill in what it leaves open, each the simplest that fits the spec.
+
+- **Ids.** The doctor's own lines use the ids `settings` (one line per settings error), `providers_file`, `chat_file`, `connectors_file` (only when connectors are on), `migrations`, `setup`, `login_provider`, `provider:<preset id>`, `connector:<name>`, and `frontend`. The instance items keep their status ids. Lines come in step order, with `migrations` after the instance items. An item's `required` is true for what the server cannot work without (settings, the files, the database, migrations, the login provider, and the embedding preset).
+- **One database probe.** One connection, bounded by 5 seconds as a whole, reads `SELECT 1`, the table names, `alembic_version`, the installed and available `vector` versions, and only `setup_state.completed_at`, never the token hash. The `database`, `migrations`, and `setup` lines are built from that. When it fails, `migrations` and a setup that would need the row are `skipped`. The engine uses `NullPool`, asyncpg gets the same connect timeout, and `dispose()` is itself bounded, so a server that accepts and never replies cannot hold the doctor past the limit.
+- **States.** Setup open is `info` ("restart the backend to print a new setup token"), finished is `ok`, off and not used are `info`. A database at a revision this backend's scripts do not know is `failed` (it was migrated by a newer version, and the entrypoint's `alembic upgrade head` would fail). A keyless embedding preset that answers without `EMBEDDING_MODEL` in its list is a `warning`, since search fails until the model is added; for other keyless presets the model count and the `EMBEDDING_MODEL` note are information on an `ok` line. A failed HTTP status from the login provider is named by its code (`HTTP 404`); every other error by its class.
+- **Settings error names.** An error on a field names that field upper-cased. A rule across fields (`loc` empty) names the first `NAME_LIKE_THIS` in its own message, which is how `AUTH_MODE` and the per-mode variables are named in the line and in its `settings`.
+- **Connectors before `mcp-connectors` lands.** As decision 18: `MCP_ENABLED` is read with `getattr`, and the loader is `app.setup.checks.load_connector_config`. Its `ConnectorConfigError` (a `ValueError`) message is shown as is; any other error by class only.
+
+*Alternatives:* one connection per line (rejected: three connects for one question, each needing its own timeout); `warning` for an open setup (rejected: an open setup is the expected state of a new install, not a problem to look into).
+
 ## Risks / Trade-offs
 
 - [The token sits in the backend log, and log shippers keep it] → it is invalid after the next restart or once setup finishes, and it grants only the configuration report and the finished flag, never data or keys.
