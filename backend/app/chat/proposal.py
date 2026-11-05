@@ -11,6 +11,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx2
 from sqlalchemy import select
@@ -36,6 +37,7 @@ from app.errors import model_not_set
 from app.models import Conversation, Message, Proposal, Thought, User
 from app.providers import provider_for_user
 from app.thoughts.categories import user_categories
+from app.thoughts.dates import DEFAULT_ZONE, today_in
 from app.thoughts.store import MAX_RAW_TEXT, known_tags
 
 logger = logging.getLogger(__name__)
@@ -239,6 +241,7 @@ async def asked_proposal(
     context: list[dict[str, Any]],
     filing: Filing,
     conversation_id: uuid.UUID | None = None,
+    zone: ZoneInfo | None = None,
 ) -> list[dict[str, Any]] | None:
     """Ask the model for a proposal, which it may decline. Returns its parts,
     or None when it calls no tool or its arguments do not make a proposal.
@@ -254,7 +257,7 @@ async def asked_proposal(
             continue
         try:
             parts = parse_proposal(
-                tool_arguments(tool_call.function.arguments), filing.categories
+                tool_arguments(tool_call.function.arguments), filing.categories, zone
             )
             return [part.as_dict() for part in parts]
         except (ValueError, ToolArgumentError):
@@ -269,12 +272,16 @@ async def offer_proposal(
     config: ChatConfig,
     settings: Settings,
     http_client: httpx2.AsyncClient | None = None,
+    zone: ZoneInfo | None = None,
 ) -> Proposal | None:
     """The proposal to show before archive or /compact, held from now on.
 
     Returns the held proposal without a model call when it has a part not
     yet saved, and None when the conversation has no discussion to propose.
+    The model is told the user's local date in `zone` (UTC when not given),
+    and the proposal's dates are stamped with it.
     """
+    zone = zone or ZoneInfo(DEFAULT_ZONE)
     held = await held_proposal(session, conversation)
     if held_parts(held) is not None:
         return held
@@ -304,9 +311,9 @@ async def offer_proposal(
         http_client=http_client,
     )
     try:
-        context = build_context(messages)
+        context = build_context(messages, today=today_in(zone))
         context.append({"role": "system", "content": offer_note(filed_titles(proposals))})
-        parts = await asked_proposal(session, call, context, filing, conversation.id)
+        parts = await asked_proposal(session, call, context, filing, conversation.id, zone)
     finally:
         await call.aclose()
     if parts is None:

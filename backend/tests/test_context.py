@@ -515,5 +515,5 @@ def test_the_system_prompt_carries_todays_date():
     from datetime import date
 
     prompt = system_prompt(date(2026, 9, 24))
-    assert prompt.endswith("\n\nToday is Thursday 2026-09-24.")
+    assert prompt.endswith("\n\nToday is Thursday 2026-09-24. Weeks start on Monday.")
     assert build_context([], today=date(2026, 9, 24))[0]["content"] == prompt

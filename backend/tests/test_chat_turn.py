@@ -56,7 +56,16 @@ def stored(client, headers, conversation_id) -> dict:
 
 PROPOSAL = {"title": "Oat milk", "summary": "Buy oat milk tomorrow.", "tags": ["shopping"]}
 # The flat call above, as the part the chat receives: a new proposal has no saved thought.
-PART = {**PROPOSAL, "category": None, "thought_id": None, "saved_title": None, "deleted": False}
+PART = {
+    **PROPOSAL,
+    "category": None,
+    # A part with no date says so (thought-dates task 2.3).
+    "when": None,
+    "when_choices": None,
+    "thought_id": None,
+    "saved_title": None,
+    "deleted": False,
+}
 
 
 def proposed_parts(response) -> list[list[dict]]:

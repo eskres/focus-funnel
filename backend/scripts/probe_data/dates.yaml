@@ -1,0 +1,74 @@
+# Messages for the dates probe (thought-dates task 2.5). Each case has a
+# fixed `today`, the date the system prompt names. A `push` case is sent as
+# /push, so the proposal tool is forced; its part should have the date in
+# `when` ({start, end}), the two choices in `when_choices`, or no date when
+# `when` is null. A `search` case expects a search_thoughts call with the
+# thought's dates `dated_from` and `dated_to`; `words` lists words the query
+# should contain (any one is enough), or is null for no query. Weeks start
+# on Monday, so "this week" runs from Monday to Sunday.
+#
+# 2026-09-30 is a Wednesday and 2026-10-02 a Friday.
+
+cases:
+  # The five thought-filing examples.
+  - id: plumber-monday
+    push: true
+    today: "2026-09-30"
+    message: "call the plumber on Monday"
+    when: {start: "2026-10-05"}
+  - id: dinner-friday
+    push: true
+    today: "2026-09-30"
+    message: "dinner with Sam Friday at 7"
+    when: {start: "2026-10-02T19:00"}
+  - id: oslo-trip
+    push: true
+    today: "2026-09-30"
+    message: "trip to Oslo 3-6 Nov"
+    when: {start: "2026-11-03", end: "2026-11-06"}
+  - id: meeting-tuesday
+    push: true
+    today: "2026-09-30"
+    message: "meeting 10-11 on Tuesday"
+    when: {start: "2026-10-06T10:00", end: "2026-10-06T11:00"}
+  - id: podcast-idea
+    push: true
+    today: "2026-09-30"
+    message: "idea: a podcast about maps"
+    when: null
+
+  # A relative day.
+  - id: dentist-tomorrow
+    push: true
+    today: "2026-09-30"
+    message: "dentist tomorrow at 9"
+    when: {start: "2026-10-01T09:00"}
+
+  # Ambiguous days: two choices, no single date.
+  - id: friday-said-on-friday
+    push: true
+    today: "2026-10-02"
+    message: "dinner with Sam Friday at 7"
+    when_choices: [{start: "2026-10-02T19:00"}, {start: "2026-10-09T19:00"}]
+  - id: next-friday
+    push: true
+    today: "2026-09-30"
+    message: "call the plumber next Friday"
+    when_choices: [{start: "2026-10-02"}, {start: "2026-10-09"}]
+
+  # Clear days: one date.
+  - id: friday-said-on-wednesday
+    push: true
+    today: "2026-09-30"
+    message: "drinks with Ana Friday at 7"
+    when: {start: "2026-10-02T19:00"}
+
+  # Searches by the thought's own date.
+  - id: this-week
+    today: "2026-10-02"
+    message: "what is on this week"
+    search: {dated_from: "2026-09-28", dated_to: "2026-10-04", words: null}
+  - id: dinners-this-month
+    today: "2026-10-02"
+    message: "what dinners do I have this month"
+    search: {dated_from: "2026-10-01", dated_to: "2026-10-31", words: [dinner, dinners]}
