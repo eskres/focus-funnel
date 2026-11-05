@@ -152,6 +152,14 @@ The overlay pins `ghcr.io/pocket-id/pocket-id:v2.16.0` (task 1.1) with `APP_URL`
 
 `not_allowed` (403), `demo_session_expired` (401), `demo_full` (503), and `rate_limited` (429, with `Retry-After`). `unauthenticated` and `service_unavailable` keep their meaning. The frontend adds the codes to `ApiErrorCode` with a page or message for each.
 
+### 14. A demo cookie the backend does not know (decided during the 11.4 check, 2026-11-04)
+
+After a restart of the demo overlay wipes the database, or after cleanup has deleted an expired user, the browser still sends its old `ff_demo` value. The backend finds no user for it and answers `401 unauthenticated`, not `demo_session_expired`. The API proxy used to clear the demo cookies only on `demo_session_expired`, so the page sent the visitor to `/auth/login`, which in demo mode redirects straight back, and `proxy.ts` saw the cookie and started no new session: the page reloaded itself in a loop. On a backend `401 unauthenticated`, the API proxy now marks the value it sent as dead: it sets an HttpOnly `ff_demo_dead` cookie holding the SHA-256 of that `ff_demo` value (base64url, one hour), and leaves `ff_demo` alone. The page's redirect through `/auth/login` then reaches `proxy.ts`, which treats a page request whose `ff_demo` value matches the mark like one without a cookie: it starts a new, empty session, and clears `ff_demo_keys` and the mark. The mark names a value, not the cookie: when a late `401` for the old value arrives after the new session is stored (another tab of a restored browser sent its call with the old value), it marks only the old value again, and the new session stays.
+
+A restored browser whose tabs all reload at once can still start one session per tab, because each tab's page request may reach `proxy.ts` before any new cookie is stored. The last cookie wins, and the other sessions stay unused until cleanup removes them at their expiry.
+
+**Alternatives:** clear `ff_demo` by name on the `401` (rejected after review: a late answer for the old value would delete a session started in the meantime, and the visitor would spend another of their `DEMO_NEW_SESSIONS_PER_HOUR` and leave an orphaned user holding a `DEMO_MAX_SESSIONS` slot), clear the cookies in `/auth/login` in demo mode (rejected: any link to `/auth/login` would then drop a live session, while the backend is what knows the value is dead), or answer `demo_session_expired` for an unknown value in the backend (rejected: it changes the meaning of `unauthenticated` that task 5.2's tests pin down, for no gain to the visitor).
+
 ## Risks / Trade-offs
 
 - [A provider does not send `email_verified`, so an allow-list shuts everyone out] → Task 1.1 probes Pocket ID. The failure is closed and the refusal page names the reason, so it is found at once. Without an allow-list the provider's own access rules apply.

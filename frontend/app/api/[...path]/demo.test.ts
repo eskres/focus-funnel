@@ -2,11 +2,16 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
+import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { GET as login } from "@/app/auth/login/route";
 
 import { readAuthConfig } from "@/lib/auth-mode";
 import { heldKeysCookie, readHeldKeys, type HeldKeys } from "@/lib/demo-keys";
-import { DEMO_KEYS_COOKIE, DEMO_SESSION_COOKIE } from "@/lib/session";
+import { DEMO_DEAD_COOKIE, DEMO_KEYS_COOKIE, DEMO_SESSION_COOKIE, demoSessionDigest } from "@/lib/session";
+
+import { proxy, resetDemoLimits } from "@/proxy";
 
 import { DELETE, GET, PUT } from "./route";
 
@@ -254,6 +259,67 @@ describe("the end of a demo session", () => {
     );
   });
 
+  it("marks the session value dead when the backend knows no user for it", async () => {
+    // After a restart wiped the database, or after cleanup deleted the user,
+    // the browser still sends its old value. Without a mark, proxy.ts would
+    // start no new session and the page would loop through /auth/login back
+    // to itself. The mark names the value, so ff_demo itself is left alone:
+    // clearing it by name would let a late answer from another tab delete a
+    // session started in the meantime (design decision 14).
+    backend = await startBackend(
+      json(401, { error: { code: "unauthenticated", message: "Authentication required." } }),
+    );
+    useDemo(backend.url);
+
+    const held = { keys: { nebius: { key: KEY, set_at: Date.now() } }, last_used_at: Date.now() };
+    const response = await GET(visitor(`${APP}/api/me`, {}, await keysCookie(held)), ctx("me"));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ error: { code: "unauthenticated" } });
+    const set = response.headers.getSetCookie();
+    expect(set).toEqual([
+      expect.stringMatching(
+        new RegExp(`^${DEMO_DEAD_COOKIE}=${demoSessionDigest("visitor-session")};.*HttpOnly`),
+      ),
+    ]);
+    // Neither ff_demo nor ff_demo_keys is cleared or re-sealed.
+    expect(set.join()).not.toContain(`${DEMO_SESSION_COOKIE}=`);
+    expect(set.join()).not.toContain(`${DEMO_KEYS_COOKIE}=`);
+  });
+
+  const KEEPS_COOKIES: [string, number, Handler][] = [
+    ["a 404", 404, json(404, { error: { code: "not_found", message: "Not found." } })],
+    ["a 401 with another code", 401, json(401, { error: { code: "not_allowed", message: "No." } })],
+    [
+      "a 401 whose body is not JSON",
+      401,
+      (_req, _body, res) => {
+        res.writeHead(401, { "Content-Type": "text/plain" });
+        res.end("Unauthorized");
+      },
+    ],
+  ];
+
+  it.each(KEEPS_COOKIES)("keeps the demo cookies and the held keys on %s", async (_name, status, handler) => {
+    backend = await startBackend(handler);
+    useDemo(backend.url);
+
+    const held = { keys: { nebius: { key: KEY, set_at: Date.now() } }, last_used_at: Date.now() };
+    const response = await GET(
+      visitor(`${APP}/api/conversations/x`, {}, await keysCookie(held)),
+      ctx("conversations", "x"),
+    );
+
+    expect(response.status).toBe(status);
+    const set = response.headers.getSetCookie();
+    expect(set.join()).not.toContain(`${DEMO_SESSION_COOKIE}=`);
+    expect(set.join()).not.toContain(`${DEMO_DEAD_COOKIE}=`);
+    // The held key is re-sealed, not dropped.
+    expect(set).toHaveLength(1);
+    const kept = await readHeldKeys(new Request(APP, { headers: { cookie: cookieHeader(response) } }), SECRET);
+    expect(kept?.keys.nebius.key).toBe(KEY);
+  });
+
   it("clears the demo cookies after End demo", async () => {
     backend = await startBackend((_req, _body, res) => {
       res.writeHead(204);
@@ -266,5 +332,78 @@ describe("the end of a demo session", () => {
     expect(response.status).toBe(204);
     expect(backend.requests[0].method).toBe("DELETE");
     expect(response.headers.getSetCookie().join()).toContain(`${DEMO_SESSION_COOKIE}=;`);
+  });
+});
+
+describe("a demo cookie the backend no longer knows", () => {
+  /** The browser's cookie jar, shared by its tabs. */
+  class Jar {
+    cookies = new Map<string, string>();
+    apply(response: Response) {
+      for (const header of response.headers.getSetCookie()) {
+        const [pair] = header.split(";");
+        const index = pair.indexOf("=");
+        const name = pair.slice(0, index);
+        if (/Max-Age=0(;|$)/.test(header)) this.cookies.delete(name);
+        else this.cookies.set(name, pair.slice(index + 1));
+      }
+    }
+    header() {
+      return [...this.cookies].map(([name, value]) => `${name}=${value}`).join("; ");
+    }
+  }
+
+  let started = 0;
+
+  beforeEach(async () => {
+    started = 0;
+    resetDemoLimits();
+    backend = await startBackend((req, body, res) => {
+      if (req.method === "POST" && req.url === "/api/demo/sessions") {
+        started += 1;
+        const expires = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+        json(201, { session: `new-session-${started}`, expires_at: expires })(req, body, res);
+      } else if (req.headers.authorization === "Bearer new-session-1") {
+        json(200, { id: "visitor", mode: "demo" })(req, body, res);
+      } else {
+        json(401, { error: { code: "unauthenticated", message: "Authentication required." } })(req, body, res);
+      }
+    });
+    useDemo(backend.url);
+  });
+
+  const api = (jar: Jar) => GET(new Request(`${APP}/api/me`, { headers: { cookie: jar.header() } }), ctx("me"));
+  const page = (url: string, jar: Jar) => proxy(new NextRequest(url, { headers: { cookie: jar.header() } }));
+
+  it("gets one new session through /auth/login, which a late answer for the old value keeps", async () => {
+    const jar = new Jar();
+    jar.cookies.set(DEMO_SESSION_COOKIE, "wiped-session");
+    jar.cookies.set(DEMO_KEYS_COOKIE, "sealed-keys-of-the-old-session");
+
+    // Two tabs call the API with the old value; tab A's answer comes first.
+    const [tabA, tabB] = await Promise.all([api(jar), api(jar)]);
+    expect(tabA.status).toBe(401);
+    jar.apply(tabA);
+
+    // Tab A goes to /auth/login, which in demo mode returns to the page...
+    const back = await login(new Request(`${APP}/auth/login?returnTo=%2Fapp`, { headers: { cookie: jar.header() } }));
+    expect(back.status).toBe(303);
+    expect(back.headers.get("location")).toBe(`${APP}/app`);
+
+    // ...where proxy.ts replaces the dead session with a new one.
+    const fresh = await page(back.headers.get("location")!, jar);
+    jar.apply(fresh);
+    expect(started).toBe(1);
+    expect(jar.cookies.get(DEMO_SESSION_COOKIE)).toBe("new-session-1");
+    expect(jar.cookies.has(DEMO_KEYS_COOKIE)).toBe(false);
+    expect(jar.cookies.has(DEMO_DEAD_COOKIE)).toBe(false);
+
+    // Tab B's answer for the old value arrives late and leaves the new session alone.
+    jar.apply(tabB);
+    expect(jar.cookies.get(DEMO_SESSION_COOKIE)).toBe("new-session-1");
+    const again = await page(`${APP}/app`, jar);
+    expect(again.headers.getSetCookie()).toEqual([]);
+    expect(started).toBe(1);
+    expect((await api(jar)).status).toBe(200);
   });
 });

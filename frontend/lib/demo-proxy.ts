@@ -13,7 +13,16 @@ import {
   withoutKey,
   type HeldKeys,
 } from "@/lib/demo-keys";
-import { DEMO_KEYS_COOKIE, DEMO_SESSION_COOKIE, clearCookie } from "@/lib/session";
+import {
+  DEMO_DEAD_COOKIE,
+  DEMO_DEAD_MAX_AGE_SECONDS,
+  DEMO_KEYS_COOKIE,
+  DEMO_SESSION_COOKIE,
+  clearCookie,
+  demoSessionDigest,
+  readCookies,
+  serializeCookie,
+} from "@/lib/session";
 
 export interface DemoCall {
   /** An answer given here, without calling the backend. */
@@ -99,9 +108,23 @@ export async function prepareDemoCall(
         headers.set("content-type", "application/json");
       } else if (upstream.status === 401) {
         const text = await upstream.text();
-        if ((await readErrorCode(text)) === "demo_session_expired") {
+        const code = await readErrorCode(text);
+        const sent = readCookies(request).get(DEMO_SESSION_COOKIE);
+        if (code === "demo_session_expired") {
           // The backend has deleted, or will delete, everything of this session.
           cookies.push(...clearDemoCookies());
+          held = null;
+        } else if (code === "unauthenticated" && sent) {
+          // The backend has no user for the value at all (a restart wiped the
+          // database, or cleanup ran). Mark that value dead, so proxy.ts starts
+          // a new session on the next page load. Clearing ff_demo by name
+          // instead would let a late answer for the old value, from another
+          // tab, delete a session started in the meantime (decision 14).
+          cookies.push(
+            serializeCookie(DEMO_DEAD_COOKIE, demoSessionDigest(sent), {
+              maxAge: DEMO_DEAD_MAX_AGE_SECONDS,
+            }),
+          );
           held = null;
         }
         responseBody = text;
