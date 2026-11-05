@@ -217,10 +217,27 @@ The frontend checks its own settings at start, so the doctor ends with an `info`
 | Firebase keys and token refresh | backend and frontend server | cannot work offline; the guide says to use `oidc` |
 | Next.js telemetry | `next build` (the CLI) | `NEXT_TELEMETRY_DISABLED=1` (decision 13) |
 | Google Fonts | `next build` only | already self-hosted (decision 13) |
-| Pocket ID analytics heartbeat | `pocket-id` container | `ANALYTICS_DISABLED=true` in `docker-compose.pocket-id.yml`; task 1.1 confirms the variable for v2.16.0 with a packet capture on the compose bridge during admin setup, passkey add, and one OIDC login, and records any other outbound call here with the variable that turns it off |
+| Pocket ID analytics heartbeat (`POST https://analytics.pocket-id.org/heartbeat`, at start and daily) | `pocket-id` container | `ANALYTICS_DISABLED=true` in `docker-compose.pocket-id.yml` (confirmed for v2.16.0 by task 1.1) |
+| Pocket ID release check (`GET https://api.github.com/repos/pocket-id/pocket-id/releases/latest`, when an admin opens a settings page) | `pocket-id` container | `VERSION_CHECK_DISABLED=true` in `docker-compose.pocket-id.yml` (found by task 1.1) |
 | MCP connectors | backend, on Test or a tool call | only operator connectors on the compose network (decision 17) |
 | Image pulls | `docker compose up` | `--no-build --pull never` (decision 14) |
 | A preset's key and console links | the browser, only when clicked | the offline preset's `key_url` is the Ollama model library (`https://ollama.com/library`); nothing loads it, and its notice points at `docs/offline.md` for pulling models. The compose-internal `http://ollama:11434` is not used, because the browser cannot reach it |
+
+*Task 1.1 result (2026-11-05, `ghcr.io/pocket-id/pocket-id:v2.16.0`, index digest `sha256:9366436f3fd21619ed7e5709fa0acac88130f73414ec8ee1caf768fc487111ea`):* the variable names come from that tag's `backend/internal/common/env_config.go` and the configuration docs. Pocket ID was started with the Pocket ID overlay on the compose project's own bridge, and `tcpdump -ni br-<id> 'not dst net <subnet> and not dst host 127.0.0.1'` ran during admin setup (`/setup`), adding a passkey, opening the admin settings pages, and one OIDC login: authorization code by passkey in the browser, then discovery, token, JWKS, and userinfo through `http://pocket-id:1411`, as the app does them. The sandbox resolves no outside names, so a DNS sinkhole on the same network answered every name with a TEST-NET address and logged the names. That way every name-based call became a packet the capture could see. Results:
+
+- Both variables unset: packets to the sinkhole address on port 443, for `analytics.pocket-id.org` and `api.github.com`.
+- `ANALYTICS_DISABLED=true` alone: packets for `api.github.com` only. This is the release check that `/api/version/latest` makes when the admin pages load.
+- `ANALYTICS_DISABLED=true` and `VERSION_CHECK_DISABLED=true`: no packet to an outside address, and no name looked up.
+
+The source has other outbound calls, and each one is off unless an operator sets something:
+
+- The GeoLite2 download runs only with `MAXMIND_LICENSE_KEY` or a custom `GEOLITE_DB_URL`.
+- Down migrations come from GitHub only with `ALLOW_DOWNGRADE=true`.
+- Client logos are fetched from a URL only when an admin enters one.
+- SCIM, back-channel logout, and federated JWKS calls happen only when they are configured.
+- The OpenTelemetry exporters are off by default.
+
+None of these needs a setting in the overlay.
 
 ### 13. Fonts and telemetry
 
@@ -246,6 +263,15 @@ The frontend checks its own settings at start, so the doctor ends with an `info`
 Models are pulled on an online machine (`docker compose ... run --rm ollama ollama pull <model>` with the same `.data/ollama`) and the directory is copied with the image archive.
 
 The browser must reach the app over `localhost` or HTTPS (Context: `Secure` cookies and passkeys). On an air-gapped host the guide uses a browser on that host, or HTTPS on the LAN with Caddy's `tls internal` as in `docs/login.md`'s "HTTPS on your network"; a browser on another machine reaching the host's IP over plain HTTP cannot log in.
+
+*Task 1.2 result (2026-11-05):* the image is `ollama/ollama:0.40.14` (digest `sha256:ebaef4f4c5d93660e1f25f8ad085a112f51ccfb0e8458073e71793959dba91c9`). The proposed models are `qwen3:1.7b` for chat (the library lists it with tools and thinking, 1.4 GB) and `nomic-embed-text:v1.5` for embeddings (768 dimensions, 274 MB). This sandbox's proxy refuses `registry.ollama.ai`, `ollama.com`, and `huggingface.co`, so neither model could be pulled. The calls ran through the backend's `openai` client against that image, using two local stand-in models: a random-weight llama GGUF for chat, and a random-weight 768-dimension BERT GGUF for embeddings. Those calls measured the server's behavior, but not the chosen models'. Results:
+
+- `stream_usage`: `final_chunk`. With `stream_options.include_usage`, the usage arrives once, on a last chunk with empty `choices` after the finish chunk, and no other chunk carries usage.
+- `dimensions` is honored. Without it, embeddings are 768 long; with `dimensions: 256`, they are 256 long (truncated and renormalized). A value above the native length, or outside a model's trained Matryoshka set, is a 400 error. `EMBEDDING_DIMENSIONS=native` sends no `dimensions`, so the overlay keeps it.
+- `/v1/models` answers `{"object":"list","data":null}` while no model is pulled. The backend's model listing iterates the page, so it reads that as an empty list.
+- Ollama 0.40.14 has no `tool_choice` field and ignores it, so a forced tool call depends on the model choosing the tool.
+
+Still to check on a machine that reaches the Ollama registry (task 1.2 stays open until then): that `qwen3:1.7b` returns a streamed tool call for a forced function, and that `nomic-embed-text:v1.5` returns 768-dimension vectors.
 
 ### 16. The offline check
 
@@ -281,4 +307,4 @@ One Alembic migration adds `setup_state` and marks an install with any user as f
 
 ## Open Questions
 
-- The Pocket ID variables that stop its outbound calls in v2.16.0 (task 1.1), and the Ollama image version, models, and `stream_usage` value (task 1.2). The design does not depend on which.
+- Resolved by task 1.1: the Pocket ID variables are `ANALYTICS_DISABLED` and `VERSION_CHECK_DISABLED` (decision 12). Partly resolved by task 1.2: the image is `ollama/ollama:0.40.14` and `stream_usage` is `final_chunk` (decision 15). The proposed models `qwen3:1.7b` and `nomic-embed-text:v1.5` still need a run that pulls them. The design does not depend on which models are chosen.
