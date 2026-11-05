@@ -100,6 +100,25 @@ describe("login redirects", () => {
     expect(url?.searchParams.get("returnTo")).toBe("/app/abc");
   });
 
+  it("sends a logged-out user on /setup to /auth/login with returnTo=/setup in oidc mode", async () => {
+    useMode("oidc");
+    const url = location(await proxy(request("/setup")));
+    expect(url?.pathname).toBe("/auth/login");
+    expect(url?.searchParams.get("returnTo")).toBe("/setup");
+  });
+
+  it("sends a logged-out user on /setup to /login with returnTo=/setup in firebase mode", async () => {
+    useMode("firebase");
+    const url = location(await proxy(request("/setup")));
+    expect(url?.pathname).toBe("/login");
+    expect(url?.searchParams.get("returnTo")).toBe("/setup");
+  });
+
+  it.each(["oidc", "firebase"] as const)("lets a logged-in user open /setup in %s mode", async (mode) => {
+    useMode(mode);
+    expect(location(await proxy(request("/setup", await sessionCookie(mode))))).toBeNull();
+  });
+
   it("lets a logged-out user open /login in firebase mode", async () => {
     useMode("firebase");
     expect(location(await proxy(request("/login")))).toBeNull();

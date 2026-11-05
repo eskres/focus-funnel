@@ -25,7 +25,9 @@ export type ApiErrorCode =
   | "not_allowed"
   | "demo_session_expired"
   | "demo_full"
-  | "rate_limited";
+  | "rate_limited"
+  | "setup_token_invalid"
+  | "setup_incomplete";
 
 export class ApiError extends Error {
   readonly code: string;
@@ -62,6 +64,8 @@ export class NotAllowedError extends ApiError {}
 export class DemoSessionExpiredError extends ApiError {}
 export class DemoFullError extends ApiError {}
 export class RateLimitedError extends ApiError {}
+export class SetupTokenInvalidError extends ApiError {}
+export class SetupIncompleteError extends ApiError {}
 
 /** Sent on window when a call finds that the demo session has ended. */
 export const DEMO_EXPIRED_EVENT = "ff:demo-session-expired";
@@ -90,6 +94,8 @@ const errorClasses: Record<ApiErrorCode, typeof ApiError> = {
   demo_session_expired: DemoSessionExpiredError,
   demo_full: DemoFullError,
   rate_limited: RateLimitedError,
+  setup_token_invalid: SetupTokenInvalidError,
+  setup_incomplete: SetupIncompleteError,
 };
 
 function isKnownCode(code: string): code is ApiErrorCode {
