@@ -7,8 +7,8 @@
 
 ## 2. Following a turn
 
-- [ ] 2.1 Add `GET /api/chat/{conversation_id}/stream` from design decision 2. Check with pytest that the owner gets every event of a running turn from the first, then the rest, then `done`; that a conversation with no running turn answers 204; and that another user's conversation and an unknown id both answer 404 `not_found` with the same body
-- [ ] 2.2 Add `turn: {"after_position"} | null` to `ConversationDetail` from the registry. Check with pytest that it is set to the user message's position while a turn runs, is null after, and is null for a conversation with only a `/compact` claim
+- [x] 2.1 Add `GET /api/chat/{conversation_id}/stream` from design decision 2. Check with pytest that the owner gets every event of a running turn from the first, then the rest, then `done`; that a conversation with no running turn answers 204; and that another user's conversation and an unknown id both answer 404 `not_found` with the same body
+- [x] 2.2 Add `turn: {"after_position"} | null` to `ConversationDetail` from the registry. Check with pytest that it is set to the user message's position while a turn runs, is null after, and is null for a conversation with only a `/compact` claim
 
 ## 3. Keys and usage without a request
 
