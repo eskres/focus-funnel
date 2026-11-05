@@ -30,7 +30,7 @@ from app.chat.prompt import (
     tools_for,
     unsaved_parts,
 )
-from app.chat.refs import Refs, conversation_refs, resolve_additions
+from app.chat.refs import Refs, SeenThought, conversation_refs, resolve_additions
 from app.chat.similar import Check, candidates_note, check_parts, with_similar
 from app.chat.tools import ProposalPart, ToolArgumentError, parse_proposal
 from app.chat.usage import completion_usage, record_usage
@@ -38,6 +38,7 @@ from app.config import Settings
 from app.errors import model_not_set
 from app.models import Conversation, Message, Proposal, Thought, User
 from app.providers import provider_for_user
+from app.thoughts.additions import proposal_additions
 from app.thoughts.categories import user_categories
 from app.thoughts.dates import DEFAULT_ZONE, today_in
 from app.thoughts.store import MAX_RAW_TEXT, known_tags
@@ -189,53 +190,128 @@ async def write_proposal(
     return proposal, replaced
 
 
-def part_thought_ids(proposals: list[Proposal]) -> list[uuid.UUID]:
-    """The ids of the thoughts saved from these proposals' parts, each once."""
-    ids = {
-        uuid.UUID(str(part["thought_id"]))
-        for proposal in proposals
-        for part in proposal.parts
-        if part.get("thought_id")
-    }
+@dataclass(frozen=True)
+class PartLookup:
+    """What a proposal's payload reads beside its stored parts: the user's
+    thoughts its parts name, as they are now, by id as text (a deleted or
+    foreign one has no entry), and whether each addition made from it is
+    undone, by (proposal id, thought id) as text."""
+
+    thoughts: dict[str, SeenThought]
+    additions: dict[tuple[str, str], bool]
+
+
+def _named_ids(proposals: list[Proposal]) -> list[uuid.UUID]:
+    """Every thought id these proposals' parts name: saved, added to, or similar."""
+    ids: set[uuid.UUID] = set()
+    for proposal in proposals:
+        for part in proposal.parts:
+            similar = part.get("similar")
+            for value in (
+                part.get("thought_id"),
+                part.get("add_to"),
+                similar.get("thought_id") if isinstance(similar, dict) else None,
+            ):
+                if value:
+                    ids.add(uuid.UUID(str(value)))
     return sorted(ids)
 
 
-async def saved_titles(
+async def _additions_of(
     session: AsyncSession, user: User, proposals: list[Proposal]
-) -> dict[str, str]:
-    """The current title of each thought saved from these proposals, by its id
-    as text, in one query. A deleted thought has no entry."""
-    ids = part_thought_ids(proposals)
-    if not ids:
-        return {}
-    rows = await session.execute(
-        select(Thought.id, Thought.title).where(Thought.id.in_(ids), Thought.user_id == user.id)
-    )
-    return {str(thought_id): title for thought_id, title in rows}
+) -> dict[tuple[str, str], bool]:
+    """The additions made from these proposals; no query when no part is saved."""
+    saved = [p.id for p in proposals if any(part.get("thought_id") for part in p.parts)]
+    return await proposal_additions(session, user, saved)
 
 
-def proposal_payload(
-    proposal: Proposal, titles: dict[str, str] | None = None
-) -> dict[str, Any]:
+async def part_lookup(session: AsyncSession, user: User, proposals: list[Proposal]) -> PartLookup:
+    """The lookup for these proposals' payloads: one query for every thought
+    their parts name, and one for their additions, however many parts and
+    additions there are (design decisions 3 and 9)."""
+    ids = _named_ids(proposals)
+    thoughts: dict[str, SeenThought] = {}
+    if ids:
+        rows = await session.execute(
+            select(Thought).where(Thought.id.in_(ids), Thought.user_id == user.id)
+        )
+        for thought in rows.scalars():
+            thoughts[str(thought.id)] = SeenThought(
+                ref="",
+                id=thought.id,
+                title=thought.title,
+                summary=thought.summary,
+                tags=list(thought.tags or []),
+                category=thought.category,
+                created_at=thought.created_at,
+                updated_at=thought.updated_at,
+            )
+    return PartLookup(thoughts, await _additions_of(session, user, proposals))
+
+
+async def lookup_from_refs(
+    session: AsyncSession, user: User, refs: Refs, proposals: list[Proposal]
+) -> PartLookup:
+    """The lookup for a conversation whose refs are loaded: the refs already
+    hold every thought its parts name, so only the additions are read."""
+    thoughts = {str(thought_id): thought for thought_id, thought in refs.thoughts.items()}
+    return PartLookup(thoughts, await _additions_of(session, user, proposals))
+
+
+def _thought_fields(thought: SeenThought) -> dict[str, Any]:
+    return {
+        "title": thought.title,
+        "summary": thought.summary,
+        "tags": list(thought.tags),
+        "category": thought.category,
+        "created_at": thought.created_at.isoformat(),
+        # The version a confirm sends back as based_on, unchanged.
+        "updated_at": thought.updated_at.isoformat(),
+    }
+
+
+def proposal_payload(proposal: Proposal, lookup: PartLookup | None = None) -> dict[str, Any]:
     """A proposal as the chat receives it, in the event and in the conversation.
 
-    Each part also carries its thought's current title (`saved_title`) and
-    whether that thought was deleted (`deleted`), from `titles`, the answer of
-    saved_titles(). Without it, as for a new proposal in the stream, a part
-    has neither.
+    From `lookup`, each part also carries its thought's current title
+    (`saved_title`) and whether that thought was deleted (`deleted`); for an
+    addition, `target`, the thought it adds to as it is now, or
+    `{"deleted": true}`; for a new idea with a strong match, `similar`, that
+    match as it is now, or null once it is gone; and once saved as an
+    addition, `added`, and `undone` once that addition was undone. Without a
+    lookup a part has none of these.
     """
+    thoughts = lookup.thoughts if lookup is not None else None
+    additions = lookup.additions if lookup is not None else {}
 
     def with_saved(part: dict[str, Any]) -> dict[str, Any]:
         thought_id = part.get("thought_id")
-        known = titles is not None and thought_id is not None
+        known = thoughts is not None and thought_id is not None
+        saved = thoughts.get(str(thought_id)) if known else None
+        add_to = part.get("add_to")
+        target = None
+        if thoughts is not None and add_to:
+            current = thoughts.get(str(add_to))
+            target = _thought_fields(current) if current else {"deleted": True}
+        similar = part.get("similar")
+        match = None
+        if thoughts is not None and isinstance(similar, dict) and similar.get("thought_id"):
+            current = thoughts.get(str(similar["thought_id"]))
+            if current is not None:
+                match = {"thought_id": str(current.id), **_thought_fields(current)}
+        addition = additions.get((str(proposal.id), str(thought_id))) if thought_id else None
         return {
             # Where the part was confirmed only fixes its ref; the chat does not need it.
             **{key: value for key, value in part.items() if key != "seen_position"},
-            "saved_title": titles.get(str(thought_id)) if known else None,
-            "deleted": known and str(thought_id) not in titles,
+            "saved_title": saved.title if saved is not None else None,
+            "deleted": known and saved is None,
             # An addition's thought and version, null for a new thought.
-            "add_to": part.get("add_to"),
+            "add_to": add_to,
             "based_on": part.get("based_on"),
+            "target": target,
+            "similar": match,
+            "added": addition is not None,
+            "undone": bool(addition),
         }
 
     return {

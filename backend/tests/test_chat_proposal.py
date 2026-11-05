@@ -157,6 +157,10 @@ def test_the_offer_call_returns_and_holds_a_proposal(client, alice, fake_llm, te
             "deleted": False,
             "add_to": None,
             "based_on": None,
+            "target": None,
+            "similar": None,
+            "added": False,
+            "undone": False,
         }
     ]
     assert offered["position"] == 1

@@ -228,6 +228,21 @@ The baseline lives in `app/thoughts/baseline.py`. Details decision 5 left open:
 
 **Alternatives:** an O(n²) self-join always (rejected: too slow for a large index); `TABLESAMPLE` (rejected: it samples pages, not pairs, and is not deterministic for the small case).
 
+### 19. Confirm, payload, and undo in detail (decided during tasks 4.1 to 4.3, 2026-11-05)
+
+The confirm, the additions list, and undo live in `app/thoughts/additions.py`. Details decisions 3, 7, and 9 left open:
+
+- **The confirm body.** `ConfirmIn` gains `mode` (`"new"` by default, so an older client files as before), `add_to`, and `based_on`. The target is the body's `add_to`, else the part's own; the version is the body's `based_on`, else the part's. So the "Similar" hint, whose part has no `add_to` or `based_on`, sends the id and `updated_at` the payload gave it, and a card that got a 409 sends the version from the error. Versions are compared as datetimes, exactly.
+- **Checks, in order.** An addition covers one part (a merge is 422). The target thought is locked (`SELECT ... FOR UPDATE`); missing or another user's is 404 with the file-as-new message. It must be a thought this conversation has seen (its refs, which include every part's `add_to` and `similar`), else 422: a crafted body cannot add to an unrelated thought. Then the version check, then the category with `keep` set to the thought's own. Nothing is written before these pass.
+- **409 `thought_changed`** keeps `code` and `message` and adds `error.thought`: `{id, title, summary, tags, category, updated_at}`. `ApiError` gains an optional `extra` merged into the error object.
+- **The raw text's `held_to`** counts the origin proposal and the additions from this conversation that are not undone: an undo restored the raw text, so those messages are no longer held.
+- **No baseline** is measured after an addition: it adds no thought, so it cannot be due. The confirm answers `"Added."`.
+- **The payload.** Each part gains `target` (for an addition: the thought's `title`, `summary`, `tags`, `category`, `created_at`, `updated_at`, or `{"deleted": true}`), `similar` (for the hint: the same fields and `thought_id`, or null once the match is gone, so taking the hint needs no extra request), and `added` and `undone` (from the `thought_additions` row of that proposal and thought, so a reloaded card says "Added to" or "Addition undone"). The conversation answer takes the thoughts from its refs lookup, which already names every id the parts hold, and reads the proposals' additions in one more query, skipped when no part is saved. The stream event and the offer use `part_lookup()`: one query for the thoughts, at most one for the additions. `saved_titles()` is gone.
+- **The additions list** is one join (`thought_additions` → `proposals` → `conversations`), newest first by `added_at`. A deleted conversation cascades to its proposals and their additions, so they drop out of the list.
+- **Undo** locks the thought, then refuses with 404 an addition that is not this thought's (or the user's), and with 409 `thought_changed` one that is not the newest not undone (an undone one included) or a thought whose `updated_at` moved past `after_updated_at`. It restores every field in `before`, title included (unchanged by an addition, and any rename since already refuses the undo), sets `undone_at`, commits, and answers the thought as `GET` does. Every undo moves `updated_at`, so the addition before it always fails the version check: in practice one undo step, as the non-goals say, and the sheet offers undo only when the newest addition is not undone.
+
+**Alternatives:** let the hint's confirm read the version on the server (rejected: it would skip the check that the user saw the current summary); the stored part's `based_on` only (rejected: after a 409 the card could never confirm against the new version).
+
 ## Risks / Trade-offs
 
 - [Depends on `thought-editing`, not built, and on `explore`, merged and archived] → The tasks start after `thought-editing` merges. If `origin`, `check_category()`, the `saved_title` lookup, or the offer code (`asked_proposal()`, `offer_note()`, `Turn._proposed`) change shape, re-read decisions 2, 3, 4, 7, and 10.

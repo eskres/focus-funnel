@@ -27,7 +27,7 @@ from app.chat.prompt import (
     forced_tool,
     tool_arguments,
 )
-from app.chat.proposal import Filing, proposal_payload, refs_for, write_proposal
+from app.chat.proposal import Filing, part_lookup, proposal_payload, refs_for, write_proposal
 from app.chat.similar import candidates_note, check_parts, with_similar
 from app.chat.sse import Event
 from app.chat.usage import record_usage, usage_warning
@@ -467,7 +467,9 @@ class Turn:
         event: Event = (
             "proposal",
             {
-                **proposal_payload(proposal),
+                **proposal_payload(
+                    proposal, await part_lookup(self.session, self.user, [proposal])
+                ),
                 # The earlier proposal whose card now shows as replaced.
                 "replaces": str(replaced) if replaced else None,
             },

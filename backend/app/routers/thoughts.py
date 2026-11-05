@@ -1,4 +1,5 @@
-"""One stored thought and its origin, for the detail view, and changing or deleting it."""
+"""One stored thought, its origin and additions, for the detail view, and
+changing or deleting it, or undoing its last addition."""
 
 import uuid
 from datetime import date, datetime
@@ -14,6 +15,7 @@ from app.config import Settings, get_settings
 from app.db import get_session
 from app.models import User
 from app.providers import get_provider_http_client
+from app.thoughts.additions import list_additions, undo_addition
 from app.thoughts.categories import check_category
 from app.thoughts.dates import when_of
 from app.thoughts.store import (
@@ -35,6 +37,17 @@ class OriginOut(BaseModel):
     proposed_at: datetime
 
 
+class AdditionOut(BaseModel):
+    id: uuid.UUID
+    added_at: datetime
+    undone: bool
+    # The conversation it came from, as it is titled now, and the proposal
+    # whose card it was: /app/<conversation_id>?proposal=<proposal_id>.
+    conversation_id: uuid.UUID
+    conversation_title: str
+    proposal_id: uuid.UUID
+
+
 class ThoughtOut(BaseModel):
     id: uuid.UUID
     title: str
@@ -49,6 +62,9 @@ class ThoughtOut(BaseModel):
     # The conversation and proposal it was saved from; null when there is none,
     # or once that conversation is deleted.
     origin: OriginOut | None
+    # Each addition from a later proposal, newest first; one whose
+    # conversation was deleted is gone.
+    additions: list[AdditionOut]
 
 
 class ThoughtPatch(BaseModel):
@@ -72,6 +88,7 @@ async def thought_answer(session: AsyncSession, user: User, thought_id: uuid.UUI
     """The user's thought with its origin. Another user's, and one that does
     not exist, are both not_found."""
     thought, origin = await get_thought_with_origin(session, user, thought_id)
+    additions = await list_additions(session, user, thought.id)
     return ThoughtOut(
         id=thought.id,
         title=thought.title,
@@ -83,6 +100,7 @@ async def thought_answer(session: AsyncSession, user: User, thought_id: uuid.UUI
         created_at=thought.created_at,
         updated_at=thought.updated_at,
         origin=OriginOut(**vars(origin)) if origin else None,
+        additions=[AdditionOut(**vars(addition)) for addition in additions],
     )
 
 
@@ -166,3 +184,26 @@ async def remove_thought(
     from keeps the part's thought_id, so the part stays filed."""
     await delete_thought(session, user, thought_id)
     return Response(status_code=204)
+
+
+@router.post("/{thought_id}/additions/{addition_id}/undo", response_model=ThoughtOut)
+async def undo_last_addition(
+    thought_id: uuid.UUID,
+    addition_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+    http_client: httpx2.AsyncClient | None = Depends(get_provider_http_client),
+) -> ThoughtOut:
+    """Restore the summary, tags, category, and raw text the thought had
+    before this addition, and answer the thought as GET does.
+
+    Refused with 409 thought_changed, with the thought's current fields,
+    unless it is the newest addition not undone and the thought has not
+    changed since. The restored content is embedded again; a failure there
+    does not fail the undo, as for an edit.
+    """
+    await undo_addition(
+        session, user, thought_id, addition_id, settings=settings, http_client=http_client
+    )
+    return await thought_answer(session, user, thought_id)

@@ -1,6 +1,7 @@
 """Shared API error format: {"error": {"code": ..., "message": ...}}."""
 
 import logging
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -40,6 +41,7 @@ class ErrorCode:
     EMBEDDING_MISMATCH = "embedding_mismatch"
     CATEGORY_EXISTS = "category_exists"
     PROPOSAL_PART_SAVED = "proposal_part_saved"
+    THOUGHT_CHANGED = "thought_changed"
 
 
 class ApiError(Exception):
@@ -49,6 +51,7 @@ class ApiError(Exception):
         code: str,
         message: str,
         headers: dict[str, str] | None = None,
+        extra: dict[str, Any] | None = None,
     ):
         super().__init__(message)
         self.status_code = status_code
@@ -57,6 +60,9 @@ class ApiError(Exception):
         # Extra response headers, for example the conversation a refused chat
         # message was stored in.
         self.headers = headers or {}
+        # Extra keys of the error object beside code and message, for example
+        # the thought's current fields on thought_changed.
+        self.extra = extra or {}
 
 
 def model_not_set() -> ApiError:
@@ -178,17 +184,21 @@ _HTTP_STATUS_CODES = {
 
 
 def error_response(
-    status_code: int, code: str, message: str, headers: dict[str, str] | None = None
+    status_code: int,
+    code: str,
+    message: str,
+    headers: dict[str, str] | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
-        content={"error": {"code": code, "message": message}},
+        content={"error": {**(extra or {}), "code": code, "message": message}},
         headers=headers,
     )
 
 
 async def _handle_api_error(_request: Request, exc: ApiError) -> JSONResponse:
-    return error_response(exc.status_code, exc.code, exc.message, exc.headers)
+    return error_response(exc.status_code, exc.code, exc.message, exc.headers, exc.extra)
 
 
 async def _handle_validation_error(

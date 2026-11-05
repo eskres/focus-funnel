@@ -67,6 +67,10 @@ PART = {
     "deleted": False,
     "add_to": None,
     "based_on": None,
+    "target": None,
+    "similar": None,
+    "added": False,
+    "undone": False,
 }
 
 

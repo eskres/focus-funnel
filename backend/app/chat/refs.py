@@ -174,11 +174,6 @@ class Refs:
         """The seen thoughts that exist, most recently seen first."""
         return [self.thoughts[thought_id] for thought_id in self.recent]
 
-    def titles(self) -> dict[str, str]:
-        """The current title of each seen thought that exists, by its id as
-        text: the answer saved_titles() gives, from the same lookup."""
-        return {str(thought.id): thought.title for thought in self.thoughts.values()}
-
     def by_id(self) -> dict[str, str]:
         """The ref of each seen thought that exists, by its id as text."""
         return {str(thought.id): thought.ref for thought in self.thoughts.values()}

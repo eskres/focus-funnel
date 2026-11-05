@@ -427,7 +427,11 @@ def test_the_second_call_is_shown_unchecked_with_its_strong_match_named(
     [proposal] = events_of(response, "proposal")
     [stored] = proposal["parts"]
     assert stored["add_to"] is None
-    assert stored["similar"] == {"thought_id": ids["podcast"]}
+    # The payload names the match as it is now (task 4.2).
+    assert (stored["similar"]["thought_id"], stored["similar"]["title"]) == (
+        ids["podcast"],
+        "Podcast about maps",
+    )
     # The second call ran layer 1 again for the strong match only.
     assert len(fake.embed_requests) == 2
 
@@ -442,7 +446,7 @@ def test_a_strong_match_on_a_part_marked_new_sets_similar(
 
     assert tool_summaries(response) == ["Proposed a thought to file"]
     [proposal] = events_of(response, "proposal")
-    assert proposal["parts"][0]["similar"] == {"thought_id": ids["podcast"]}
+    assert proposal["parts"][0]["similar"]["thought_id"] == ids["podcast"]
     assert len(fake.embed_requests) == 1
 
 
@@ -465,7 +469,7 @@ def test_a_task_part_gets_the_repeated_task_line_and_no_similar(
     assert listing.rstrip().endswith(REPEATED_TASK)
     [proposal] = events_of(response, "proposal")
     [stored] = proposal["parts"]
-    assert stored["add_to"] is None and "similar" not in stored
+    assert stored["add_to"] is None and stored["similar"] is None
     # A task is never checked for the hint: the second call embeds nothing.
     assert len(fake.embed_requests) == 1
 
@@ -481,7 +485,7 @@ def test_no_candidate_writes_the_proposal_at_once(client, alice, test_database_u
 
     assert tool_summaries(response) == ["Proposed a thought to file"]
     [proposal] = events_of(response, "proposal")
-    assert "similar" not in proposal["parts"][0]
+    assert proposal["parts"][0]["similar"] is None
 
 
 def four_rounds(settings_env, tmp_path) -> None:
