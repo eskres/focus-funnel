@@ -103,14 +103,6 @@ class McpSession(Protocol):
         """Call one tool. Raises ConnectorError when the connector fails."""
         ...
 
-    async def _abort(self) -> None:
-        """Stop a connect that did not finish: there is no session to end."""
-        task, self._task = self._task, None
-        if task is not None and not task.done():
-            task.cancel()
-            with anyio.CancelScope(shield=True):
-                await asyncio.wait({task})
-
     async def aclose(self) -> None:
         """End the session. Safe to call more than once."""
         ...

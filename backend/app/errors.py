@@ -42,6 +42,11 @@ class ErrorCode:
     CONNECTOR_UNREACHABLE = "connector_unreachable"
     CONNECTOR_AUTH_FAILED = "connector_auth_failed"
     CONNECTOR_PROTOCOL_ERROR = "connector_protocol_error"
+    USER_CONNECTORS_DISABLED = "user_connectors_disabled"
+    OPERATOR_CONNECTOR = "operator_connector"
+    TOO_MANY_TOOLS = "too_many_tools"
+    ACTION_EXPIRED = "action_expired"
+    ACTION_RUNNING = "action_running"
 
 
 class ApiError(Exception):
@@ -160,6 +165,61 @@ def rate_limited(retry_after_seconds: int) -> ApiError:
         ErrorCode.RATE_LIMITED,
         f"Too many requests. Try again in {seconds} seconds.",
         headers={"Retry-After": str(seconds)},
+    )
+
+
+def user_connectors_disabled() -> ApiError:
+    return ApiError(
+        403,
+        ErrorCode.USER_CONNECTORS_DISABLED,
+        "This server does not let users add their own connectors.",
+    )
+
+
+def operator_connector() -> ApiError:
+    return ApiError(
+        403,
+        ErrorCode.OPERATOR_CONNECTOR,
+        "This connector is set up by the server's operator and can't be changed or removed.",
+    )
+
+
+# The three connector failure codes (app/mcp_client.py ConnectorError). The
+# reason reads after "the server": "could not be reached", "refused the auth".
+CONNECTOR_FAILURE_CODES = (
+    ErrorCode.CONNECTOR_UNREACHABLE,
+    ErrorCode.CONNECTOR_AUTH_FAILED,
+    ErrorCode.CONNECTOR_PROTOCOL_ERROR,
+)
+
+
+def connector_failed(code: str, reason: str) -> ApiError:
+    if code not in CONNECTOR_FAILURE_CODES:
+        raise ValueError(f"{code} is not a connector failure code")
+    return ApiError(502, code, f"The server {reason}.")
+
+
+def too_many_tools(limit: int) -> ApiError:
+    return ApiError(
+        422,
+        ErrorCode.TOO_MANY_TOOLS,
+        f"A conversation can have at most {limit} connector tools switched on. Turn a "
+        "connector off here, or switch some of its tools off in settings.",
+    )
+
+
+def action_expired() -> ApiError:
+    return ApiError(
+        409,
+        ErrorCode.ACTION_EXPIRED,
+        "This action expired: the conversation moved on, or its tool is no longer on. "
+        "Ask again in the chat if you still want it.",
+    )
+
+
+def action_running() -> ApiError:
+    return ApiError(
+        409, ErrorCode.ACTION_RUNNING, "This action is already running. Wait for its outcome."
     )
 
 
