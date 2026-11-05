@@ -112,6 +112,31 @@ describe("a proposal card", () => {
     expect(screen.queryByRole("button", { name: "Merge into one" })).not.toBeInTheDocument();
   });
 
+  it("offers the six fixed kinds, ending with event, when the categories cannot be loaded", async () => {
+    const { calls } = api({
+      "POST /api/chat": proposing(OAT),
+      "GET /api/settings/categories": errorResponse(500, "internal_error", "Something went wrong."),
+    });
+    await openChat();
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/settings/categories")).toBe(true));
+
+    send("/push buy oat milk");
+
+    await screen.findByRole("region", { name: "Proposal to file" });
+    const category = within(card("Oat milk")).getByLabelText("Category");
+    expect(category).toHaveValue("task");
+    // The frontend's own FIXED_CATEGORIES: the card's choices until, or unless, the settings answer arrives.
+    expect(within(category).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "None",
+      "task",
+      "idea",
+      "decision",
+      "note",
+      "reference",
+      "event",
+    ]);
+  });
+
   it("confirms the edited card and shows it as saved, with a link to the thought", async () => {
     const { calls } = api({ "POST /api/chat": proposing(OAT), [CONFIRM]: saved("t1") });
     await openChat();
