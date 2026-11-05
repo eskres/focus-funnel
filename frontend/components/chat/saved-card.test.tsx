@@ -143,6 +143,33 @@ describe("a saved card in the open chat", () => {
     expect(await sourcesOf()).toEqual(before);
   });
 
+  it("keeps a renamed card's title after an edit that sends no title", async () => {
+    const renamed = { ...THOUGHT, title: "Lisbon trip" };
+    const { calls } = api({
+      "GET /api/conversations/c1": json(
+        200,
+        stored([{ ...TRIP, thought_id: "t1", saved_title: "Lisbon trip", deleted: false }]),
+      ),
+      "GET /api/thoughts/t1": json(200, renamed),
+      "PATCH /api/thoughts/t1": json(200, { ...renamed, tags: ["travel", "spring"] }),
+    });
+    await openChat();
+    const saved = await screen.findByRole("group", { name: "Saved: Lisbon trip" });
+    fireEvent.click(within(saved).getByRole("link", { name: "Open" }));
+    const sheet = await screen.findByRole("dialog", { name: "Lisbon trip" });
+
+    fireEvent.click(await within(sheet).findByRole("button", { name: "Edit" }));
+    fireEvent.change(within(sheet).getByLabelText(/Tags/), { target: { value: "travel, spring" } });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save" }));
+
+    expect(await within(sheet).findByText("#spring")).toBeInTheDocument();
+    expect(calls.filter((c) => c.method === "PATCH")).toEqual([
+      { method: "PATCH", path: "/api/thoughts/t1", body: { tags: ["travel", "spring"] } },
+    ]);
+    expect(screen.getByRole("group", { name: "Saved: Lisbon trip" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Saved: Trip ideas" })).not.toBeInTheDocument();
+  });
+
   it("does not change for another thought's edit", async () => {
     const { updateThought } = await import("@/lib/thoughts");
     api({ "PATCH /api/thoughts/t9": json(200, { ...THOUGHT, id: "t9", title: "Something else" }) });

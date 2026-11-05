@@ -44,6 +44,17 @@ describe("updateThought", () => {
     expect(seen).toEqual([{ id: "t1", title: "Dentist in May" }]);
   });
 
+  it("announces the title from the answer when the change sends no title", async () => {
+    const answer = { ...THOUGHT, title: "Dentist in June", tags: ["health", "teeth"] };
+    fakeApi({ "PATCH /api/thoughts/t1": json(200, answer) });
+    const { seen, stop } = listen();
+
+    await updateThought("t1", { tags: ["health", "teeth"] });
+    stop();
+
+    expect(seen).toEqual([{ id: "t1", title: "Dentist in June" }]);
+  });
+
   it("throws the server's message and announces nothing when the change is refused", async () => {
     fakeApi({ "PATCH /api/thoughts/t1": errorResponse(422, "validation_error", "title: must not be empty") });
     const { seen, stop } = listen();
