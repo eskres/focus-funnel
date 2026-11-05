@@ -38,6 +38,10 @@ class ErrorCode:
     EMBEDDING_MISMATCH = "embedding_mismatch"
     CATEGORY_EXISTS = "category_exists"
     PROPOSAL_PART_SAVED = "proposal_part_saved"
+    # MCP connectors: a server that could not be used (app/mcp_client.py).
+    CONNECTOR_UNREACHABLE = "connector_unreachable"
+    CONNECTOR_AUTH_FAILED = "connector_auth_failed"
+    CONNECTOR_PROTOCOL_ERROR = "connector_protocol_error"
 
 
 class ApiError(Exception):

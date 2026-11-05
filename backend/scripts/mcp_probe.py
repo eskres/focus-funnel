@@ -4,12 +4,12 @@ Task 1.1 of the mcp-connectors change: find out how the `mcp` SDK connects,
 lists tools page by page, calls a tool, and reports failures, before
 app/mcp_client.py depends on it. The findings are in design decision 1.
 
-The SDK is not a backend dependency until task 4.1, so run it with `--with`,
-from backend/:
+The SDK is a backend dependency since task 4.1 (app/mcp_client.py wraps it).
+Run the probe from backend/:
 
-  uv run --with mcp==2.3.0 python -m scripts.mcp_probe list URL [-H "Name: value"]
-  uv run --with mcp==2.3.0 python -m scripts.mcp_probe call URL TOOL '{"a": 1}'
-  uv run --with mcp==2.3.0 python -m scripts.mcp_probe selftest
+  uv run python -m scripts.mcp_probe list URL [-H "Name: value"]
+  uv run python -m scripts.mcp_probe call URL TOOL '{"a": 1}'
+  uv run python -m scripts.mcp_probe selftest
 
 `list` prints the negotiated protocol version, every page of `tools/list`,
 and each tool's annotations. `call` prints the raw `tools/call` result.

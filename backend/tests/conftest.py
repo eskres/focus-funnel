@@ -20,7 +20,7 @@ from app.db import create_engine, get_engine, get_sessionmaker
 from app.models import Base, User
 from app.provider_config import get_providers_config
 
-pytest_plugins = ["tests.chat_helpers"]
+pytest_plugins = ["tests.chat_helpers", "tests.mcp_helpers"]
 
 REQUIRED_ENV = {
     "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
