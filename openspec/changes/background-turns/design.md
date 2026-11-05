@@ -105,6 +105,13 @@ Subscribers wait on an `asyncio.Event` that the turn sets and replaces on every 
 Alternatives:
 - **Shield each step separately.** A second cancellation would let the caller's `finally` close the session while a shielded release still uses it. Rejected.
 
+### 9. The follow route checks the conversation first, then the registry
+
+`GET /api/chat/{conversation_id}/stream` and `ConversationDetail.turn` both load the conversation owner-scoped before they look in the registry, and both also check that the running turn's user is the caller. An unknown id and another user's conversation get the same 404 `not_found` body, and a malformed id gets the 422 `validation_error` every other id route gives. A `/compact` claim has no registry entry, so its conversation answers 204 and `turn: null`: there is nothing to follow, and the draft is not stored.
+
+Alternatives:
+- **Answer from the registry alone.** Saves one query, but would answer 204 for an unknown or foreign id instead of 404. Rejected.
+
 ## Risks / Trade-offs
 
 - [One process only] → Recorded as a non-goal and in the Dockerfile comment. The registry is the single place to replace with a shared queue and pub/sub later.

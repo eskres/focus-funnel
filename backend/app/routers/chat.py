@@ -4,7 +4,7 @@ import logging
 import uuid
 
 import httpx2
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -38,7 +38,7 @@ from app.chat.proposal import filing_for, held_parts, held_proposal
 from app.chat.sse import log_response, sse_response
 from app.chat.turn import Turn
 from app.config import Settings, get_settings
-from app.db import get_sessionmaker
+from app.db import get_session, get_sessionmaker
 from app.errors import ApiError, ErrorCode, context_full, model_not_set
 from app.models import Conversation, Message, User
 from app.providers import get_provider_http_client, provider_for_user
@@ -259,6 +259,26 @@ async def chat(
 
     turn_entry = running.start(conversation_id, user.id, after_position, events(), settle)
     return log_response(running.follow(turn_entry))
+
+
+@router.get("/{conversation_id}/stream", response_model=None)
+async def follow_turn(
+    conversation_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Follow the conversation's running turn again, from its first event.
+
+    The stream replays every event the turn has sent so far, then the rest as
+    they come, and ends with the same terminal event. With no running turn the
+    answer is 204: the stored messages already hold the last answer. Another
+    user's conversation is not found. This route never reads provider keys.
+    """
+    await get_conversation(session, user, conversation_id)
+    turn = running.get(conversation_id)
+    if turn is None or turn.user_id != user.id:
+        return Response(status_code=204)
+    return log_response(running.follow(turn))
 
 
 async def larger_models(
