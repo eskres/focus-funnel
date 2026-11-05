@@ -454,7 +454,7 @@ class Turn:
         )
         if check.has_candidates:
             result, similar = candidates_note(
-                parts, check, refs, self.config.filing.seen_summary_chars
+                parts, check, refs, self.config.filing.seen_summary_chars, self.zone
             )
             self._checked = True
             self._force_propose = True

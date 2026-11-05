@@ -1,7 +1,7 @@
 """add thought additions and similarity baselines
 
 Revision ID: 0162bb890895
-Revises: 2bea7235fdf6
+Revises: 8de09c18db91
 Create Date: 2026-11-05 02:44:10.248621
 
 Creates thought_additions, one row per addition to a saved thought with the
@@ -18,7 +18,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = '0162bb890895'
-down_revision: Union[str, Sequence[str], None] = '2bea7235fdf6'
+down_revision: Union[str, Sequence[str], None] = '8de09c18db91'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

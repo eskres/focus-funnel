@@ -196,7 +196,7 @@ async def chat(
             messages,
             held,
             today_in(zone),
-            seen_note=refs.note(config.filing),
+            seen_note=refs.note(config.filing, zone=zone),
             refs=refs.by_id(),
         )
         filing = await filing_for(session, user, config)

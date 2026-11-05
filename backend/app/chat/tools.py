@@ -4,7 +4,7 @@ compact result the model reads and the sources the chat shows."""
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time
+from datetime import date
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -19,7 +19,13 @@ from app.errors import ApiError, ErrorCode
 from app.models import User
 from app.provider_config import get_providers_config
 from app.thoughts.categories import clean_name
-from app.thoughts.dates import DEFAULT_ZONE, parse_when, when_of
+from app.thoughts.dates import (
+    DEFAULT_ZONE,
+    local_day,
+    parse_when,
+    thought_date_text,
+    when_of,
+)
 from app.thoughts.search import SearchResult, search_thoughts
 
 NO_MATCH = (
@@ -308,38 +314,6 @@ def words_only_note(error: ApiError, provider_id: str) -> str:
     return f"Searched by words only: {error.message} Tell the user."
 
 
-_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-
-
-def _day_and_time(on: date, at: time | None) -> str:
-    written = f"{_WEEKDAYS[on.weekday()]} {on.isoformat()}"
-    return written if at is None else f"{written} {at.strftime('%H:%M')}"
-
-
-def thought_date_text(thought: Any) -> str | None:
-    """A thought's own date as the search result shows it, or None for no date.
-
-    `Fri 2026-10-02 19:00`, `Tue 2026-11-03 to Fri 2026-11-06`, or, for an end
-    later the same day, `Fri 2026-10-02 19:00 to 21:00`. As written, in the
-    zone it was set in.
-    """
-    if thought.starts_on is None:
-        return None
-    start = _day_and_time(thought.starts_on, thought.starts_at)
-    if thought.ends_on is None:
-        return start
-    if thought.ends_on == thought.starts_on and thought.ends_at is not None:
-        return f"{start} to {thought.ends_at.strftime('%H:%M')}"
-    return f"{start} to {_day_and_time(thought.ends_on, thought.ends_at)}"
-
-
-def _local_day(moment: datetime, zone: ZoneInfo) -> date:
-    """The day `moment` falls on in `zone`; a naive moment (SQLite) is UTC."""
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=UTC)
-    return moment.astimezone(zone).date()
-
-
 def format_search_result(
     result: SearchResult,
     config: SearchConfig,
@@ -376,7 +350,7 @@ def format_search_result(
         ref = f"{refs.label(thought.id)} · " if refs is not None else ""
         heading = (
             f"{number}. {ref}{thought.title} · filed "
-            f"{_local_day(thought.created_at, filed_zone).isoformat()}"
+            f"{local_day(thought.created_at, filed_zone).isoformat()}"
         )
         dated = thought_date_text(thought)
         if dated:
