@@ -460,4 +460,7 @@ def test_the_messages_query_count_does_not_grow_with_saved_parts(client, alice, 
     assert sum(p["deleted"] for ps in parts for p in ps) == 1
     assert parts[0][0]["thought_id"] == deleted_id
     assert len(for_many) == len(for_one)
-    assert sum("FROM thoughts" in s for s in for_many) == 1
+    # One lookup for the parts' thoughts. The meter's tool definitions
+    # (mcp-connectors) read the known tags once more, whatever the parts.
+    assert sum("FROM thoughts" in s and "unnest" not in s for s in for_many) == 1
+    assert sum("FROM thoughts" in s and "unnest" in s for s in for_many) == 1

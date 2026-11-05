@@ -599,7 +599,10 @@ def test_neither_endpoint_grows_its_queries_with_parts_or_additions(
     assert len(body["additions"]) == 4
     assert len(conversation_many) == len(conversation_one)
     assert len(thought_many) == len(thought_one)
-    assert sum("FROM thoughts" in s for s in conversation_many) == 1
+    # One lookup for the parts' thoughts. The meter's tool definitions
+    # (mcp-connectors) read the known tags once more, whatever the parts.
+    assert sum("FROM thoughts" in s and "unnest" not in s for s in conversation_many) == 1
+    assert sum("FROM thoughts" in s and "unnest" in s for s in conversation_many) == 1
     assert sum("FROM thought_additions" in s for s in conversation_many) == 1
     assert sum("FROM thought_additions" in s for s in thought_many) == 1
 

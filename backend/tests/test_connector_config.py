@@ -312,7 +312,8 @@ def test_app_starts_with_a_valid_file_when_enabled(settings_env, tmp_path, test_
         pass
 
 
-def test_app_does_not_read_the_file_when_disabled(settings_env, tmp_path):
+def test_app_does_not_read_the_file_when_disabled(settings_env, tmp_path, test_database_url):
+    # Startup sweeps stale turn claims (background-turns), so it needs the tables.
     settings_env.setenv("MCP_CONNECTORS_PATH", str(write(tmp_path, with_connector(name="Bad"))))
     with TestClient(app):
         pass

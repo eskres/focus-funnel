@@ -5,7 +5,9 @@ calls, and closes. The failure tests use the real client against the local
 MCP test server (tests/mcp_helpers.py) with sub-second timeouts.
 """
 
+import json
 import uuid
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -16,6 +18,7 @@ from app.errors import ErrorCode
 from app.main import app
 from app.mcp_client import ConnectorError, McpTool, ToolResult, get_mcp_connect
 from app.models import Connector
+from app.thoughts import dates
 from tests.chat_helpers import (
     api_error,
     chat,
@@ -519,3 +522,91 @@ def test_a_failed_connect_is_not_tried_again_in_the_same_turn(
     assert len(fake_mcp.connects) == 1
     ends = [e for e in events_of(response, "tool") if e["phase"] == "end"]
     assert [e.get("failed") for e in ends] == [True, True]
+
+
+# --- with thought-dates and thought-appending -------------------------------------
+
+
+def test_a_connector_turn_gets_the_paragraph_before_the_local_date(
+    client, alice, on, fake_llm, monkeypatch
+):
+    # 22:00 on Wednesday 30 September in Los Angeles is Thursday in UTC.
+    monkeypatch.setattr(dates, "utc_now", lambda: datetime(2026, 10, 1, 5, 0, tzinfo=UTC))
+    fake_llm.queue(text_chunks("Hi"))
+
+    chat(client, alice, "hello", on["conversation"], time_zone="America/Los_Angeles")
+
+    prompt = fake_llm.chat_requests[0]["messages"][0]["content"]
+    assert prompt == system_prompt(date(2026, 9, 30), connectors=True)
+    assert prompt.endswith(
+        f"{CONNECTORS_PROMPT}\n\nToday is Wednesday 2026-09-30. Weeks start on Monday."
+    )
+
+
+def test_a_proposal_in_a_connector_turn_is_dated_in_the_turns_zone(
+    client, alice, on, fake_llm, fake_mcp
+):
+    dinner = {
+        "title": "Dinner with Sam",
+        "summary": "Dinner with Sam.",
+        "tags": ["sam"],
+        "category": "event",
+        "when": {"start": "2026-10-02T19:00"},
+    }
+    fake_llm.queue(
+        tool_call_chunks("calendar__list_events", '{"text": "friday"}', "call_1"),
+        tool_call_chunks("propose_thought", json.dumps({"thoughts": [dinner]}), "call_2"),
+        text_chunks("Free on Friday; ready to file."),
+    )
+
+    response = chat(
+        client, alice, "dinner with Sam Friday at 7", on["conversation"], time_zone="Europe/Oslo"
+    )
+
+    assert [name for name, _ in parse_events(response.text)][-1] == "done"
+    assert fake_mcp.calls == [("list_events", {"text": "friday"})]
+    [proposal] = events_of(response, "proposal")
+    assert proposal["parts"][0]["when"] == {
+        "start": "2026-10-02T19:00",
+        "end": None,
+        "time_zone": "Europe/Oslo",
+    }
+
+
+@pytest.mark.parametrize("connector_rounds, last", [(2, False), (4, True)])
+def test_the_similar_check_counts_the_connector_rounds(
+    client, alice, on, fake_llm, fake_mcp, monkeypatch, connector_rounds, last
+):
+    """chat.yaml: tool_rounds 3, connectors.tool_rounds 5. With a connector on,
+    the proposal in round 3 is not in the last round, so the check may still
+    ask for a candidate round; in round 5 it is, so layer 2 is skipped."""
+    import app.chat.turn as turn_module
+    from app.chat.similar import Check, PartCheck
+
+    seen: list[bool] = []
+
+    async def check_parts(session, user, parts, refs, *, again=False, **_):
+        seen.append(again)
+        return Check(parts=[PartCheck() for _ in parts])
+
+    monkeypatch.setattr(turn_module, "check_parts", check_parts)
+    milk = {"title": "Oat milk", "summary": "Buy oat milk.", "tags": ["shopping"]}
+    fake_llm.queue(
+        *[
+            tool_call_chunks("calendar__list_events", f'{{"text": "{n}"}}', f"call_{n}")
+            for n in range(connector_rounds)
+        ],
+        tool_call_chunks("propose_thought", json.dumps({"thoughts": [milk]}), "call_p"),
+        text_chunks("Ready."),
+    )
+
+    response = chat(client, alice, "milk, and what is on?", on["conversation"])
+
+    assert seen == [last]
+    assert len(events_of(response, "proposal")) == 1
+    errors = events_of(response, "error")
+    if last:
+        # The proposal used the last round: the limit ends the turn after it.
+        assert [e["error"]["code"] for e in errors] == ["tool_loop_limit"]
+    else:
+        assert errors == []
