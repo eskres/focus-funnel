@@ -23,6 +23,7 @@ from app.thoughts.dates import (
     DEFAULT_ZONE,
     local_day,
     parse_when,
+    status_mark,
     thought_date_text,
     when_of,
 )
@@ -36,6 +37,12 @@ NO_DATED_MATCH = (
     "No filed thoughts are dated in those days. Say so plainly, and do not answer as "
     "if the user had filed something."
 )
+NO_FILTERED_MATCH = (
+    "No filed thoughts match those filters. Say so plainly, and do not answer as if "
+    "the user had filed something."
+)
+# The statuses the search tool offers (thought-status design decision 12).
+SEARCH_STATUSES = ("open",)
 ALREADY_PROPOSED = (
     "Error: a proposal is already shown in this turn, and nothing was proposed now. "
     "Do not call propose_thought again in this turn: one proposal holds every "
@@ -205,17 +212,39 @@ def parse_proposal(
 
 @dataclass(frozen=True)
 class SearchArguments:
-    # None when the search is by the thought's days only.
+    # None when the search lists the thoughts that pass its filters.
     query: str | None
     tags: list[str] | None = None
     since: date | None = None
     # The days the thought itself is dated on, not the day it was filed.
     dated_from: date | None = None
     dated_to: date | None = None
+    # Only thoughts with this status (`open`) or this category, as stored.
+    status: str | None = None
+    category: str | None = None
+
+    @property
+    def dated(self) -> bool:
+        return self.dated_from is not None or self.dated_to is not None
 
     @property
     def by_date_only(self) -> bool:
+        """No query and a filter on the thought's days: a list in date order."""
+        return self.query is None and self.dated
+
+    @property
+    def listed(self) -> bool:
+        """No query: a list of the thoughts that pass the filters."""
         return self.query is None
+
+    @property
+    def summary(self) -> str:
+        """The tool's line in the chat (thought-status design decision 12)."""
+        if self.query is not None:
+            return f"Searched your thoughts for “{self.query}”"
+        status = f" {self.status}" if self.status else ""
+        category = f" in {self.category}" if self.category else ""
+        return f"Listed your{status} thoughts{category}"
 
     @property
     def days_text(self) -> str:
@@ -248,7 +277,9 @@ def _day(arguments: dict[str, Any], name: str) -> date | None:
 
 
 def parse_search(arguments: dict[str, Any]) -> SearchArguments:
-    """The search call's arguments. A query is needed unless dated_from or dated_to is given."""
+    """The search call's arguments. A query is needed unless dated_from,
+    dated_to, status, or category is given. The only status the tool offers
+    is `open`; the category is cleaned as it is stored."""
     query = arguments.get("query")
     if query is not None and not isinstance(query, str):
         raise ToolArgumentError("query must be a string")
@@ -268,9 +299,17 @@ def parse_search(arguments: dict[str, Any]) -> SearchArguments:
             raise ToolArgumentError("since must be a date written YYYY-MM-DD")
     dated_from = _day(arguments, "dated_from")
     dated_to = _day(arguments, "dated_to")
-    if not query and dated_from is None and dated_to is None:
+    status = arguments.get("status")
+    if status is not None and status not in SEARCH_STATUSES:
+        raise ToolArgumentError("status must be open, or left out to find done thoughts too")
+    category = arguments.get("category")
+    if category is not None and not isinstance(category, str):
+        raise ToolArgumentError("category must be a string")
+    category = clean_name(category) if category else None
+    if not query and dated_from is None and dated_to is None and not status and not category:
         raise ToolArgumentError(
-            "query must be a non-empty string, unless dated_from or dated_to is given"
+            "query must be a non-empty string, unless dated_from, dated_to, status, "
+            "or category is given"
         )
     if dated_from is not None and dated_to is not None and dated_to < dated_from:
         raise ToolArgumentError("dated_to must not be before dated_from")
@@ -280,6 +319,8 @@ def parse_search(arguments: dict[str, Any]) -> SearchArguments:
         since=since,
         dated_from=dated_from,
         dated_to=dated_to,
+        status=status,
+        category=category or None,
     )
 
 
@@ -321,6 +362,7 @@ def format_search_result(
     *,
     newest_first: bool = False,
     by_date: bool = False,
+    filtered: bool = False,
     zone: ZoneInfo | None = None,
     refs: Refs | None = None,
 ) -> SearchToolResult:
@@ -331,7 +373,10 @@ def format_search_result(
     next would pass budget_chars. Each entry gives the day it was filed and,
     for a dated thought, its date. `by_date` is a search by the thought's days
     with no query: its entries are in date order (thought-dates design
-    decision 4). The filed day is the user's local day in `zone` (UTC when not
+    decision 4). `filtered` is a search with a status or category filter: its
+    no-match text names those filters. A thought whose status is not `open`
+    gets ` · <status> <day>` after its filed day (thought-status design
+    decision 12). The filed day is the user's local day in `zone` (UTC when not
     given), the same days as the model's today and its `since`. With the
     conversation's `refs`, each entry carries its thought's ref, and a thought
     shown for the first time is numbered after every other (thought-appending
@@ -341,7 +386,8 @@ def format_search_result(
     provider_id = result.embedding_provider or settings.embedding_provider
     note = [words_only_note(result.words_only, provider_id)] if result.words_only else []
     if not result.hits:
-        return SearchToolResult(text="\n".join([NO_DATED_MATCH if by_date else NO_MATCH, *note]))
+        nothing = NO_FILTERED_MATCH if filtered else NO_DATED_MATCH if by_date else NO_MATCH
+        return SearchToolResult(text="\n".join([nothing, *note]))
     entries: list[str] = []
     sources: list[dict[str, Any]] = []
     used = 0
@@ -351,6 +397,7 @@ def format_search_result(
         heading = (
             f"{number}. {ref}{thought.title} · filed "
             f"{local_day(thought.created_at, filed_zone).isoformat()}"
+            f"{status_mark(thought.status, thought.status_changed_at, filed_zone)}"
         )
         dated = thought_date_text(thought)
         if dated:
@@ -420,11 +467,21 @@ async def search_tool_result(
         since=arguments.since,
         dated_from=arguments.dated_from,
         dated_to=arguments.dated_to,
+        status=arguments.status,
+        category=arguments.category,
         zone=zone,
         conversation_id=conversation_id,
         http_client=http_client,
         config=config,
     )
     return format_search_result(
-        result, config, settings, by_date=arguments.by_date_only, zone=zone, refs=refs
+        result,
+        config,
+        settings,
+        # A list with no query and no date filter is newest filed first.
+        newest_first=arguments.listed and not arguments.dated,
+        by_date=arguments.by_date_only,
+        filtered=arguments.status is not None or arguments.category is not None,
+        zone=zone,
+        refs=refs,
     )

@@ -60,7 +60,9 @@ SEARCH_TOOL_SCHEMA: dict[str, Any] = {
             "Returns the best matches, or says that none matched. When the user asks "
             "what is on, coming up, or planned for a time, pass dated_from and "
             "dated_to, with no query unless they name a subject; the result then "
-            "lists the thoughts dated in those days, in date order."
+            "lists the thoughts dated in those days, in date order. For what is still "
+            "open, such as open tasks, pass status open (and category task), with no "
+            "query unless they name a subject; that list is newest first."
         ),
         "parameters": {
             "type": "object",
@@ -70,8 +72,20 @@ SEARCH_TOOL_SCHEMA: dict[str, Any] = {
                     "description": (
                         "The key words and names to look for, not a question. "
                         "For example: 'dentist appointment' or 'ACME-4471 invoice'. "
-                        "Needed unless dated_from or dated_to is given."
+                        "Needed unless dated_from, dated_to, status, or category is given."
                     ),
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["open"],
+                    "description": (
+                        "Only thoughts not marked done. Leave it out to find done "
+                        "thoughts too."
+                    ),
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Only thoughts of this category, such as task.",
                 },
                 "tags": {
                     "type": "array",
