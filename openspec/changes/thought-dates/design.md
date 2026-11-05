@@ -192,6 +192,15 @@ The partial index `ix_thoughts_user_id_starts_on` is declared like the GIN index
 
 **Alternatives:** keep undated headings as they were and add only the `on` part (rejected: an unlabelled filing day next to an `on` date reads as two event dates); a weekday on the single date only, as decision 4's example shows (rejected: a range is just as often asked about by weekday).
 
+### 13. Details of editing the date, settled while building them
+
+- `PATCH /api/thoughts/{id}` takes `when` as `ThoughtPatch` takes the other fields: a missing key keeps the date, `null` clears it, and an object is checked by the same parser as confirm, so a refusal is 422 `validation_error` "when: …" with the thought unchanged. `GET` and `PATCH` answer `when` (`{start, end, time_zone}` or null). A date-only change commits without touching `search_tsv` or the embeddings.
+- The sheet sends `when` only when the start or end changed, as it sends only the changed fields; the zone alone never counts as a change. A changed date carries the browser's zone at save, so a date set in Oslo and moved in Tokyo is stored with `Asia/Tokyo`.
+- `date-fields.tsx` holds the fields as text (`start`, `startTime`, `end`, `endTime`, `""` for empty) and turns them into `when` only at save. "Add date" starts the start day at the browser's local today, so the fields never hold a date with no start. Setting a start time while an end exists gives the end the same time when it has none; clearing the start time clears the end time, so both or neither have a time. "Add end" starts the end as the start; "Remove end" and "Clear date" undo each.
+- The sheet's date line ("When: Fri 2 Oct 2026, 19:00", "When: Tue 3 Nov 2026 – Fri 6 Nov 2026", or "Mon 5 Oct 2026, 09:30 – 11:00" for an end later the same day) sits in the header between the title and the filed and changed dates, and shows the stored date in edit mode too, so a refused save still shows what is stored. `lib/dates.ts` formats it from the string with fixed English weekday and month names; `lib/time-zone.ts` reads the browser's zone. Both were added with task 4.2, ahead of group 5, which uses them.
+
+**Alternatives:** send `when` on every save (rejected: an unchanged field is never sent, so a stale browser zone would overwrite the stored one on any title edit); leave "Add date" with an empty start (rejected: a save would then be refused for a missing start the user never saw as a field to fill).
+
 ## Risks / Trade-offs
 
 - [The model gives two choices for a clear day, or one date for an unclear day] → Task 2.5 measures both on the preferred model. A wrong single date still shows on the card, where the user checks it before confirming.

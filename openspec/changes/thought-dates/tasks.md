@@ -22,8 +22,10 @@ Group 4 depends on `thought-editing` (planned, not built). Groups 1 to 3 and 5 d
 
 ## 4. Edit the date (after `thought-editing`)
 
-- [ ] 4.1 Add `when` to the `PATCH /api/thoughts/{id}` body and to the `GET` answer (design decision 7). Check with pytest that `PATCH` sets, changes, and clears (`"when": null`) the date, refuses an end before the start with 422 naming `when` and the thought unchanged, and makes no embedding call for a date-only change
-- [ ] 4.2 Add the date fields to `ThoughtSheet`'s edit mode. Check with vitest the set, clear, and end-before-start scenarios of the `thought-detail-view` delta
+- [x] 4.1 Add `when` to the `PATCH /api/thoughts/{id}` body and to the `GET` answer (design decision 7). Check with pytest that `PATCH` sets, changes, and clears (`"when": null`) the date, refuses an end before the start with 422 naming `when` and the thought unchanged, and makes no embedding call for a date-only change
+  - Passed on 2026-11-05 on top of `b96e9f5`: `tests/test_thought_dates_editing.py` on Postgres (set, change, clear with `"when": null`, end before start and six other bad dates refused as 422 "when: …" with the GET answer, the search words, and the entries unchanged, and `fake.embed_requests == []` for every date-only change).
+- [x] 4.2 Add the date fields to `ThoughtSheet`'s edit mode. Check with vitest the set, clear, and end-before-start scenarios of the `thought-detail-view` delta
+  - Passed on 2026-11-05 on top of `b96e9f5`: `components/chat/thought-dates-edit.test.tsx` with `TZ=America/Los_Angeles` (set a Monday start and the sheet shows "When: Mon 5 Oct 2026" with no time or end; clear sends `when: null` and the line is gone; an end before the start shows the server's "when: …" alert, keeps the typed end, and the stored date). The sheet's date line and `lib/dates.ts`/`lib/time-zone.ts` came with it (design decision 13); tasks 5.1 and 5.3 still need their own checks.
 
 ## 5. Frontend
 

@@ -1,6 +1,7 @@
 // Typed clients for one stored thought (`/api/thoughts`) and the categories
 // setting (`/api/settings/categories`).
 import { apiFetch } from "@/lib/api";
+import type { When } from "@/lib/dates";
 
 /** The conversation and proposal a thought was saved from, as they are now. */
 export type ThoughtOrigin = {
@@ -18,6 +19,8 @@ export type Thought = {
   tags: string[];
   category: string | null;
   raw_text: string | null;
+  /** The thought's own date; null, or missing from an older server, when it has none. */
+  when?: When | null;
   created_at: string;
   updated_at: string;
   /** Null, or missing from an older server, when there is no origin. */
@@ -30,8 +33,13 @@ export function getThought(id: string): Promise<Thought> {
   return apiFetch<Thought>(thoughtPath(id));
 }
 
-/** The fields of a thought the user can change. Raw text is not one of them. */
-export type ThoughtChange = Partial<Pick<Thought, "title" | "summary" | "tags" | "category">>;
+/**
+ * The fields of a thought the user can change. Raw text is not one of them.
+ * A `when` of null clears the date.
+ */
+export type ThoughtChange = Partial<Pick<Thought, "title" | "summary" | "tags" | "category">> & {
+  when?: When | null;
+};
 
 /**
  * Sent on window after a thought is changed or deleted in this page, so a
