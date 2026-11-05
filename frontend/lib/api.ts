@@ -20,6 +20,7 @@ export type ApiErrorCode =
   | "conversation_busy"
   | "output_limit_reached"
   | "tool_loop_limit"
+  | "answer_interrupted"
   | "backend_unreachable"
   | "internal_error"
   | "not_allowed"
@@ -56,6 +57,8 @@ export class ContextFullError extends ApiError {}
 export class ConversationBusyError extends ApiError {}
 export class OutputLimitReachedError extends ApiError {}
 export class ToolLoopLimitError extends ApiError {}
+/** A running answer stopped because the server stopped or restarted. */
+export class AnswerInterruptedError extends ApiError {}
 export class BackendUnreachableError extends ApiError {}
 export class InternalError extends ApiError {}
 export class NotAllowedError extends ApiError {}
@@ -84,6 +87,7 @@ const errorClasses: Record<ApiErrorCode, typeof ApiError> = {
   conversation_busy: ConversationBusyError,
   output_limit_reached: OutputLimitReachedError,
   tool_loop_limit: ToolLoopLimitError,
+  answer_interrupted: AnswerInterruptedError,
   backend_unreachable: BackendUnreachableError,
   internal_error: InternalError,
   not_allowed: NotAllowedError,

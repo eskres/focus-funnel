@@ -467,6 +467,7 @@ describe("Chat", () => {
     it.each([
       ["output_limit_reached", "The model ran out of room"],
       ["tool_loop_limit", "The answer could not be completed"],
+      ["answer_interrupted", "The answer did not finish"],
     ])("%s keeps the text and offers to try again in place", async (code, title) => {
       const { calls } = fakeApi({
         "GET /api/settings/models": json(200, withDefault),

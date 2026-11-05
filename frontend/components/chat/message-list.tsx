@@ -30,6 +30,8 @@ export type AnswerMessage = {
   /** The thoughts this answer's searches returned, each once. */
   sources?: Source[];
   status: "streaming" | "done" | "failed" | "cut";
+  /** Cut short because the server could not be reached to follow it again. */
+  unreached?: boolean;
   error?: ApiError;
   /** Replaced for the model by a /compact summary, and still shown. */
   compacted?: boolean;
@@ -214,7 +216,10 @@ function Answer({
       {answer.status === "cut" && (
         <Alert>
           <AlertDescription className="flex flex-wrap items-center gap-2 text-pretty!">
-            <span>This answer was cut short. The text above is all that arrived.</span>
+            <span>
+              This answer was cut short. The text above is all that arrived.
+              {answer.unreached && " Open the conversation again later to see if it finished."}
+            </span>
             <Button variant="outline" size="xs" disabled={!canAct} onClick={() => onRetry(answer)}>
               Send again
             </Button>

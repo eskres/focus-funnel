@@ -126,6 +126,22 @@ Alternatives:
 - **Store in `Turn.events()` under `asyncio.shield`.** Rejected for the race above.
 - **Track in memory whether the answer was stored.** A cancel during the final `commit` leaves it unknown whether the row landed; reading the last stored message after the rollback does not guess.
 
+### 11. The chat follows an answer with one recover step
+
+The chat handles every stream that ends without `done` or `error` the same way, whether it is the `POST` stream of a message it sent or a reattach stream: reload the conversation detail; with `turn` set, show the stored messages through `after_position` and follow the turn; without it, show the stored answer. A conversation that loads with `turn` set goes straight into that step. It follows again at most three times per answer, then shows the answer as cut short. The event handling `send` uses is one function that both paths call.
+
+- **Proposals.** Stored proposals after `after_position` are left out with the messages, because the replay sends them again; otherwise the leftover-proposal rule in `fromStored` would add them to the answer before it, and they would show twice.
+- **Text already received.** After a stream break the chat keeps the answer it has (text, tools, cards, sources) while it follows again, and starts the answer over only at the replay's first event. The replay is the whole answer, so nothing shows twice and nothing disappears while the reattach request is on its way.
+- **Did the stored answer finish?** By the backend's rule (Decision 10): the last stored message is an assistant message without tool calls. Then the chat shows the stored conversation as it is: complete, failed with its reason, or cut short. Otherwise (no answer stored, or the last stored message is a tool round) it keeps the text it received and says the answer was cut short.
+- **Server cannot be reached.** When the reload fails, or a new conversation's stream broke before its `conversation` event so the chat has no id to reload, the chat keeps the text and says the answer was cut short, adding "Open the conversation again later to see if it finished." (the spec's "the conversation can be opened again").
+- **`answer_interrupted`** has its own error class. `chat-error.tsx` titles it "The answer did not finish", always shows "This answer did not finish. Send the message again to retry.", and offers Try again, like the other errors a second try can fix.
+- **Leaving.** The follow request uses the chat's abort controller, which unmount aborts as before; nothing is sent to the server, so the answer keeps running.
+- **A stream that stays open after `done`.** The chat keeps reading until the stream closes, as it did before this change; the backend closes it after the terminal event.
+
+Alternatives:
+- **Rebuild the whole chat from the reload at once after a break.** Simpler, but the received text would vanish until the replay's first event arrives. Rejected.
+- **Keep the received answer and append only new events.** Would need the client to count events across the break (see Decision 2's rejected offset). Rejected.
+
 ## Risks / Trade-offs
 
 - [One process only] → Recorded as a non-goal and in the Dockerfile comment. The registry is the single place to replace with a shared queue and pub/sub later.

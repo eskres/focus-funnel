@@ -87,3 +87,37 @@ export async function* streamChat(
   if (!response.body) return;
   yield* parseSse(response.body);
 }
+
+/**
+ * Follows the answer running in a conversation (`GET /api/chat/{id}/stream`):
+ * yields every event it has sent so far, then the rest as they arrive, and
+ * ends after `done` or `error`. Yields nothing when no answer is running
+ * (204): the stored conversation then holds the last answer.
+ *
+ * Throws an `ApiError` subclass when the request is refused, for example
+ * `NotFoundError` for a conversation that is not the user's. Aborting `signal`
+ * stops following; the answer itself keeps running on the server.
+ */
+export async function* followTurn(
+  conversationId: string,
+  signal?: AbortSignal,
+): AsyncGenerator<SseEvent, void, undefined> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/chat/${encodeURIComponent(conversationId)}/stream`, {
+      headers: { Accept: "text/event-stream" },
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new BackendUnreachableError(
+      "backend_unreachable",
+      "The server could not be reached. Try again.",
+      0,
+    );
+  }
+  if (response.status === 204) return;
+  if (!response.ok) throw await toApiError(response);
+  if (!response.body) return;
+  yield* parseSse(response.body);
+}

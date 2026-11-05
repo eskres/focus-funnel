@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ModelNotSetError } from "./api";
-import { COMMANDS, isDeleteCommand, streamChat } from "./chat";
+import { delta, done, errorResponse, fakeApi, streamOf, toolEvent } from "@/test/fake-api";
+
+import { BackendUnreachableError, NotFoundError, ModelNotSetError } from "./api";
+import { COMMANDS, followTurn, isDeleteCommand, streamChat } from "./chat";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -64,6 +66,68 @@ describe("streamChat", () => {
 
     expect(stored).toHaveBeenCalledWith("c9");
     expect(error).toBeInstanceOf(ModelNotSetError);
+  });
+});
+
+describe("followTurn", () => {
+  it("yields the running answer's events from the first, through the terminal event", async () => {
+    const { calls, fetchMock } = fakeApi({
+      "GET /api/chat/c1/stream": streamOf(
+        toolEvent("search_thoughts", "start"),
+        toolEvent("search_thoughts", "end", "Searched"),
+        delta("Hal"),
+        delta("f."),
+        done,
+      ),
+    });
+
+    const events = await drain(followTurn("c1"));
+
+    expect(events).toEqual([
+      { type: "tool", name: "search_thoughts", phase: "start" },
+      { type: "tool", name: "search_thoughts", phase: "end", summary: "Searched" },
+      { type: "delta", text: "Hal" },
+      { type: "delta", text: "f." },
+      { type: "done" },
+    ]);
+    expect(calls).toEqual([{ method: "GET", path: "/api/chat/c1/stream", body: undefined }]);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(new Headers(init.headers).get("Accept")).toBe("text/event-stream");
+  });
+
+  it("yields nothing when no answer is running (204)", async () => {
+    fakeApi({ "GET /api/chat/c1/stream": new Response(null, { status: 204 }) });
+
+    await expect(drain(followTurn("c1"))).resolves.toEqual([]);
+  });
+
+  it("throws NotFoundError for a conversation that is not the user's (404)", async () => {
+    fakeApi({ "GET /api/chat/c9/stream": errorResponse(404, "not_found", "Not found.") });
+
+    const error = await drain(followTurn("c9")).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(NotFoundError);
+    expect(error).toMatchObject({ code: "not_found", message: "Not found.", status: 404 });
+  });
+
+  it("throws BackendUnreachableError when the server cannot be reached", async () => {
+    fakeApi({
+      "GET /api/chat/c1/stream": () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+
+    await expect(drain(followTurn("c1"))).rejects.toBeInstanceOf(BackendUnreachableError);
+  });
+
+  it("passes the signal on, so leaving stops only the following", async () => {
+    const { fetchMock } = fakeApi({ "GET /api/chat/c1/stream": streamOf(done) });
+    const controller = new AbortController();
+
+    await drain(followTurn("c1", controller.signal));
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.signal).toBe(controller.signal);
   });
 });
 
