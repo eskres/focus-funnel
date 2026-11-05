@@ -147,7 +147,9 @@ def test_the_offer_call_returns_and_holds_a_proposal(client, alice, fake_llm, te
 
     assert response.status_code == 200, response.text
     offered = response.json()["proposal"]
-    assert offered["parts"] == [{**PROPOSAL, "thought_id": None, "saved_title": None, "deleted": False}]
+    assert offered["parts"] == [
+        {**PROPOSAL, "when": None, "when_choices": None, "thought_id": None, "saved_title": None, "deleted": False}
+    ]
     assert offered["position"] == 1
     request = fake_llm.chat_requests[0]
     # Not forced, so the model can decline when only small talk is left.

@@ -10,6 +10,7 @@ import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx2
 from sqlalchemy import select
@@ -36,6 +37,7 @@ from app.errors import ApiError, ErrorCode, output_limit_reached, tool_loop_limi
 from app.models import Conversation, Message, UsageEvent, User
 from app.ownership import not_found
 from app.provider_config import StreamUsage
+from app.thoughts.dates import DEFAULT_ZONE
 
 logger = logging.getLogger(__name__)
 
@@ -117,8 +119,12 @@ class Turn:
         held_parts: list[dict[str, Any]] | None = None,
         settings: Settings | None = None,
         http_client: httpx2.AsyncClient | None = None,
+        zone: ZoneInfo | None = None,
     ):
         self.session = session
+        # The user's zone, read once from the request: the search tool's days
+        # and the proposal's dates are in it (thought-dates design decision 3).
+        self.zone = zone or ZoneInfo(DEFAULT_ZONE)
         self.settings = settings or get_settings()
         self.http_client = http_client
         self.user = user
@@ -362,6 +368,7 @@ class Turn:
                     config=self.config.search,
                     conversation_id=self.conversation.id,
                     http_client=self.http_client,
+                    zone=self.zone,
                 )
                 result = found.text
                 extra = {"sources": found.sources}
@@ -371,7 +378,7 @@ class Turn:
                 result = ALREADY_PROPOSED
                 summary = "Already proposed in this answer"
             elif name == PROPOSE_TOOL:
-                parts = parse_proposal(arguments, self.filing.categories)
+                parts = parse_proposal(arguments, self.filing.categories, self.zone)
                 drop_held_note(self.context, self.held_parts)
                 self.held_parts = None
                 proposal, replaced = await write_proposal(

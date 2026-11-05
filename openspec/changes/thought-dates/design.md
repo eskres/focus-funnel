@@ -170,6 +170,18 @@ The partial index `ix_thoughts_user_id_starts_on` is declared like the GIN index
 
 **Alternatives:** a partial index on both databases with `sqlite_where`, as `uq_search_indexes_one_active` does (rejected: the design asks for one Postgres index, and nothing on SQLite needs it); `freezegun` (rejected: a new dev dependency for one clock).
 
+### 11. Details of the model's dates, settled while building them
+
+- The system prompt ends "Today is <Weekday> <YYYY-MM-DD>. Weeks start on Monday." The date is the user's local date for the turn and the offer; the context meter and a caller with no zone use the UTC date.
+- Every stored part has the keys `when` and `when_choices`, null when unused, so the stream event, the conversation, and the offer answer show one shape. Older stored parts without the keys read as null.
+- `parse_proposal()` counts only a non-empty `when_choices` list as choices; null or `[]` leaves `when` to stand. Two choices that are the same date count as one, which then becomes `when`. Any `time_zone` the model writes is ignored; the turn's zone is stamped.
+- The held-proposal note gives each part a `Date:` line after `Category:`: `Date: 2026-10-02T19:00`, `Date: 2026-11-03 to 2026-11-06`, `Date: 2026-10-02 or 2026-10-09 (not picked yet)`, or `Date: none`, as `Category: none` does.
+- `POST /api/conversations/{id}/proposal` takes an optional body, so an older frontend's empty POST still works (UTC).
+- Confirm checks the pick after the already-saved check, so a repeated confirm of a saved part still answers its thought, and before anything is stored: a card whose first part has `when_choices` and whose body has no `when` key gets 422 "when: pick a date, or no date". With a merge, only the first part's choices count, as merge keeps the first part's date.
+- The `dates` probe reads the search call's `dated_from`, `dated_to`, and `query` from the raw arguments, so it scores the model's call whether or not `parse_search()` accepts it yet.
+
+**Alternatives:** leave the date keys out of a part with no date (rejected: the conversation's answer model adds them as null anyway, so the event and the conversation would differ); refuse a confirm that picks a date outside the two choices (rejected in decision 2: the fields are the source of truth).
+
 ## Risks / Trade-offs
 
 - [The model gives two choices for a clear day, or one date for an unclear day] → Task 2.5 measures both on the preferred model. A wrong single date still shows on the card, where the user checks it before confirming.

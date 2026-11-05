@@ -12,7 +12,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 
 import httpx2
 from sqlalchemy import exists, select, text
@@ -59,17 +59,18 @@ class SearchResult:
         return self.words_only is not None and self.words_only.code == ErrorCode.EMBEDDING_MISMATCH
 
 
-def _as_start(value: date | datetime | None) -> datetime | None:
+def _as_start(value: date | datetime | None, zone: tzinfo | None = None) -> datetime | None:
+    """A start date is the user's local midnight in `zone` (UTC when not given)."""
     if value is None or isinstance(value, datetime):
         return value
-    return datetime.combine(value, time.min, tzinfo=UTC)
+    return datetime.combine(value, time.min, tzinfo=zone or UTC)
 
 
-def _as_end(value: date | datetime | None) -> datetime | None:
-    """An end date includes its whole day."""
+def _as_end(value: date | datetime | None, zone: tzinfo | None = None) -> datetime | None:
+    """An end date includes its whole local day in `zone` (UTC when not given)."""
     if value is None or isinstance(value, datetime):
         return value
-    return datetime.combine(value + timedelta(days=1), time.min, tzinfo=UTC)
+    return datetime.combine(value + timedelta(days=1), time.min, tzinfo=zone or UTC)
 
 
 def _vector_literal(vector: list[float]) -> str:
@@ -214,8 +215,12 @@ async def search_thoughts(
     conversation_id: uuid.UUID | None = None,
     http_client: httpx2.AsyncClient | None = None,
     config: SearchConfig | None = None,
+    zone: tzinfo | None = None,
 ) -> SearchResult:
     """The user's thoughts that match the query, best first. See the module docstring.
+
+    `since` and `until` given as dates are the user's local days in `zone`
+    (UTC when not given).
 
     Never raises for a provider problem: the search then runs by words only
     and `words_only` says why.
@@ -256,6 +261,7 @@ async def search_thoughts(
         until=until,
         newest_first=newest_first,
         config=config,
+        zone=zone,
     )
     result.words_only = outcome.error
     result.embedding_provider = (
@@ -277,6 +283,7 @@ async def rank(
     until: date | datetime | None = None,
     newest_first: bool = False,
     use_words: bool = True,
+    zone: tzinfo | None = None,
 ) -> SearchResult:
     """Run the ranking SQL for a query already embedded (or not, for words only).
 
@@ -287,8 +294,8 @@ async def rank(
     params = {
         "user_id": user.id,
         "tags": clean_tags(tags) or None,
-        "since": _as_start(since),
-        "until": _as_end(until),
+        "since": _as_start(since, zone),
+        "until": _as_end(until, zone),
         "query": query if use_words else "",
         "candidates": config.candidates,
         "rrf_k": config.rrf_k,

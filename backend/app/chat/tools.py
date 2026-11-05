@@ -5,6 +5,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx2
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,7 @@ from app.errors import ApiError, ErrorCode
 from app.models import User
 from app.provider_config import get_providers_config
 from app.thoughts.categories import clean_name
+from app.thoughts.dates import DEFAULT_ZONE, parse_when, when_of
 from app.thoughts.search import SearchResult, search_thoughts
 
 NO_MATCH = (
@@ -48,6 +50,9 @@ class ProposalPart:
     summary: str
     tags: list[str]
     category: str | None
+    # The date, {start, end, time_zone}, or two choices of it, never both.
+    when: dict[str, Any] | None = None
+    when_choices: list[dict[str, Any]] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """The part as stored on a proposal row, not yet saved."""
@@ -56,11 +61,51 @@ class ProposalPart:
             "summary": self.summary,
             "tags": self.tags,
             "category": self.category,
+            "when": self.when,
+            "when_choices": self.when_choices,
             "thought_id": None,
         }
 
 
-def _parse_part(item: Any, where: str, categories: list[str]) -> ProposalPart:
+def _checked_date(value: Any, zone: ZoneInfo) -> dict[str, Any] | None:
+    """A date from the model, with the turn's zone, or None when it fails the store's check."""
+    if not isinstance(value, dict):
+        return None
+    try:
+        # The model never names a zone: the server stamps the turn's.
+        columns = parse_when(
+            {"start": value.get("start"), "end": value.get("end"), "time_zone": zone.key}
+        )
+    except ApiError:
+        return None
+    return when_of(columns)
+
+
+def _dates(item: dict[str, Any], zone: ZoneInfo) -> tuple[dict | None, list[dict] | None]:
+    """A part's date or its two choices (thought-dates design decision 2).
+
+    Choices win over a single date; a choice that fails the check is dropped;
+    one choice left becomes the date; more than two keep the first two. A date
+    that fails the check is dropped, and the rest of the part is kept.
+    """
+    choices = item.get("when_choices")
+    if isinstance(choices, list) and choices:
+        valid: list[dict[str, Any]] = []
+        for choice in choices:
+            checked = _checked_date(choice, zone)
+            if checked is not None and checked not in valid:
+                valid.append(checked)
+        if not valid:
+            return None, None
+        if len(valid) == 1:
+            return valid[0], None
+        return None, valid[:2]
+    return _checked_date(item.get("when"), zone), None
+
+
+def _parse_part(
+    item: Any, where: str, categories: list[str], zone: ZoneInfo
+) -> ProposalPart:
     if not isinstance(item, dict):
         raise ToolArgumentError(f"{where} must be an object")
     title = item.get("title")
@@ -82,27 +127,34 @@ def _parse_part(item: Any, where: str, categories: list[str]) -> ProposalPart:
             cleaned_tags.append(tag)
     # A category the user does not have is dropped, so the card shows none.
     named = clean_name(category) if isinstance(category, str) else None
+    when, when_choices = _dates(item, zone)
     return ProposalPart(
         title=title.strip(),
         summary=summary.strip(),
         tags=cleaned_tags,
         category=named if named in categories else None,
+        when=when,
+        when_choices=when_choices,
     )
 
 
-def parse_proposal(arguments: dict[str, Any], categories: list[str]) -> list[ProposalPart]:
-    """The parts of a propose_thought call.
+def parse_proposal(
+    arguments: dict[str, Any], categories: list[str], zone: ZoneInfo | None = None
+) -> list[ProposalPart]:
+    """The parts of a propose_thought call, each date stamped with the turn's zone.
 
     The call's shape is {"thoughts": [...]}. A call with title, summary, and
     tags at the top, as the tool once took, is read as one part.
     """
+    zone = zone or ZoneInfo(DEFAULT_ZONE)
     if "thoughts" not in arguments and "title" in arguments:
-        return [_parse_part(arguments, "", categories)]
+        return [_parse_part(arguments, "", categories, zone)]
     items = arguments.get("thoughts")
     if not isinstance(items, list) or not 1 <= len(items) <= MAX_PARTS:
         raise ToolArgumentError(f"thoughts must be a list of 1 to {MAX_PARTS} thoughts")
     return [
-        _parse_part(item, f"thoughts[{index}].", categories) for index, item in enumerate(items)
+        _parse_part(item, f"thoughts[{index}].", categories, zone)
+        for index, item in enumerate(items)
     ]
 
 
@@ -220,8 +272,11 @@ async def search_tool_result(
     config: SearchConfig,
     conversation_id: uuid.UUID | None = None,
     http_client: httpx2.AsyncClient | None = None,
+    zone: ZoneInfo | None = None,
 ) -> SearchToolResult:
-    """The search tool's result for the model. A failed search becomes a note, never an error."""
+    """The search tool's result for the model. A failed search becomes a note, never an error.
+
+    The dates are the user's local days in `zone` (UTC when not given)."""
     result = await search_thoughts(
         session,
         user,
@@ -229,6 +284,7 @@ async def search_tool_result(
         settings=settings,
         tags=arguments.tags,
         since=arguments.since,
+        zone=zone,
         conversation_id=conversation_id,
         http_client=http_client,
         config=config,
