@@ -30,7 +30,13 @@ from app.chat.prompt import (
     tools_for,
     unsaved_parts,
 )
-from app.chat.refs import Refs, SeenThought, conversation_refs, resolve_additions
+from app.chat.refs import (
+    Refs,
+    SeenThought,
+    conversation_refs,
+    resolve_additions,
+    saved_ids,
+)
 from app.chat.similar import Check, candidates_note, check_parts, with_similar
 from app.chat.tools import ProposalPart, ToolArgumentError, parse_proposal
 from app.chat.usage import completion_usage, record_usage
@@ -122,13 +128,29 @@ def discussion_start(proposals: list[Proposal]) -> int:
 
 
 async def refs_for(
-    session: AsyncSession, conversation: Conversation, messages: list[Message] | None = None
+    session: AsyncSession,
+    conversation: Conversation,
+    messages: list[Message] | None = None,
+    *,
+    before_next_row: bool = False,
 ) -> Refs:
-    """The conversation's refs as its rows stand now (design decision 2)."""
+    """The conversation's refs as its rows stand now (design decision 2).
+
+    A running turn passes `before_next_row` for refs it numbers new thoughts
+    from and stores in its next row. A card confirmed while the turn runs is
+    stamped at that row's position, and counts after the row's thoughts
+    there, so it is left out now and numbered after them, as every later
+    load numbers it: a number the model is shown never moves.
+    """
     if messages is None:
         messages = await list_messages(session, conversation)
     proposals = await list_proposals(session, conversation)
-    return await conversation_refs(session, conversation.user_id, messages, proposals)
+    seen_before = None
+    if before_next_row:
+        seen_before = messages[-1].position + 1 if messages else 0
+    return await conversation_refs(
+        session, conversation.user_id, messages, proposals, seen_before=seen_before
+    )
 
 
 async def raw_text_for(
@@ -397,7 +419,9 @@ async def offer_proposal(
         http_client=http_client,
     )
     refs = await conversation_refs(session, user.id, messages, proposals)
-    seen_note = refs.note(config.filing)
+    # Every thought the conversation filed is listed, past the cap, so the
+    # model can add to it rather than file it again.
+    seen_note = refs.note(config.filing, keep=saved_ids(proposals))
 
     async def check(parts: list[ProposalPart], again: bool) -> Check:
         return await check_parts(

@@ -284,10 +284,20 @@ def candidates_note(
 
 def with_similar(stored: list[dict[str, Any]], check: Check) -> list[dict[str, Any]]:
     """The stored parts, each new part with a strong match naming it as
-    `similar` (layer 3)."""
+    `similar` (layer 3). Two parts of one proposal never add to one thought,
+    so a thought several parts match strongly is named on the closest only
+    (the first of equals)."""
+    # The best (similarity, -index) per thought: the closest, then the first.
+    closest: dict[uuid.UUID, tuple[float, int]] = {}
+    for index, part_check in enumerate(check.parts):
+        strong = part_check.strong
+        if strong is not None:
+            score = (strong.similarity or 0.0, -index)
+            closest[strong.thought.id] = max(closest.get(strong.thought.id, score), score)
+    named = {-index for _, index in closest.values()}
     return [
         {**part, "similar": {"thought_id": str(part_check.strong.thought.id)}}
-        if part_check.strong is not None
+        if part_check.strong is not None and index in named
         else part
-        for part, part_check in zip(stored, check.parts)
+        for index, (part, part_check) in enumerate(zip(stored, check.parts))
     ]

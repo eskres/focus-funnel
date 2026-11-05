@@ -153,6 +153,9 @@ class Turn:
         # proposal call skips layer 2, and the next round must make it.
         self._checked = False
         self._force_propose = False
+        # Set during the last round the limit allows: no round is left to
+        # force a proposal in, so a proposal call skips layer 2.
+        self._last_round = False
         # The round being read, until it is stored: an interrupted turn keeps its text.
         self._in_flight: RoundState | None = None
         # Set when the turn was cancelled (server shutdown): its settle step
@@ -226,6 +229,7 @@ class Turn:
     async def _rounds(self) -> AsyncIterator[Event]:
         last_answer: Message | None = None
         for round_number in range(self.config.tool_rounds):
+            self._last_round = round_number == self.config.tool_rounds - 1
             if round_number == 0:
                 assert self._first_chunks is not None, "open() first"
                 chunks = self._first_chunks
@@ -385,7 +389,7 @@ class Turn:
                     conversation_id=self.conversation.id,
                     http_client=self.http_client,
                     zone=self.zone,
-                    refs=await refs_for(self.session, self.conversation),
+                    refs=await refs_for(self.session, self.conversation, before_next_row=True),
                 )
                 result = found.text
                 extra = {"sources": found.sources}
@@ -430,10 +434,13 @@ class Turn:
         part has candidates, nothing is written: the result lists them by ref
         and the next round must propose again, once, with no second candidate
         round. A candidate round writes no proposal, so the one-proposal rule
-        still allows that call.
+        still allows that call. In the last round the limit allows, no round
+        is left for that call, so layer 2 is skipped and the proposal is
+        written at once, with its strong matches named: the user always gets
+        a card.
         """
         parts = parse_proposal(arguments, self.filing.categories, self.zone)
-        refs = await refs_for(self.session, self.conversation)
+        refs = await refs_for(self.session, self.conversation, before_next_row=True)
         check = await check_parts(
             self.session,
             self.user,
@@ -441,7 +448,7 @@ class Turn:
             refs,
             config=self.config,
             settings=self.settings,
-            again=self._checked,
+            again=self._checked or self._last_round,
             conversation_id=self.conversation.id,
             http_client=self.http_client,
         )

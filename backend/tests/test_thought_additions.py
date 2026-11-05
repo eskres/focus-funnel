@@ -379,6 +379,36 @@ def test_the_similar_hint_confirms_as_an_addition_with_the_version_it_shows(
     assert thought(client, alice, lock["id"])["summary"] == ADDED["summary"]
 
 
+def test_two_parts_of_one_proposal_never_add_to_one_thought(client, alice, lock, test_database_url):
+    """Two cards whose hints both named the lock: the second, even confirmed
+    against the current version, is refused and nothing is added twice."""
+    hinted = part(title="Black D-lock") | {"similar": {"thought_id": lock["id"]}}
+    proposal_id = seed_proposal(
+        test_database_url,
+        lock["conversation_id"],
+        [hinted, hinted | {"title": "Lock prices"}],
+        position=5,
+        from_position=2,
+        to_position=4,
+    )
+    first = add(
+        client, alice, lock["conversation_id"], proposal_id, 0,
+        add_to=lock["id"], based_on=lock["updated_at"],
+    )
+    assert first.status_code == 200, first.text
+    now = thought(client, alice, lock["id"])
+
+    second = add(
+        client, alice, lock["conversation_id"], proposal_id, 1,
+        add_to=lock["id"], based_on=now["updated_at"],
+    )
+
+    assert second.status_code == 409, second.text
+    assert error_code(second) == "proposal_part_saved"
+    assert len(additions_rows(test_database_url, lock["id"])) == 1
+    assert thought(client, alice, lock["id"])["updated_at"] == now["updated_at"]
+
+
 def test_two_additions_from_one_conversation_add_each_message_once(
     client, alice, lock, proposed, test_database_url
 ):

@@ -435,6 +435,31 @@ def test_the_offer_names_the_seen_thoughts_in_place_of_the_filed_titles(
     assert not any("already filed from this conversation" in note for note in notes)
 
 
+def test_the_offer_names_a_filed_thought_past_the_cap(
+    client, alice, fake_llm, test_database_url, turn_user
+):
+    """A search after the filing fills the cap with other thoughts: the filed
+    one is still listed, by its ref, so the model can add to it."""
+    url = test_database_url
+    lock = seed_thought(url, turn_user, "Buy new bike lock", category="task")
+    others = [seed_thought(url, turn_user, f"Other lock {n}") for n in range(3)]
+    conversation_id = seed_conversation(
+        url, client, alice, messages=("/push buy new bike lock", "Filed.", "/pull locks", "Found three.")
+    )
+    seed_proposal(
+        url, conversation_id, [part(title="Buy new bike lock", thought_id=lock) | {"seen_position": 2}],
+        hold=False,
+    )
+    seed_tool(url, conversation_id, 4, sources=others)
+    fake_llm.queue(completion("nothing"))
+
+    offer(client, alice, conversation_id)
+
+    seen = system_notes(fake_llm.chat_requests[0])[-2]
+    assert "T1 · Buy new bike lock" in seen
+    assert all(f"Other lock {n}" in seen for n in range(3))
+
+
 def test_the_offer_with_no_seen_thought_keeps_only_the_offer_note(
     client, alice, fake_llm, test_database_url, turn_user
 ):

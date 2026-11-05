@@ -67,13 +67,21 @@ def _position(value: Any, fallback: int) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else fallback
 
 
-def appearances(messages: Sequence[Message], proposals: Sequence[Proposal]) -> list[uuid.UUID]:
+def appearances(
+    messages: Sequence[Message],
+    proposals: Sequence[Proposal],
+    *,
+    seen_before: int | None = None,
+) -> list[uuid.UUID]:
     """Every thought id the rows name, in the order the conversation saw them,
     repeats included: the first of an id fixes its number, the last says how
     recently it was seen.
 
     Within one position, a tool message's sources come first, then its
     candidates, then the parts of the proposals there, by part index.
+
+    With `seen_before`, a confirmed part stamped at that position or later
+    is left out: a row the turn stores there will be numbered before it.
     """
     found: list[tuple[tuple[int, ...], uuid.UUID]] = []
     for message in messages:
@@ -101,6 +109,8 @@ def appearances(messages: Sequence[Message], proposals: Sequence[Proposal]) -> l
             )
             for kind, (value, position) in enumerate(named):
                 thought_id = _thought_id(value)
+                if kind == 2 and seen_before is not None and position >= seen_before:
+                    continue
                 if thought_id is not None:
                     found.append(((position, 1, order, index, kind), thought_id))
     found.sort(key=lambda item: item[0])
@@ -178,9 +188,16 @@ class Refs:
         """The ref of each seen thought that exists, by its id as text."""
         return {str(thought.id): thought.ref for thought in self.thoughts.values()}
 
-    def note(self, filing: FilingConfig) -> str | None:
-        """The seen-thoughts note, or None when no seen thought exists."""
-        return seen_thoughts_note(self.seen(), filing.seen_thoughts, filing.seen_summary_chars)
+    def note(
+        self, filing: FilingConfig, keep: set[uuid.UUID] | frozenset[uuid.UUID] = frozenset()
+    ) -> str | None:
+        """The seen-thoughts note, or None when no seen thought exists: the
+        `filing.seen_thoughts` most recently seen, and every thought in
+        `keep` past them (the offer keeps the thoughts the conversation filed)."""
+        seen = self.seen()
+        cap = filing.seen_thoughts
+        listed = seen[:cap] + [thought for thought in seen[cap:] if thought.id in keep]
+        return seen_thoughts_note(listed, len(listed), filing.seen_summary_chars)
 
 
 async def conversation_refs(
@@ -188,10 +205,12 @@ async def conversation_refs(
     user_id: uuid.UUID,
     messages: Sequence[Message],
     proposals: Sequence[Proposal],
+    *,
+    seen_before: int | None = None,
 ) -> Refs:
     """The conversation's refs from the rows a turn loads anyway, with one
-    query for the thoughts they name."""
-    order = appearances(messages, proposals)
+    query for the thoughts they name. `seen_before` as for appearances()."""
+    order = appearances(messages, proposals, seen_before=seen_before)
     distinct = list(dict.fromkeys(order))
     if not distinct:
         return Refs([], {}, [])
@@ -237,6 +256,16 @@ async def conversation_refs(
     }
     recent = [thought_id for thought_id in dict.fromkeys(reversed(order)) if thought_id in thoughts]
     return Refs(numbered, thoughts, recent)
+
+
+def saved_ids(proposals: Sequence[Proposal]) -> set[uuid.UUID]:
+    """The thoughts the conversation's confirmed parts saved or added to."""
+    return {
+        thought_id
+        for proposal in proposals
+        for part in proposal.parts or []
+        if isinstance(part, dict) and (thought_id := _thought_id(part.get("thought_id")))
+    }
 
 
 def resolve_additions(parts: list[dict[str, Any]], refs: Refs) -> list[dict[str, Any]]:

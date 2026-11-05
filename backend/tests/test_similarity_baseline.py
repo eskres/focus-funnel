@@ -329,3 +329,35 @@ def test_cut_offs_without_a_baseline_and_with_the_floor():
     assert (cutoffs(qwen, config).candidate, cutoffs(qwen, config).strong) == pytest.approx(
         (0.38, 0.48)
     )
+
+
+def test_a_failed_baseline_commit_still_answers_the_stored_thought(
+    test_database_url, fake, alice_id, monkeypatch, caplog
+):
+    """The baseline's own commit fails (a dropped connection): the store,
+    committed before it, still answers its thought, and the old baseline stays."""
+    small_baseline(monkeypatch, 5)
+    index_id = seed_index(
+        test_database_url, alice_id, 10, similarity_p95=0.3, similarity_p99=0.5, baseline_thoughts=6
+    )
+    measured = baseline.percentiles
+
+    async def then_fail_the_commit(session, index_id, heads):
+        result = await measured(session, index_id, heads)
+        dialect = session.bind.dialect
+
+        def lost(dbapi_connection):
+            del dialect.do_commit
+            raise ConnectionError("the connection was lost")
+
+        dialect.do_commit = lost
+        return result
+
+    monkeypatch.setattr(baseline, "percentiles", then_fail_the_commit)
+
+    thought_id = store(test_database_url, alice_id, fake, "Oat milk")
+
+    assert run_db(test_database_url, lambda s: s.get(Thought, thought_id)).title == "Oat milk"
+    row = index_row(test_database_url, index_id)
+    assert (row.similarity_p95, row.similarity_p99, row.baseline_thoughts) == (0.3, 0.5, 6)
+    assert "Could not store the similarity baseline" in caplog.text

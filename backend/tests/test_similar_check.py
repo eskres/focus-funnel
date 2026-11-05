@@ -17,7 +17,7 @@ from app.chat.config import get_chat_config
 from app.chat.prompt import forced_tool
 from app.chat.similar import REPEATED_TASK, Query, check_parts, find_similar
 from app.chat.tools import ALREADY_PROPOSED, ProposalPart
-from app.models import Message, Proposal, SearchIndex, Thought
+from app.models import Conversation, Message, Proposal, SearchIndex, Thought
 from app.thoughts.baseline import cutoffs
 from app.thoughts.search import search_by_vector, search_thoughts
 from app.thoughts.store import store_thought
@@ -539,6 +539,114 @@ def test_the_round_limit_still_ends_a_looping_model(client, alice, test_database
     messages, proposals = stored_rows(test_database_url, conversation_id)
     assert len(proposals) == 1
     assert [m.error_code for m in messages if m.role == "assistant"][-1] == "tool_loop_limit"
+
+
+def search_round(query: str, call_id: str) -> list:
+    return tool_call_chunks("search_thoughts", json.dumps({"query": query}), call_id=call_id)
+
+
+def test_a_proposal_in_the_last_round_is_shown_without_a_candidate_round(
+    client, alice, test_database_url, fake, seeded
+):
+    """No round is left to propose again in, so the card is written at once,
+    with its strong match named, before the round limit ends the turn."""
+    ids, conversation_id = seeded
+    fake.queue(
+        search_round("maps", "call_1"),
+        search_round("atlas", "call_2"),
+        propose_round(podcast_args(), call_id="call_3"),
+    )
+
+    response = chat(client, alice, "on cartography and old maps", conversation_id)
+
+    assert len(fake.chat_requests) == get_chat_config().tool_rounds == 3
+    assert tool_summaries(response)[-1] == "Proposed a thought to file"
+    [proposal] = events_of(response, "proposal")
+    [stored] = proposal["parts"]
+    assert stored["add_to"] is None
+    assert stored["similar"]["thought_id"] == ids["podcast"]
+    [error] = events_of(response, "error")
+    assert error["error"]["code"] == "tool_loop_limit"
+    _, proposals = stored_rows(test_database_url, conversation_id)
+    assert len(proposals) == 1
+
+
+def test_two_parts_that_match_one_thought_name_it_on_one_card_only(
+    client, alice, test_database_url, fake, seeded
+):
+    """Two parts of one proposal never add to one thought, so the hint names
+    a thought on one part only."""
+    ids, conversation_id = seeded
+    atlas = podcast_args(
+        title="Atlas podcast",
+        summary="A podcast on atlas makers and their maps.",
+        new=True,
+    )
+    fake.queue(propose_round(podcast_args(new=True), atlas), text_chunks("Ready."))
+
+    response = chat(client, alice, "on cartography and old maps, and atlas makers", conversation_id)
+
+    [proposal] = events_of(response, "proposal")
+    named = [p["similar"]["thought_id"] for p in proposal["parts"] if p["similar"] is not None]
+    assert named == [ids["podcast"]]
+
+
+def test_a_card_confirmed_while_the_turn_runs_does_not_renumber_its_candidates(
+    client, alice, test_database_url, fake, seeded, monkeypatch
+):
+    """The user confirms an older card after the turn stored its tool call and
+    before it numbers the candidates. The card counts after the candidate
+    message, so the ref the model is shown for a candidate is the one every
+    later load gives it, and the model's add_to names that thought."""
+    from app.chat import turn as turn_module
+    from app.chat.conversations import next_position
+    from tests.chat_helpers import part, seed_proposal
+
+    ids, conversation_id = seeded
+    older = seed_proposal(
+        test_database_url, conversation_id, [part(title="Dentist")], position=1, hold=False
+    )
+    real_refs_for = turn_module.refs_for
+    confirmed = []
+
+    async def confirm_first(session, conversation, *args, **kwargs):
+        if not confirmed:
+            # As confirm_proposal leaves it: the part names the thought, seen now.
+            proposal = await session.get(Proposal, uuid.UUID(older))
+            seen = await next_position(session, conversation)
+            proposal.parts = [
+                {**proposal.parts[0], "thought_id": ids["dentist"], "seen_position": seen}
+            ]
+            await session.commit()
+            confirmed.append(seen)
+        return await real_refs_for(session, conversation, *args, **kwargs)
+
+    monkeypatch.setattr(turn_module, "refs_for", confirm_first)
+    fake.queue(
+        propose_round(podcast_args()),
+        propose_round(podcast_args(add_to="T1"), call_id="call_2"),
+        text_chunks("Ready."),
+    )
+
+    response = chat(client, alice, "on cartography and old maps", conversation_id)
+
+    assert response.status_code == 200, response.text
+    [listing] = tool_results(fake.chat_requests[1])
+    assert "T1 · Podcast about maps · filed " in listing
+    [proposal] = events_of(response, "proposal")
+    assert proposal["parts"][0]["add_to"] == ids["podcast"]
+    # Every later load numbers the candidate as the model was shown it.
+    messages, _ = stored_rows(test_database_url, conversation_id)
+
+    async def load(session):
+        conversation = await session.get(Conversation, uuid.UUID(conversation_id))
+        return await real_refs_for(session, conversation)
+
+    refs = run_db(test_database_url, load)
+    assert refs.ref_of(uuid.UUID(ids["podcast"])) == "T1"
+    assert refs.ref_of(uuid.UUID(ids["dentist"])) is not None
+    [candidate_message] = [m for m in messages if m.role == "tool" and "similar" in (m.details or {})]
+    assert candidate_message.position == confirmed[0]
 
 
 # --- 3.3: layers 2 and 3 in the offer ---

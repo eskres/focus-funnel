@@ -148,9 +148,19 @@ async def measure_baseline(
             p95, p99 = await percentiles(session, index.id, heads)
             index.similarity_p95, index.similarity_p99 = p95, p99
             index.baseline_thoughts = count
-        await session.commit()
     except Exception:
         logger.exception("Could not measure the similarity baseline of search index %s", index.id)
+        return False
+    try:
+        await session.commit()
+    except Exception:
+        logger.exception("Could not store the similarity baseline of search index %s", index.id)
+        # A failed commit leaves the session unusable until it rolls back:
+        # the caller's next query (store_thought's refresh) would fail.
+        try:
+            await session.rollback()
+        except Exception:
+            logger.exception("Could not roll back after the similarity baseline")
         return False
     logger.info(
         "Search index %s baseline: p95 %.3f, p99 %.3f over %d thoughts", index.id, p95, p99, count

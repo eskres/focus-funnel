@@ -592,6 +592,19 @@ async def confirm_addition(
     target_id = body.add_to or (uuid.UUID(str(part["add_to"])) if part.get("add_to") else None)
     if target_id is None:
         raise ApiError(422, ErrorCode.VALIDATION_ERROR, "add_to: name the thought to add to")
+    # Two parts of one proposal never add to one thought. The proposal row
+    # is locked, so a concurrent confirm of another part cannot slip past.
+    if any(
+        other.get("thought_id") == str(target_id)
+        for index, other in enumerate(proposal.parts)
+        if index != indexes[0]
+    ):
+        raise ApiError(
+            409,
+            ErrorCode.PROPOSAL_PART_SAVED,
+            "Another part of this proposal was saved to that thought already. "
+            "File this one as a new thought instead.",
+        )
     thought = await lock_thought(session, user, target_id)
     if thought is None:
         raise target_gone()
