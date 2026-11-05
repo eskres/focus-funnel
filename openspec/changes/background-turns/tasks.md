@@ -29,4 +29,5 @@
 
 ## 6. Specs and checks
 
-- [ ] 6.1 Run `openspec validate background-turns --strict`, the full default and `postgres` pytest runs, and the frontend vitest run and type check, and check that all pass
+- [x] 6.1 Run `openspec validate background-turns --strict`, the full default and `postgres` pytest runs, and the frontend vitest run and type check, and check that all pass
+  - Passed on 2026-11-05 at `34edbda`. `openspec validate background-turns --strict`: valid. Backend on SQLite: 664 passed (102 `postgres` tests deselected). Backend `-m postgres` on Postgres 18 with pgvector (`TEST_DATABASE_URL`): 102 passed. Frontend: `npx next typegen && npx tsc --noEmit` and `npm run lint` exit 0, `npx vitest run` 389 passed in 30 files.
