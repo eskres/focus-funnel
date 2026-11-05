@@ -41,10 +41,24 @@ function messageFor(error: unknown): string {
   return error instanceof ApiError ? error.message : "Something went wrong. Try again.";
 }
 
-/** A provider the user can choose models from: one with a saved key, or a saved keyless one. */
+/**
+ * A provider the user can choose models from: one with a saved key, or a
+ * keyless one. A keyless preset needs no saved row (the server sends it a
+ * placeholder key), but the custom provider does, because its base URL lives
+ * there.
+ */
 function usable(provider: ProviderStatus): boolean {
-  return provider.key_saved || (!provider.key_required && Boolean(provider.key_saved_at));
+  return (
+    provider.key_saved ||
+    (!provider.key_required && (!provider.is_custom || Boolean(provider.key_saved_at)))
+  );
 }
+
+/**
+ * Fired on `window` after the model settings are saved, so other parts of the
+ * page (the setup wizard's status) can read them again.
+ */
+export const MODEL_SETTINGS_CHANGED = "focus-funnel:model-settings-changed";
 
 /**
  * The chat model settings: a loadout of up to five models, one marked as the
@@ -238,6 +252,7 @@ export function ModelSettingsSection() {
       );
       applySettings(result, nextKey);
       setSaved(true);
+      window.dispatchEvent(new Event(MODEL_SETTINGS_CHANGED));
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
         redirectToLogin("/settings");

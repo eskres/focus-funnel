@@ -12,6 +12,10 @@ import { prepareDemoCall } from "@/lib/demo-proxy";
 // client-sent Authorization header are deliberately not forwarded.
 const FORWARDED_REQUEST_HEADERS = ["accept", "accept-language", "content-type"];
 
+// The setup token goes only to the backend's setup routes, never through the
+// list above, so no other route (or anything that logs its headers) gets it.
+const SETUP_TOKEN_HEADER = "x-setup-token";
+
 // Response headers passed back to the browser. Everything else (Set-Cookie,
 // WWW-Authenticate, Server, hop-by-hop and encoding headers) is dropped.
 const FORWARDED_RESPONSE_HEADERS = [
@@ -125,6 +129,10 @@ async function forward(request: Request, context: ProxyContext): Promise<Respons
   for (const name of FORWARDED_REQUEST_HEADERS) {
     const value = request.headers.get(name);
     if (value !== null) headers.set(name, value);
+  }
+  if (path[0] === "setup") {
+    const token = request.headers.get(SETUP_TOKEN_HEADER);
+    if (token !== null) headers.set(SETUP_TOKEN_HEADER, token);
   }
   if (demoCall?.providerKeys) headers.set(PROVIDER_KEYS_HEADER, demoCall.providerKeys);
 

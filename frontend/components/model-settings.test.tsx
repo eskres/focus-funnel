@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { errorResponse, fakeApi, json, loadout, loadoutEntry } from "@/test/fake-api";
 
-import { ModelSettingsSection } from "./model-settings";
+import { MODEL_SETTINGS_CHANGED, ModelSettingsSection } from "./model-settings";
 import { ProvidersSettings } from "./providers-settings";
 
 vi.mock("@/lib/redirect-to-login", () => ({ redirectToLogin: vi.fn() }));
@@ -318,6 +318,160 @@ describe("ModelSettingsSection", () => {
       await waitFor(() =>
         expect(screen.queryByText("Add a provider API key to choose chat models.")).not.toBeInTheDocument(),
       );
+    });
+  });
+  describe("keyless providers", () => {
+    const local = {
+      id: "local",
+      label: "Local Ollama",
+      key_url: "",
+      notice: "",
+      key_required: false,
+      is_custom: false,
+      key_saved: false,
+    };
+    const custom = {
+      id: "custom",
+      label: "Custom provider",
+      key_url: "",
+      notice: "",
+      key_required: false,
+      is_custom: true,
+      key_saved: false,
+    };
+    const localModels = { models: [{ id: "qwen3:1.7b", features: { tool_calling: "supported" } }] };
+
+    function keylessApi(providers: unknown[]) {
+      return fakeApi({
+        "GET /api/settings/models": json(200, loadout()),
+        "GET /api/providers": json(200, { providers, custom_provider_allowed: true }),
+        "GET /api/providers/local/models": json(200, localModels),
+        "GET /api/providers/custom/models": json(200, localModels),
+        "GET /api/settings/models/efforts": json(200, { efforts: [] }),
+      });
+    }
+
+    async function providerOptions() {
+      fireEvent.click(await screen.findByRole("button", { name: "Add a model" }));
+      const select = await screen.findByLabelText("Model 1 provider");
+      return within(select)
+        .queryAllByRole("option")
+        .map((option) => option.textContent);
+    }
+
+    it("offers a keyless preset's models with no saved row", async () => {
+      keylessApi([nvidiaNoKey, local]);
+      render(<ModelSettingsSection />);
+      await screen.findByText("Not set");
+
+      expect(screen.queryByText("Add a provider API key to choose chat models.")).not.toBeInTheDocument();
+      expect(await providerOptions()).toEqual(["Local Ollama"]);
+      const model = screen.getByLabelText("Model 1 model");
+      expect(await within(model).findByRole("option", { name: "qwen3:1.7b" })).toBeInTheDocument();
+    });
+
+    it("offers a keyless preset in a demo-shaped status, which has no key_saved_at", async () => {
+      keylessApi([{ ...nvidiaNoKey, key_held: false }, { ...local, key_held: false }]);
+      render(<ModelSettingsSection />);
+      await screen.findByText("Not set");
+
+      expect(await providerOptions()).toEqual(["Local Ollama"]);
+      const model = screen.getByLabelText("Model 1 model");
+      expect(await within(model).findByRole("option", { name: "qwen3:1.7b" })).toBeInTheDocument();
+    });
+
+    it("does not offer a keyless custom provider with no saved row", async () => {
+      keylessApi([nvidiaNoKey, custom]);
+      render(<ModelSettingsSection />);
+
+      expect(await screen.findByText("Add a provider API key to choose chat models.")).toBeInTheDocument();
+      expect(await providerOptions()).toEqual(["Choose a provider"]);
+    });
+
+    it("offers a keyless custom provider once its row is saved", async () => {
+      keylessApi([
+        nvidiaNoKey,
+        { ...custom, base_url: "http://localhost:11434/v1/", key_saved_at: "2026-09-24T10:00:00Z" },
+      ]);
+      render(<ModelSettingsSection />);
+      await screen.findByText("Not set");
+
+      expect(screen.queryByText("Add a provider API key to choose chat models.")).not.toBeInTheDocument();
+      expect(await providerOptions()).toEqual(["Custom provider"]);
+    });
+  });
+
+  describe("the model settings changed event", () => {
+    function listen() {
+      const listener = vi.fn();
+      window.addEventListener(MODEL_SETTINGS_CHANGED, listener);
+      return {
+        listener,
+        stop: () => window.removeEventListener(MODEL_SETTINGS_CHANGED, listener),
+      };
+    }
+
+    it("is dispatched once after a successful save", async () => {
+      api(loadout(), {
+        "PUT /api/settings/models": json(200, loadout([loadoutEntry(NANO, { is_default: true })])),
+      });
+      const { listener, stop } = listen();
+      try {
+        render(<ModelSettingsSection />);
+        await screen.findByText("Not set");
+        await addModel(NANO, 1);
+        expect(listener).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole("button", { name: "Save models" }));
+
+        expect(await screen.findByText("Saved.")).toBeInTheDocument();
+        expect(listener).toHaveBeenCalledTimes(1);
+      } finally {
+        stop();
+      }
+    });
+
+    it("is not dispatched when the server refuses the save", async () => {
+      api(loadout(), {
+        "PUT /api/settings/models": errorResponse(
+          400,
+          "model_unknown",
+          `Nebius Token Factory does not list the model '${BIG}' for your key.`,
+        ),
+      });
+      const { listener, stop } = listen();
+      try {
+        render(<ModelSettingsSection />);
+        await screen.findByText("Not set");
+        await addModel(BIG, 1);
+
+        fireEvent.click(screen.getByRole("button", { name: "Save models" }));
+
+        expect(await screen.findByRole("alert")).toHaveTextContent(BIG);
+        expect(listener).not.toHaveBeenCalled();
+      } finally {
+        stop();
+      }
+    });
+
+    it("is not dispatched when the form refuses the save before sending it", async () => {
+      api(loadout());
+      const { listener, stop } = listen();
+      try {
+        render(<ModelSettingsSection />);
+        await screen.findByText("Not set");
+        fireEvent.click(await screen.findByRole("button", { name: "Add a model" }));
+        await screen.findByLabelText("Model 1 model");
+
+        fireEvent.click(screen.getByRole("button", { name: "Save models" }));
+
+        expect(await screen.findByRole("alert")).toHaveTextContent(
+          "Choose a model in every slot, or remove the empty slot.",
+        );
+        expect(listener).not.toHaveBeenCalled();
+      } finally {
+        stop();
+      }
     });
   });
 });

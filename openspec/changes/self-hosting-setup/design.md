@@ -301,6 +301,14 @@ Decision 7 fixes the items and their rules; these choices fill in what it leaves
 
 *Alternatives:* extra structured fields on the items for the login values (rejected: the spec's item shape has none, and the wizard can render messages); a `failed` search key for any undecryptable row (rejected: it would block finishing on an install whose search works).
 
+### 19. How the wizard page tells "closed" from "needs the token"
+
+Decision 9 puts the token field first, and the spec says a logged-in user who opens `/setup` after setup has finished is told it is not open. The backend answers 404 before it reads the token (decision 6), so the page asks once without one. On load, with no token kept in the tab, it calls `GET /api/setup/status` without `X-Setup-Token`: 404 shows "Setup is not open on this server." with links to Settings and the app, and 403 shows the token form with no error (the refusal is shown only for a token the operator entered or the tab kept). With a kept token it calls with that token, and a 403 or 404 forgets it as decision 9 says. A 401 sends the user to log in with `returnTo=/setup`. Other failures show their message: on the token form while the steps are not yet shown, or above the steps when a refresh fails, which keep the last status.
+
+The steps render the status as it comes: each item's name, state, message, and `settings`. The login step adds the mode and the union of the `login` and `allow_list` variable names; the issuer, client id, and allow-list entries come from the item messages (decision 18). The provider step shows the `search_key` item above `ProvidersSettings`, the model step the `chat_model` item above `ModelSettingsSection`, and the server step the rest. A 409 on Finish shows the server's message and reads the status again. `ProvidersSettings` and `ModelSettingsSection` stay unchanged apart from decision 2 and the new event, so an expired login inside one of them still returns to `/settings`, not `/setup`.
+
+*Alternatives:* show the token form first and learn that setup is closed only after a token is entered (rejected: a user without a token, which is everyone after setup, could never see the closed message); a separate unauthenticated "is setup open" route (rejected: it would tell anyone whether an instance is unconfigured, which the 404 rule avoids).
+
 ## Risks / Trade-offs
 
 - [The token sits in the backend log, and log shippers keep it] → it is invalid after the next restart or once setup finishes, and it grants only the configuration report and the finished flag, never data or keys.

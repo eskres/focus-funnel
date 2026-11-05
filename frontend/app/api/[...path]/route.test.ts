@@ -187,6 +187,86 @@ describe("API proxy", () => {
     expect(del.headers.authorization).toBe("Bearer test-access-token");
   });
 
+  describe("the setup token header", () => {
+    const SETUP_TOKEN = "setup-token-0123456789abcdefghij";
+
+    it("reaches the backend with the credential for setup/status", async () => {
+      backend = await startBackend(okBackend);
+      vi.stubEnv("BACKEND_URL", backend.url);
+
+      const response = await GET(
+        authed("http://localhost:3000/api/setup/status", {
+          headers: { "X-Setup-Token": SETUP_TOKEN, "X-Other": "dropped" },
+        }),
+        ctx("setup", "status"),
+      );
+
+      expect(response.status).toBe(200);
+      const [forwarded] = backend.requests;
+      expect(forwarded.url).toBe("/api/setup/status");
+      expect(forwarded.headers["x-setup-token"]).toBe(SETUP_TOKEN);
+      expect(forwarded.headers.authorization).toBe("Bearer test-access-token");
+      expect(forwarded.headers["x-other"]).toBeUndefined();
+    });
+
+    it("reaches setup/complete with a POST", async () => {
+      backend = await startBackend((_req, _body, res) => {
+        res.writeHead(204);
+        res.end();
+      });
+      vi.stubEnv("BACKEND_URL", backend.url);
+
+      const response = await POST(
+        authed("http://localhost:3000/api/setup/complete", {
+          method: "POST",
+          headers: { "X-Setup-Token": SETUP_TOKEN },
+        }),
+        ctx("setup", "complete"),
+      );
+
+      expect(response.status).toBe(204);
+      expect(backend.requests[0].headers["x-setup-token"]).toBe(SETUP_TOKEN);
+    });
+
+    it("is dropped for settings/models, as are other unknown headers", async () => {
+      backend = await startBackend(okBackend);
+      vi.stubEnv("BACKEND_URL", backend.url);
+
+      const response = await PUT(
+        authed("http://localhost:3000/api/settings/models", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Setup-Token": SETUP_TOKEN,
+            "X-Other": "dropped",
+          },
+          body: JSON.stringify({ models: [], temperature: null }),
+        }),
+        ctx("settings", "models"),
+      );
+
+      expect(response.status).toBe(200);
+      const [forwarded] = backend.requests;
+      expect(forwarded.url).toBe("/api/settings/models");
+      expect(forwarded.headers["x-setup-token"]).toBeUndefined();
+      expect(forwarded.headers["x-other"]).toBeUndefined();
+      expect(forwarded.headers.authorization).toBe("Bearer test-access-token");
+      expect(forwarded.headers["content-type"]).toBe("application/json");
+    });
+
+    it("is dropped for a path that only ends in setup", async () => {
+      backend = await startBackend(okBackend);
+      vi.stubEnv("BACKEND_URL", backend.url);
+
+      await GET(
+        authed("http://localhost:3000/api/me/setup", { headers: { "X-Setup-Token": SETUP_TOKEN } }),
+        ctx("me", "setup"),
+      );
+
+      expect(backend.requests[0].headers["x-setup-token"]).toBeUndefined();
+    });
+  });
+
   it("passes backend status codes and empty bodies through", async () => {
     backend = await startBackend((_req, _body, res) => {
       res.writeHead(204);
