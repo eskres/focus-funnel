@@ -57,7 +57,7 @@ afterEach(() => {
 });
 
 describe("the thought sheet", () => {
-  it("opens the thought the address names, with every field and no way to change it", async () => {
+  it("opens the thought the address names, with every field, Edit, and Delete", async () => {
     at("/app/c1?thought=t1");
     api({ "GET /api/thoughts/t1": json(200, THOUGHT) });
 
@@ -72,8 +72,21 @@ describe("the thought sheet", () => {
     expect(within(dialog).getByText("#errands")).toBeInTheDocument();
     expect(within(dialog).getByText(/^Filed .* · changed /)).toBeInTheDocument();
     const buttons = within(dialog).getAllByRole("button").map((b) => b.textContent);
-    expect(buttons).toEqual(["Close"]);
-    expect(dialog.textContent?.toLowerCase()).not.toMatch(/edit|delete/);
+    expect(buttons).toEqual(["Edit", "Delete", "Close"]);
+    expect(within(dialog).queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("sends no change when the user views and closes without Edit or Delete", async () => {
+    at("/app/c1?thought=t1");
+    const { calls } = api({ "GET /api/thoughts/t1": json(200, THOUGHT) });
+    render(<Chat conversationId="c1" />);
+    const dialog = await sheet();
+    await within(dialog).findByText("Oat milk");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(calls.filter((c) => c.method !== "GET")).toEqual([]);
   });
 
   it.each([

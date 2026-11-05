@@ -43,6 +43,10 @@ export type WirePart = {
   tags: string[];
   category?: string | null;
   thought_id?: string | null;
+  /** The saved thought's current title; left out, as an older server does. */
+  saved_title?: string | null;
+  /** True when the saved thought was deleted; left out, as an older server does. */
+  deleted?: boolean;
 };
 
 export const wireProposal = (

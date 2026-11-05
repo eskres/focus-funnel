@@ -1,25 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { useCategories } from "@/components/chat/categories-context";
 import { ThoughtLink } from "@/components/chat/thought-link";
+import { type FieldText, hasEmptyField, parseTags, ThoughtFields } from "@/components/chat/thought-fields";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { confirmProposal } from "@/lib/conversations";
 import type { Proposal, ProposalPart } from "@/lib/sse";
+import { THOUGHT_CHANGED_EVENT, type ThoughtChanged } from "@/lib/thoughts";
 import { cn } from "@/lib/utils";
 
-function parseTags(text: string): string[] {
-  return text
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean);
-}
-
-/** A card: the parts it covers, and the text as the user left it. */
+/**
+ * A card: the parts it covers, and the text as the user left it. Once saved,
+ * `savedTitle` is the thought's current title and `deleted` says it is gone.
+ */
 type Card = {
   parts: number[];
   title: string;
@@ -27,6 +21,8 @@ type Card = {
   tags: string;
   category: string | null;
   thoughtId: string | null;
+  savedTitle: string | null;
+  deleted: boolean;
 };
 
 function cardOf(part: ProposalPart, index: number): Card {
@@ -37,6 +33,8 @@ function cardOf(part: ProposalPart, index: number): Card {
     tags: part.tags.join(", "),
     category: part.category,
     thoughtId: part.thoughtId,
+    savedTitle: part.savedTitle,
+    deleted: part.deleted,
   };
 }
 
@@ -56,6 +54,9 @@ export function mergeParts(parts: ProposalPart[]): Card {
     tags: tags.join(", "),
     category: parts[0].category,
     thoughtId: null,
+    // Merged parts are saved as one thought, so the first part says how it is now.
+    savedTitle: parts[0].savedTitle,
+    deleted: parts[0].deleted,
   };
 }
 
@@ -154,17 +155,32 @@ function ProposalCard({
   card: Card;
   onSaved: (parts: number[], thoughtId: string) => void;
 }) {
-  const categories = useCategories();
-  const [title, setTitle] = useState(card.title);
-  const [summary, setSummary] = useState(card.summary);
-  const [tags, setTags] = useState(card.tags);
-  const [category, setCategory] = useState(card.category ?? "");
+  const [text, setText] = useState<FieldText>(() => ({
+    title: card.title,
+    summary: card.summary,
+    tags: card.tags,
+    category: card.category ?? "",
+  }));
+  // The saved thought as it is now: its title once it changed, and whether it is gone.
+  const [now, setNow] = useState({ title: card.savedTitle, deleted: card.deleted });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const thoughtId = card.thoughtId;
-  const empty = !title.trim() || !summary.trim();
-  // A category the user has since removed stays visible, so the card shows what it holds.
-  const choices = category && !categories.includes(category) ? [...categories, category] : categories;
+  const empty = hasEmptyField(text);
+
+  // An edit or a delete in the thought sheet shows here at once.
+  useEffect(() => {
+    if (!thoughtId) return;
+    function follow(event: Event) {
+      const change = (event as CustomEvent<ThoughtChanged>).detail;
+      if (change?.id !== thoughtId) return;
+      setNow((current) =>
+        "deleted" in change ? { ...current, deleted: true } : { title: change.title, deleted: false },
+      );
+    }
+    window.addEventListener(THOUGHT_CHANGED_EVENT, follow);
+    return () => window.removeEventListener(THOUGHT_CHANGED_EVENT, follow);
+  }, [thoughtId]);
 
   async function confirm() {
     if (!conversationId || empty) return;
@@ -173,10 +189,10 @@ function ProposalCard({
     try {
       const outcome = await confirmProposal(conversationId, proposalId, {
         parts: card.parts,
-        title: title.trim(),
-        summary: summary.trim(),
-        tags: parseTags(tags),
-        category: category || null,
+        title: text.title.trim(),
+        summary: text.summary.trim(),
+        tags: parseTags(text.tags),
+        category: text.category || null,
       });
       onSaved(card.parts, outcome.thought_id);
     } catch (err) {
@@ -187,17 +203,34 @@ function ProposalCard({
     }
   }
 
+  const shownTitle = now.title ?? text.title;
+
+  if (thoughtId && now.deleted) {
+    return (
+      <div
+        role="group"
+        aria-label={`Deleted: ${shownTitle}`}
+        className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed p-3 text-sm"
+      >
+        <span role="status" className="text-muted-foreground">
+          Deleted:
+        </span>
+        <span className="text-muted-foreground">{shownTitle}</span>
+      </div>
+    );
+  }
+
   if (thoughtId) {
     return (
       <div
         role="group"
-        aria-label={`Saved: ${title}`}
+        aria-label={`Saved: ${shownTitle}`}
         className="flex flex-wrap items-center gap-2 rounded-lg border p-3 text-sm"
       >
         <span role="status" className="text-muted-foreground">
           Saved:
         </span>
-        <span className="font-medium">{title}</span>
+        <span className="font-medium">{shownTitle}</span>
         <ThoughtLink id={thoughtId} className="text-xs">
           Open
         </ThoughtLink>
@@ -212,33 +245,7 @@ function ProposalCard({
       className="flex flex-col gap-2 rounded-lg border p-3"
     >
       <p className="text-xs font-medium text-muted-foreground">A thought to file</p>
-      <Label className="flex flex-col items-start gap-1 text-xs">
-        Title
-        <Input value={title} onChange={(event) => setTitle(event.target.value)} />
-      </Label>
-      <Label className="flex flex-col items-start gap-1 text-xs">
-        Summary
-        <Textarea value={summary} onChange={(event) => setSummary(event.target.value)} />
-      </Label>
-      <Label className="flex flex-col items-start gap-1 text-xs">
-        Tags, separated by commas
-        <Input value={tags} onChange={(event) => setTags(event.target.value)} />
-      </Label>
-      <Label className="flex flex-col items-start gap-1 text-xs">
-        Category
-        <select
-          className="rounded-md border bg-background px-2 py-1 text-sm"
-          value={category}
-          onChange={(event) => setCategory(event.target.value)}
-        >
-          <option value="">None</option>
-          {choices.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
-      </Label>
+      <ThoughtFields value={text} onChange={setText} />
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={confirm} disabled={busy || empty || !conversationId}>
           Confirm
