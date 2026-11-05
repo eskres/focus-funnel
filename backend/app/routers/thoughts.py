@@ -23,6 +23,7 @@ from app.thoughts.store import (
     get_thought,
     get_thought_with_origin,
     list_upcoming,
+    set_status,
     update_thought,
 )
 
@@ -59,6 +60,9 @@ class ThoughtOut(BaseModel):
     when: dict[str, str | None] | None
     created_at: datetime
     updated_at: datetime
+    # open or done, and when it last changed; null while it never changed.
+    status: str
+    status_changed_at: datetime | None
     # The conversation and proposal it was saved from; null when there is none,
     # or once that conversation is deleted.
     origin: OriginOut | None
@@ -82,6 +86,8 @@ class ThoughtPatch(BaseModel):
     # {start, end, time_zone}, with the browser's zone; null clears the date.
     # The thought store checks it, so a refusal names `when`.
     when: Any = None
+    # open or done; the thought store checks it, so a refusal names `status`.
+    status: Any = None
 
 
 async def thought_answer(session: AsyncSession, user: User, thought_id: uuid.UUID) -> ThoughtOut:
@@ -99,6 +105,8 @@ async def thought_answer(session: AsyncSession, user: User, thought_id: uuid.UUI
         when=when_of(thought),
         created_at=thought.created_at,
         updated_at=thought.updated_at,
+        status=thought.status,
+        status_changed_at=thought.status_changed_at,
         origin=OriginOut(**vars(origin)) if origin else None,
         additions=[AdditionOut(**vars(addition)) for addition in additions],
     )
@@ -156,21 +164,32 @@ async def change_thought(
 ) -> ThoughtOut:
     """Change the fields the body names, and answer the thought as GET does.
 
+    A status change runs first and keeps updated_at; any other field moves it.
+
     Only what changed is embedded again; a new date or category is not
     embedded at all. An embedding failure does not fail
     the change, as for confirm: search finds it by its words at once, and the
     missing entries are filled in by the next call that reaches the provider.
     """
     fields = body.model_dump(exclude_unset=True)
+    has_status = "status" in fields
+    status = fields.pop("status", None)
+    if has_status:
+        # First, and with the other fields in one commit: a refused field
+        # after it leaves the status as it was. It keeps updated_at.
+        await set_status(session, user, thought_id, status)
     if "category" in fields:
         # The thought's own category stays a choice, even once the user removed it.
         current = await get_thought(session, user, thought_id)
         fields["category"] = await check_category(
             session, user, body.category, keep=current.category
         )
-    await update_thought(
-        session, user, thought_id, settings=settings, http_client=http_client, **fields
-    )
+    if fields or not has_status:
+        await update_thought(
+            session, user, thought_id, settings=settings, http_client=http_client, **fields
+        )
+    else:
+        await session.commit()
     return await thought_answer(session, user, thought_id)
 
 
