@@ -1,7 +1,8 @@
 // Parses the chat event stream (`POST /api/chat`) into typed events.
 // The backend sends named events, each with a JSON payload:
 //   event: conversation  data: {"id":"...","title":"..."}    first, for a new conversation
-//   event: tool          data: {"name":"...","phase":"start"|"end","summary":"...","sources":[...]}
+//   event: tool          data: {"name":"...","phase":"start"|"end","summary":"...","sources":[...],"failed":true}
+//                        (a connector tool is named "<connector>__<tool>"; failed marks a connector failure)
 //   event: proposal      data: {"id":"...","position":2,"parts":[{"title","summary","tags","category","when","when_choices","thought_id","saved_title","deleted","add_to","based_on","target","similar","added","undone"}],"replaced_by":null,"replaces":"..."|null}
 //   event: delta         data: {"text":"..."}
 //   event: usage         data: {"prompt_tokens":1,"completion_tokens":1,"context_length":1}
@@ -75,7 +76,14 @@ export type CompactModel = { providerId: string; model: string; contextLength: n
 
 export type SseEvent =
   | { type: "conversation"; id: string; title: string }
-  | { type: "tool"; name: string; phase: "start" | "end"; summary?: string; sources?: Source[] }
+  | {
+      type: "tool";
+      name: string;
+      phase: "start" | "end";
+      summary?: string;
+      sources?: Source[];
+      failed?: boolean;
+    }
   /** `replaces`: the earlier proposal whose cards now show as replaced. */
   | ({ type: "proposal"; replaces: string | null } & Proposal)
   | { type: "delta"; text: string }
@@ -248,6 +256,7 @@ function toEvent(name: string, data: string): SseEvent | null {
           phase: payload.phase,
           ...(typeof payload.summary === "string" ? { summary: payload.summary } : {}),
           ...(Array.isArray(payload.sources) ? { sources: toSources(payload.sources) } : {}),
+          ...(payload.failed === true ? { failed: true } : {}),
         };
       }
       return null;

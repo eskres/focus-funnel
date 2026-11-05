@@ -37,11 +37,11 @@
 
 ## 6. Tool-provider seam
 
-- [ ] 6.1 Add `ToolProvider` and `ToolOutcome` and move the two built-in tools behind `BuiltinTools`, with `Turn` taking a list of providers instead of `Filing` (design decision 2). Check that the existing chat turn, proposal, search tool, command, and SSE tests pass unchanged
-- [ ] 6.2 Add `ConnectorTools`: definitions from the stored list with `<name>__<tool>` names, a lazy session per turn, calls through `app/mcp_client.py`, and `aclose()` from `Turn`'s cleanup. Check with pytest using a fake client that only switched-on available tools are offered, that no connection is made when the model calls none, that one session is reused for two calls, and that it is closed when the turn ends or fails
-- [ ] 6.3 Build the providers for a turn from the conversation's connectors, use `connectors.tool_rounds` when any is on, check `max_tools` before the first model call, and add the system prompt paragraph only when a connector is on. Check with pytest that a conversation with none on sends exactly today's tools and prompt, that one with a connector on gets its tools and the paragraph, and that a conversation past the limit gets `too_many_tools` with the user's message stored and no model call
-- [ ] 6.4 Turn connector failures into tool errors per design decision 9. Check with pytest that an unreachable server, a refused auth, and a timeout each give the model a plain error result, a `tool` end event marked failed, and a turn that ends normally
-- [ ] 6.5 Show connector tools in the chat's tool indication with the connector name. Check with Vitest that `calendar__list_events` shows as `calendar: list_events` while it runs and after
+- [x] 6.1 Add `ToolProvider` and `ToolOutcome` and move the two built-in tools behind `BuiltinTools`, with `Turn` taking a list of providers instead of `Filing` (design decision 2). Check that the existing chat turn, proposal, search tool, command, and SSE tests pass unchanged
+- [x] 6.2 Add `ConnectorTools`: definitions from the stored list with `<name>__<tool>` names, a lazy session per turn, calls through `app/mcp_client.py`, and `aclose()` from `Turn`'s cleanup. Check with pytest using a fake client that only switched-on available tools are offered, that no connection is made when the model calls none, that one session is reused for two calls, and that it is closed when the turn ends or fails
+- [x] 6.3 Build the providers for a turn from the conversation's connectors, use `connectors.tool_rounds` when any is on, check `max_tools` before the first model call, and add the system prompt paragraph only when a connector is on. Check with pytest that a conversation with none on sends exactly today's tools and prompt, that one with a connector on gets its tools and the paragraph, and that a conversation past the limit gets `too_many_tools` with the user's message stored and no model call
+- [x] 6.4 Turn connector failures into tool errors per design decision 9. Check with pytest that an unreachable server, a refused auth, and a timeout each give the model a plain error result, a `tool` end event marked failed, and a turn that ends normally
+- [x] 6.5 Show connector tools in the chat's tool indication with the connector name. Check with Vitest that `calendar__list_events` shows as `calendar: list_events` while it runs and after
 
 ## 7. Actions and approval
 

@@ -220,6 +220,93 @@ describe("Chat", () => {
     });
   });
 
+  describe("connector tools", () => {
+    it("shows calendar__list_events as calendar: list_events while it runs and after", async () => {
+      const stream = openStream();
+      fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "POST /api/chat": () => stream.response,
+      });
+      render(<Chat />);
+
+      send("what is on this week?");
+      await stream.push(toolEvent("calendar__list_events", "start"));
+
+      const indication = await screen.findByTestId("tool-indication");
+      expect(indication).toHaveTextContent("Using calendar: list_events…");
+      expect(indication).not.toHaveTextContent("__");
+
+      await stream.push(toolEvent("calendar__list_events", "end"));
+      await stream.push(delta("Two meetings."));
+      expect(await screen.findByText("Two meetings.")).toBeInTheDocument();
+      expect(screen.getByTestId("tool-indication")).toHaveTextContent(
+        "Used calendar: list_events",
+      );
+      await stream.close();
+    });
+
+    it("shows the server's summary and marks a failed connector call", async () => {
+      const stream = openStream();
+      fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "POST /api/chat": () => stream.response,
+      });
+      render(<Chat />);
+
+      send("what is on this week?");
+      await stream.push(toolEvent("calendar__list_events", "start"));
+      await stream.push(
+        toolEvent(
+          "calendar__list_events",
+          "end",
+          "calendar: list_events failed: the connector could not be reached",
+          undefined,
+          true,
+        ),
+      );
+      await stream.push(delta("The calendar is down.") + done);
+      await stream.close();
+
+      expect(await screen.findByText("The calendar is down.")).toBeInTheDocument();
+      const indication = screen.getByTestId("tool-indication");
+      expect(indication).toHaveTextContent(
+        "calendar: list_events failed: the connector could not be reached",
+      );
+      expect(indication).toHaveAttribute("data-failed", "true");
+    });
+
+    it("names the connector in a reloaded conversation", async () => {
+      fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "GET /api/conversations/c1": json(
+          200,
+          conversation({
+            messages: [
+              storedMessage(0, "user", "what is on?"),
+              storedMessage(1, "assistant", null, {
+                tool_calls: [
+                  {
+                    id: "t",
+                    type: "function",
+                    function: { name: "calendar__list_events", arguments: "{}" },
+                  },
+                ],
+              }),
+              storedMessage(2, "tool", "Data from connector", { tool_call_id: "t" }),
+              storedMessage(3, "assistant", "Two meetings."),
+            ],
+          }),
+        ),
+      });
+      render(<Chat conversationId="c1" />);
+
+      const list = await screen.findByRole("list", { name: "Conversation" });
+      expect(within(list).getByTestId("tool-indication")).toHaveTextContent(
+        "Used calendar: list_events",
+      );
+    });
+  });
+
   describe("resuming a conversation", () => {
     it("loads and shows every stored message", async () => {
       fakeApi({
