@@ -37,19 +37,38 @@ The browser talks only to the Next.js server. The Next.js server runs the login,
 
 ## Run it with Docker
 
-You need Docker. Login is set up with `AUTH_MODE` in `.env`: an OpenID Connect provider, a Firebase project, or an anonymous demo. [docs/login.md](docs/login.md) explains each one. The quickest start is Pocket ID, which runs next to the app:
+You need Docker and `openssl`. Login is set up with `AUTH_MODE` in `.env`: an OpenID Connect provider, a Firebase project, or an anonymous demo. [docs/login.md](docs/login.md) explains each one. The quickest start is Pocket ID, which runs next to the app. [docs/setup.md](docs/setup.md) covers each step in detail.
 
-1. Copy `.env.example` to `.env`.
-2. Follow [Pocket ID in docs/login.md](docs/login.md#pocket-id). It generates the secrets, starts everything with `docker-compose.pocket-id.yml`, and registers the app with Pocket ID.
-3. Open http://localhost:3000 and log in with your passkey.
-4. In **Settings**, save an API key for a provider.
-5. In **Settings**, add a chat model and mark it as the default. The Test button checks that the model answers and can call a tool.
+1. Generate `.env` with new secrets. Keep a copy of the `KEY_ENCRYPTION_KEY` it sets:
 
-Without the Pocket ID overlay, start everything with:
+   ```sh
+   scripts/init-env.sh --auth-mode oidc
+   ```
+
+2. Start Pocket ID on its own and register the app with it, as steps 4 to 6 of [Pocket ID in docs/login.md](docs/login.md#pocket-id) describe. Then fill `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` in `.env`:
+
+   ```sh
+   docker compose -f docker-compose.yml -f docker-compose.pocket-id.yml up -d pocket-id
+   ```
+
+3. Start everything, and find the setup token in the backend's log:
+
+   ```sh
+   docker compose -f docker-compose.yml -f docker-compose.pocket-id.yml up -d --build
+   docker compose -f docker-compose.yml -f docker-compose.pocket-id.yml logs backend | grep 'Setup token'
+   ```
+
+4. Open the app's http://localhost:3000/setup, log in with your passkey, and enter the token. The wizard checks the login settings and the database, saves your API key, and sets your default chat model. Click **Finish** when every required item is OK.
+
+Other users save their own key and choose their models in **Settings**.
+
+Without the Pocket ID overlay, for example with another OpenID Connect provider or Firebase, run the script with that mode, fill in its settings in `.env`, and start everything with the command below. Then find the token with `docker compose logs backend` and open `/setup` as in steps 3 and 4.
 
 ```sh
 docker compose up --build
 ```
+
+To use the same compose files in every command without `-f`, set `COMPOSE_FILE` in `.env`. `SETUP_WIZARD=false` skips the wizard, and the doctor (`python -m app.doctor`) checks an install from the command line. [docs/setup.md](docs/setup.md) covers all three.
 
 The backend applies database migrations each time it starts. Postgres keeps its data in `.data/`.
 
@@ -134,6 +153,8 @@ frontend/
   app/           pages: /app (chat), /app/[id], /settings
   components/    chat UI, settings sections, shadcn components
   lib/           API clients and the event stream parser
+scripts/         init-env.sh: creates .env with new secrets
+docs/            login, setup, and search guides
 openspec/        specs and planned changes
 ```
 

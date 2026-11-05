@@ -10,7 +10,7 @@ Focus Funnel has three ways to log in. You choose one with `AUTH_MODE` in `.env`
 
 There is no mode without login that keeps data. Only `demo` has no login, and its data expires.
 
-Every mode needs `SESSION_SECRET`. It seals the cookies the frontend server sets:
+Every mode needs `SESSION_SECRET`. It seals the cookies the frontend server sets. `scripts/init-env.sh` sets it with the other secrets ([docs/setup.md](setup.md)), or generate one yourself:
 
 ```sh
 openssl rand -hex 32
@@ -24,29 +24,28 @@ These cookies are marked `Secure`. Browsers accept them on `http://localhost` an
 
 [Pocket ID](https://pocket-id.org) is a small OpenID Connect provider that logs people in with passkeys. `docker-compose.pocket-id.yml` runs it next to Focus Funnel, pinned to `ghcr.io/pocket-id/pocket-id:v2.16.0`. Its data is stored in `.data/pocket-id`.
 
-1. Copy `.env.example` to `.env` if you have not already.
-2. Generate the secrets and put them in `.env`:
+1. Generate `.env` with new secrets and the mode:
 
    ```sh
-   openssl rand -hex 32      # SESSION_SECRET
-   openssl rand -base64 32   # KEY_ENCRYPTION_KEY
-   openssl rand -base64 32   # POCKET_ID_ENCRYPTION_KEY
+   scripts/init-env.sh --auth-mode oidc
    ```
 
-3. Start everything with the Pocket ID overlay:
+   It copies `.env.example` to `.env` and sets `AUTH_MODE=oidc`, `SESSION_SECRET`, `KEY_ENCRYPTION_KEY`, `POCKET_ID_ENCRYPTION_KEY`, and a new Postgres password. On an existing `.env`, it fills only the secrets that are empty and leaves a set `AUTH_MODE` as it is. [docs/setup.md](setup.md) explains each value.
+2. Keep a copy of `KEY_ENCRYPTION_KEY` somewhere safe. Saved provider keys cannot be read without it. The script lists `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` as still to fill; they come from Pocket ID in step 6.
+3. Start Pocket ID on its own:
 
    ```sh
-   docker compose -f docker-compose.yml -f docker-compose.pocket-id.yml up --build
+   docker compose -f docker-compose.yml -f docker-compose.pocket-id.yml up -d pocket-id
    ```
 
-   The backend and the frontend stop at once because `AUTH_MODE` is not set yet. That is expected; Pocket ID keeps running.
-4. Open http://localhost:1411/setup, create the admin account, and add a passkey.
+   The backend and the frontend would stop at once now, because the `OIDC_*` settings are still empty. They start in step 7.
+4. Open http://localhost:1411/setup, create the admin account, and add a passkey. This is Pocket ID's own setup page. The app's setup wizard comes in step 8.
 5. In Pocket ID, open **OIDC Clients** and add a client:
    - **Name:** Focus Funnel
    - **Callback URLs:** `http://localhost:3000/auth/callback`
    - **Logout Callback URLs:** `http://localhost:3000/`, exactly. Logging out, and deleting an account, then ends the Pocket ID session without asking. A pattern such as `http://localhost:3000/*` does not match it, since a `*` stands for one non-empty path segment; Pocket ID then shows its own sign-out confirmation, and a user who cancels it stays logged in at Pocket ID.
    - Leave **Public Client** off, so the client has a secret.
-6. Copy the client ID and the client secret into `.env`, and set the mode:
+6. Copy the client ID and the client secret into `.env`:
 
    ```sh
    AUTH_MODE=oidc
@@ -56,8 +55,14 @@ These cookies are marked `Secure`. Browsers accept them on `http://localhost` an
    ```
 
    Leave `OIDC_INTERNAL_URL` empty. The overlay sets it to `http://pocket-id:1411`, because inside compose `localhost:1411` is the container itself. The backend and the frontend server then call Pocket ID at that address. Tokens are still checked against `OIDC_ISSUER`.
-7. Restart: stop compose with Ctrl+C and run the command from step 3 again.
-8. Open http://localhost:3000 and log in with your passkey.
+7. Start everything with the Pocket ID overlay, and find the setup token in the backend's log:
+
+   ```sh
+   docker compose -f docker-compose.yml -f docker-compose.pocket-id.yml up -d --build
+   docker compose -f docker-compose.yml -f docker-compose.pocket-id.yml logs backend | grep 'Setup token'
+   ```
+
+8. Open the app's http://localhost:3000/setup, log in with your passkey, and enter the token. The wizard saves your API key and default model; see [docs/setup.md](setup.md#5-the-setup-wizard).
 
 Two Pocket ID settings can refuse everyone:
 
