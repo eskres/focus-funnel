@@ -1,3 +1,4 @@
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
@@ -74,6 +75,7 @@ def test_chat_error_constructors_have_their_documented_status():
         (errors.model_unsupported("org/m", "tool calling"), 400, ErrorCode.MODEL_UNSUPPORTED),
         (errors.model_unavailable("org/m"), 409, ErrorCode.MODEL_UNAVAILABLE),
         (errors.context_full(), 409, ErrorCode.CONTEXT_FULL),
+        (errors.context_full(connectors=True), 409, ErrorCode.CONTEXT_FULL),
         (errors.conversation_busy(), 409, ErrorCode.CONVERSATION_BUSY),
     ]
     for error, status_code, code in cases:
@@ -129,3 +131,47 @@ def test_rate_limited_carries_retry_after_in_the_response():
     assert response.status_code == 429
     assert response.headers["retry-after"] == "42"
     assert response.json()["error"]["code"] == "rate_limited"
+
+
+def test_connector_error_constructors_return_their_documented_status():
+    """Openspec mcp-connectors task 5.5: the eight new codes (design decision 11)."""
+    from app import errors
+
+    cases = [
+        (errors.user_connectors_disabled(), 403, "user_connectors_disabled"),
+        (errors.operator_connector(), 403, "operator_connector"),
+        (
+            errors.connector_failed(ErrorCode.CONNECTOR_UNREACHABLE, "could not be reached"),
+            502,
+            "connector_unreachable",
+        ),
+        (
+            errors.connector_failed(ErrorCode.CONNECTOR_AUTH_FAILED, "refused the auth"),
+            502,
+            "connector_auth_failed",
+        ),
+        (
+            errors.connector_failed(
+                ErrorCode.CONNECTOR_PROTOCOL_ERROR, "did not answer as an MCP server"
+            ),
+            502,
+            "connector_protocol_error",
+        ),
+        (errors.too_many_tools(20), 422, "too_many_tools"),
+        (errors.action_expired(), 409, "action_expired"),
+        (errors.action_running(), 409, "action_running"),
+    ]
+    for error, status, code in cases:
+        assert (error.status_code, error.code) == (status, code)
+        assert error.message
+    assert errors.connector_failed(
+        ErrorCode.CONNECTOR_AUTH_FAILED, "refused the auth"
+    ).message == "The server refused the auth."
+    assert "20" in errors.too_many_tools(20).message
+
+
+def test_connector_failed_takes_only_a_failure_code():
+    from app.errors import connector_failed
+
+    with pytest.raises(ValueError):
+        connector_failed(ErrorCode.NOT_FOUND, "is missing")

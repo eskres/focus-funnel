@@ -11,7 +11,8 @@ async def delete_user_data(session: AsyncSession, user: User) -> None:
 
     Every user-owned table references users.id with ON DELETE CASCADE, so one
     delete removes conversations, messages, usage, provider keys, settings,
-    thoughts, and their search indexes.
+    thoughts, their search indexes, connectors, the conversations' connector
+    links, and tool actions.
     """
     await session.execute(delete(User).where(User.id == user.id))
     await session.commit()
@@ -20,10 +21,11 @@ async def delete_user_data(session: AsyncSession, user: User) -> None:
 async def delete_user_content(session: AsyncSession, user: User) -> None:
     """Delete the user's thoughts, search indexes, and conversations, in one transaction.
 
-    Search entries cascade from thoughts and indexes, and messages and
-    proposals from conversations. Usage records stay, with their conversation
-    link cleared. The account, provider keys, model settings, and added
-    categories stay too: categories are settings.
+    Search entries cascade from thoughts and indexes, and messages,
+    proposals, connector links, and tool actions from conversations. Usage
+    records stay, with their conversation link cleared. The account, provider
+    keys, model settings, added categories, and connectors stay too: they are
+    settings.
     """
     await session.execute(delete(Thought).where(Thought.user_id == user.id))
     await session.execute(delete(SearchIndex).where(SearchIndex.user_id == user.id))

@@ -62,6 +62,22 @@ filing:
     floor_delta: 0.1
     min_thoughts: 30
 
+# MCP connectors (openspec mcp-connectors, design decisions 8 to 10). Read
+# only when the operator sets MCP_ENABLED=true.
+connectors:
+  # Most switched-on tools across one conversation's connectors. The two
+  # built-in tools are not counted.
+  max_tools: 20
+  # Model calls in one turn while any connector is on, used instead of
+  # tool_rounds above: a read followed by an action needs more rounds.
+  tool_rounds: 5
+  # Seconds allowed to connect to a server and start its session, and to
+  # wait for one tool call. A call that times out is not retried.
+  connect_seconds: 10
+  call_seconds: 30
+  # A tool result is cut to this many characters before the model sees it.
+  result_max_chars: 8000
+
 # Thought search (openspec thought-storage, design decisions 5, 7, and 8).
 # min_similarity is provisional until the evaluation in task 6.4 sets it:
 # rerun backend/scripts/search_eval.py after changing the embedding model.

@@ -15,11 +15,12 @@ from app.auth import JwksCache
 from app.chat.config import get_chat_config
 from app.chat.model_info import clear_model_info_cache
 from app.config import get_settings
+from app.connector_config import get_connector_config
 from app.db import create_engine, get_engine, get_sessionmaker
 from app.models import Base, User
 from app.provider_config import get_providers_config
 
-pytest_plugins = ["tests.chat_helpers"]
+pytest_plugins = ["tests.chat_helpers", "tests.mcp_helpers"]
 
 REQUIRED_ENV = {
     "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
@@ -31,7 +32,14 @@ TEST_ISSUER = REQUIRED_ENV["OIDC_ISSUER"]
 TEST_KID = "test-key-1"
 
 
-CACHED = (get_settings, get_engine, get_sessionmaker, get_providers_config, get_chat_config)
+CACHED = (
+    get_settings,
+    get_engine,
+    get_sessionmaker,
+    get_providers_config,
+    get_chat_config,
+    get_connector_config,
+)
 
 
 @pytest.fixture(autouse=True)

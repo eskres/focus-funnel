@@ -42,6 +42,15 @@ class ErrorCode:
     CATEGORY_EXISTS = "category_exists"
     PROPOSAL_PART_SAVED = "proposal_part_saved"
     THOUGHT_CHANGED = "thought_changed"
+    # MCP connectors: a server that could not be used (app/mcp_client.py).
+    CONNECTOR_UNREACHABLE = "connector_unreachable"
+    CONNECTOR_AUTH_FAILED = "connector_auth_failed"
+    CONNECTOR_PROTOCOL_ERROR = "connector_protocol_error"
+    USER_CONNECTORS_DISABLED = "user_connectors_disabled"
+    OPERATOR_CONNECTOR = "operator_connector"
+    TOO_MANY_TOOLS = "too_many_tools"
+    ACTION_EXPIRED = "action_expired"
+    ACTION_RUNNING = "action_running"
 
 
 class ApiError(Exception):
@@ -100,12 +109,16 @@ def model_unavailable(model: str) -> ApiError:
     )
 
 
-def context_full() -> ApiError:
+def context_full(connectors: bool = False) -> ApiError:
+    """connectors: some are on in the conversation, so turning them off is advised too."""
+    advice = (
+        "Use /compact, choose a model with a larger context, start a new conversation, "
+        "or turn some connectors off."
+        if connectors
+        else "Use /compact, choose a model with a larger context, or start a new conversation."
+    )
     return ApiError(
-        409,
-        ErrorCode.CONTEXT_FULL,
-        "This conversation is too long for the model. Use /compact, choose a model "
-        "with a larger context, or start a new conversation.",
+        409, ErrorCode.CONTEXT_FULL, f"This conversation is too long for the model. {advice}"
     )
 
 
@@ -172,6 +185,61 @@ def rate_limited(retry_after_seconds: int) -> ApiError:
         ErrorCode.RATE_LIMITED,
         f"Too many requests. Try again in {seconds} seconds.",
         headers={"Retry-After": str(seconds)},
+    )
+
+
+def user_connectors_disabled() -> ApiError:
+    return ApiError(
+        403,
+        ErrorCode.USER_CONNECTORS_DISABLED,
+        "This server does not let users add their own connectors.",
+    )
+
+
+def operator_connector() -> ApiError:
+    return ApiError(
+        403,
+        ErrorCode.OPERATOR_CONNECTOR,
+        "This connector is set up by the server's operator and can't be changed or removed.",
+    )
+
+
+# The three connector failure codes (app/mcp_client.py ConnectorError). The
+# reason reads after "the server": "could not be reached", "refused the auth".
+CONNECTOR_FAILURE_CODES = (
+    ErrorCode.CONNECTOR_UNREACHABLE,
+    ErrorCode.CONNECTOR_AUTH_FAILED,
+    ErrorCode.CONNECTOR_PROTOCOL_ERROR,
+)
+
+
+def connector_failed(code: str, reason: str) -> ApiError:
+    if code not in CONNECTOR_FAILURE_CODES:
+        raise ValueError(f"{code} is not a connector failure code")
+    return ApiError(502, code, f"The server {reason}.")
+
+
+def too_many_tools(limit: int) -> ApiError:
+    return ApiError(
+        422,
+        ErrorCode.TOO_MANY_TOOLS,
+        f"A conversation can have at most {limit} connector tools switched on. Turn a "
+        "connector off here, or switch some of its tools off in settings.",
+    )
+
+
+def action_expired() -> ApiError:
+    return ApiError(
+        409,
+        ErrorCode.ACTION_EXPIRED,
+        "This action expired: the conversation moved on, or its tool is no longer on. "
+        "Ask again in the chat if you still want it.",
+    )
+
+
+def action_running() -> ApiError:
+    return ApiError(
+        409, ErrorCode.ACTION_RUNNING, "This action is already running. Wait for its outcome."
     )
 
 

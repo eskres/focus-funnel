@@ -27,7 +27,15 @@ export type ApiErrorCode =
   | "demo_session_expired"
   | "demo_full"
   | "rate_limited"
-  | "thought_changed";
+  | "thought_changed"
+  | "action_expired"
+  | "action_running"
+  | "too_many_tools"
+  | "user_connectors_disabled"
+  | "operator_connector"
+  | "connector_unreachable"
+  | "connector_auth_failed"
+  | "connector_protocol_error";
 
 export class ApiError extends Error {
   readonly code: string;
@@ -71,6 +79,14 @@ export class DemoFullError extends ApiError {}
 export class RateLimitedError extends ApiError {}
 /** The thought changed since the card or sheet read it; `details.thought` is how it is now. */
 export class ThoughtChangedError extends ApiError {}
+export class ActionExpiredError extends ApiError {}
+export class ActionRunningError extends ApiError {}
+export class TooManyToolsError extends ApiError {}
+export class UserConnectorsDisabledError extends ApiError {}
+export class OperatorConnectorError extends ApiError {}
+export class ConnectorUnreachableError extends ApiError {}
+export class ConnectorAuthFailedError extends ApiError {}
+export class ConnectorProtocolError extends ApiError {}
 
 /** Sent on window when a call finds that the demo session has ended. */
 export const DEMO_EXPIRED_EVENT = "ff:demo-session-expired";
@@ -101,6 +117,14 @@ const errorClasses: Record<ApiErrorCode, typeof ApiError> = {
   demo_full: DemoFullError,
   rate_limited: RateLimitedError,
   thought_changed: ThoughtChangedError,
+  action_expired: ActionExpiredError,
+  action_running: ActionRunningError,
+  too_many_tools: TooManyToolsError,
+  user_connectors_disabled: UserConnectorsDisabledError,
+  operator_connector: OperatorConnectorError,
+  connector_unreachable: ConnectorUnreachableError,
+  connector_auth_failed: ConnectorAuthFailedError,
+  connector_protocol_error: ConnectorProtocolError,
 };
 
 function isKnownCode(code: string): code is ApiErrorCode {

@@ -1,0 +1,33 @@
+# The operator connector docker-compose.mcp.yml gives the backend
+# (MCP_CONNECTORS_PATH). See backend/app/connectors.yaml for every field and
+# docs/connectors.md#google-calendar for the setup.
+connectors:
+  - name: calendar
+    # The gcal-mcp service, on the compose network only.
+    url: http://gcal-mcp:8000/mcp
+    # manage-accounts is left out: it would start a Google sign-in from a chat.
+    tools:
+      - list-calendars
+      - list-events
+      - search-events
+      - get-event
+      - list-colors
+      - get-freebusy
+      - get-current-time
+      - create-event
+      - create-events
+      - update-event
+      - delete-event
+      - respond-to-event
+    # Reads run at once; every other tool waits for the user's approval.
+    read_only:
+      - list-calendars
+      - list-events
+      - search-events
+      - get-event
+      - list-colors
+      - get-freebusy
+      - get-current-time
+
+# The operator connector already covers this server, so no catalog entry.
+catalog: []

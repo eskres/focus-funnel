@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth import get_current_user
 from app.chat import running
+from app.chat.actions import expire_actions, list_actions, wait_for_running
 from app.chat.commands import parse_message
 from app.chat.compaction import (
     compaction_request,
@@ -36,10 +37,16 @@ from app.chat.model_info import model_info
 from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, build_context, estimate_tokens, forced_tool
 from app.chat.proposal import filing_for, held_parts, held_proposal, refs_for
 from app.chat.sse import log_response, sse_response
-from app.chat.turn import Turn
+from app.chat.tool_providers import (
+    connector_definitions,
+    connector_tool_count,
+    conversation_connector_tools,
+)
+from app.chat.turn import BuiltinTools, Turn
 from app.config import Settings, get_settings
 from app.db import get_session, get_sessionmaker
-from app.errors import ApiError, ErrorCode, context_full, model_not_set
+from app.errors import ApiError, ErrorCode, context_full, model_not_set, too_many_tools
+from app.mcp_client import McpConnect, get_mcp_connect
 from app.models import Conversation, Message, User
 from app.providers import get_provider_http_client, provider_for_user
 from app.thoughts.dates import today_in, zone_from
@@ -137,6 +144,7 @@ async def chat(
     config: ChatConfig = Depends(get_chat_config),
     settings: Settings = Depends(get_settings),
     http_client: httpx2.AsyncClient | None = Depends(get_provider_http_client),
+    connect: McpConnect = Depends(get_mcp_connect),
 ) -> StreamingResponse:
     """Answer a message as an event stream.
 
@@ -161,6 +169,7 @@ async def chat(
     session = session_factory()
     conversation_id: uuid.UUID | None = None
     claimed = False
+    turn: Turn | None = None
     try:
         if body.conversation_id is not None:
             conversation = await get_conversation(session, user, body.conversation_id)
@@ -183,9 +192,26 @@ async def chat(
         conversation.archived_at = None
         conversation.last_activity_at = now()
         await _store_user_message(session, conversation, body.message)
+        if settings.mcp_enabled and not is_new:
+            # The turn starts: cards still waiting for approval expire with it
+            # (decision 7).
+            await expire_actions(session, conversation.id)
         await session.commit()
+        if settings.mcp_enabled and not is_new:
+            # An approval already running finishes first, so this turn gets
+            # its outcome. Any approval from now on finds its action expired.
+            await wait_for_running(session, conversation.id, config.connectors)
 
         await _ensure_model(session, user, conversation)
+
+        # The connectors that are on (none while MCP_ENABLED is off). A
+        # conversation past the tool limit is refused before any model call,
+        # with the user's message kept.
+        connectors = await conversation_connector_tools(
+            session, user.id, conversation.id, settings, connect, config.connectors
+        )
+        if connector_tool_count(connectors) > config.connectors.max_tools:
+            raise too_many_tools(config.connectors.max_tools)
 
         held = held_parts(await held_proposal(session, conversation))
         messages = await list_messages(session, conversation)
@@ -198,13 +224,21 @@ async def chat(
             today_in(zone),
             seen_note=refs.note(config.filing, zone=zone),
             refs=refs.by_id(),
+            connectors=bool(connectors),
+            actions=await list_actions(session, conversation.id) if settings.mcp_enabled else None,
         )
         filing = await filing_for(session, user, config)
         info = await model_info(
             session, user, conversation.provider_id, conversation.model, settings, http_client
         )
         check_room(
-            conversation, context, body.message, info.context_length if info else None, config
+            conversation,
+            context,
+            body.message,
+            info.context_length if info else None,
+            config,
+            tools=[*filing.tools, *connector_definitions(connectors)],
+            connectors=bool(connectors),
         )
 
         provider = await provider_for_user(session, user, conversation.provider_id, settings)
@@ -219,6 +253,19 @@ async def chat(
             settings=settings,
             http_client=http_client,
         )
+        builtin = BuiltinTools(
+            session,
+            user,
+            conversation,
+            config,
+            context,
+            filing,
+            command=parsed.command,
+            held_parts=held,
+            settings=settings,
+            http_client=http_client,
+            zone=zone,
+        )
         turn = Turn(
             session,
             user,
@@ -226,15 +273,12 @@ async def chat(
             call,
             config,
             context=context,
-            filing=filing,
+            providers=[builtin, *connectors],
             forced_tool=forced_tool(FORCED_TOOLS[parsed.command])
             if parsed.command in FORCED_TOOLS
             else None,
-            command=parsed.command,
-            held_parts=held,
-            settings=settings,
-            http_client=http_client,
-            zone=zone,
+            # A read followed by an act needs more rounds (decision 9).
+            tool_rounds=config.connectors.tool_rounds if connectors else None,
         )
         try:
             await turn.open()
@@ -242,6 +286,8 @@ async def chat(
             await call.aclose()
             raise
     except BaseException as exc:
+        if turn is not None:
+            await turn.aclose()
         await session.rollback()
         if claimed:
             await release_turn(session, conversation_id)
@@ -251,14 +297,23 @@ async def chat(
         raise
 
     async def events():
-        if is_new:
-            yield ("conversation", {"id": str(conversation_id), "title": conversation.title})
-        async for event in turn.events():
-            yield event
+        try:
+            if is_new:
+                yield ("conversation", {"id": str(conversation_id), "title": conversation.title})
+            async for event in turn.events():
+                yield event
+        finally:
+            # In the turn's own background task, however the turn ends: no
+            # connector session outlives it (decision 9).
+            await turn.aclose()
 
     async def settle() -> None:
         try:
             try:
+                # Connector sessions first: they end with the turn (decision
+                # 9). `events` closed them already, in the turn's own task;
+                # this only covers a turn whose events never started.
+                await turn.aclose()
                 await call.aclose()
             finally:
                 try:

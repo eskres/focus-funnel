@@ -16,6 +16,7 @@ import httpx2
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat.actions import ACTION_SHOWN, ActionTarget, action_payload, new_action
 from app.chat.config import ChatConfig
 from app.chat.context import compact_suggestion
 from app.chat.conversations import ends_answered, interrupted_answer, last_message, next_position
@@ -30,6 +31,13 @@ from app.chat.prompt import (
 from app.chat.proposal import Filing, part_lookup, proposal_payload, refs_for, write_proposal
 from app.chat.similar import candidates_note, check_parts, with_similar
 from app.chat.sse import Event
+from app.chat.tool_providers import (
+    ToolOutcome,
+    ToolProvider,
+    TurnToolState,
+    holds_connector_data,
+    tool_label,
+)
 from app.chat.usage import record_usage, usage_warning
 from app.chat.tools import (
     ALREADY_PROPOSED,
@@ -109,6 +117,156 @@ async def read_round(
                 state.finish_reason = choice.finish_reason
 
 
+class BuiltinTools:
+    """The two built-in tools, search_thoughts and propose_thought, for one
+    turn (openspec mcp-connectors design decision 2). Their names have no
+    prefix, so the model sees them as before connectors existed."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        user: User,
+        conversation: Conversation,
+        config: ChatConfig,
+        context: list[dict[str, Any]],
+        filing: Filing,
+        command: str | None = None,
+        held_parts: list[dict[str, Any]] | None = None,
+        settings: Settings | None = None,
+        http_client: httpx2.AsyncClient | None = None,
+        zone: ZoneInfo | None = None,
+    ):
+        self.session = session
+        self.user = user
+        self.conversation = conversation
+        self.config = config
+        # The turn's context, shared with Turn: a proposal drops the held note.
+        self.context = context
+        self.filing = filing
+        self.command = command
+        # The held proposal's parts the context's note lists, if any.
+        self.held_parts = held_parts
+        self.settings = settings or get_settings()
+        self.http_client = http_client
+        # The user's zone, read once from the request: the search tool's days
+        # and the proposal's dates are in it (thought-dates design decision 3).
+        self.zone = zone or ZoneInfo(DEFAULT_ZONE)
+        # One proposal per turn: a second propose_thought call is refused.
+        self._proposed = False
+        # Set by a candidate round of the similar-thought check: the next
+        # proposal call skips layer 2 (the turn's next round must make it).
+        self._checked = False
+
+    def definitions(self) -> list[dict[str, Any]]:
+        return self.filing.tools
+
+    def owns(self, name: str) -> bool:
+        return name in (SEARCH_TOOL, PROPOSE_TOOL)
+
+    def needs_approval(self, name: str, turn: TurnToolState) -> bool:
+        return False
+
+    def action_target(self, name: str) -> ActionTarget:
+        raise NotImplementedError("the built-in tools never need approval")
+
+    async def call(self, name: str, arguments: dict[str, Any], turn: TurnToolState) -> ToolOutcome:
+        if name == SEARCH_TOOL:
+            search = parse_search(arguments)
+            found = await search_tool_result(
+                self.session,
+                self.user,
+                search,
+                settings=self.settings,
+                config=self.config.search,
+                conversation_id=self.conversation.id,
+                http_client=self.http_client,
+                zone=self.zone,
+                refs=await refs_for(self.session, self.conversation, before_next_row=True),
+            )
+            return ToolOutcome(
+                result=found.text,
+                summary=(
+                    f"Looked up your thoughts dated {search.days_text}"
+                    if search.by_date_only
+                    else f"Searched your thoughts for “{search.query}”"
+                ),
+                extra={"sources": found.sources},
+                details={"sources": found.sources},
+            )
+        if self._proposed:
+            return ToolOutcome(result=ALREADY_PROPOSED, summary="Already proposed in this answer")
+        return await self._propose(arguments, turn)
+
+    async def _propose(self, arguments: dict[str, Any], turn: TurnToolState) -> ToolOutcome:
+        """A propose_thought call.
+
+        The similar-thought check runs first (thought-appending design
+        decision 4). When a new part has candidates, nothing is written: the
+        result lists them by ref and the turn's next round must propose
+        again, once, with no second candidate round. A candidate round writes
+        no proposal, so the one-proposal rule still allows that call. In the
+        last round the limit allows, no round is left for that call, so
+        layer 2 is skipped and the proposal is written at once, with its
+        strong matches named: the user always gets a card.
+        """
+        parts = parse_proposal(arguments, self.filing.categories, self.zone)
+        refs = await refs_for(self.session, self.conversation, before_next_row=True)
+        check = await check_parts(
+            self.session,
+            self.user,
+            parts,
+            refs,
+            config=self.config,
+            settings=self.settings,
+            again=self._checked or turn.last_round,
+            conversation_id=self.conversation.id,
+            http_client=self.http_client,
+        )
+        if check.has_candidates:
+            result, similar = candidates_note(
+                parts, check, refs, self.config.filing.seen_summary_chars, self.zone
+            )
+            self._checked = True
+            # After a candidate round the model proposes again, choosing
+            # add_to or new for each part, so the user always gets a card.
+            turn.force_tool = PROPOSE_TOOL
+            return ToolOutcome(
+                result=result, summary="Checked for similar thoughts", details={"similar": similar}
+            )
+
+        drop_held_note(self.context, self.held_parts)
+        self.held_parts = None
+        proposal, replaced = await write_proposal(
+            self.session,
+            self.conversation,
+            with_similar([part.as_dict() for part in parts], check),
+            await next_position(self.session, self.conversation),
+            push=self.command == "push",
+            refs=refs,
+        )
+        self._proposed = True
+        return ToolOutcome(
+            result=PROPOSAL_SHOWN,
+            summary="Proposed a thought to file",
+            details={"proposal_id": str(proposal.id)},
+            events=[
+                (
+                    "proposal",
+                    {
+                        **proposal_payload(
+                            proposal, await part_lookup(self.session, self.user, [proposal])
+                        ),
+                        # The earlier proposal whose card now shows as replaced.
+                        "replaces": str(replaced) if replaced else None,
+                    },
+                )
+            ],
+        )
+
+    async def aclose(self) -> None:
+        pass
+
+
 class Turn:
     """Runs the tool loop for one message and stores what it produces."""
 
@@ -120,42 +278,28 @@ class Turn:
         call: ModelCall,
         config: ChatConfig,
         context: list[dict[str, Any]],
-        filing: Filing,
+        providers: list[ToolProvider],
         forced_tool: dict[str, Any] | None = None,
-        command: str | None = None,
-        held_parts: list[dict[str, Any]] | None = None,
-        settings: Settings | None = None,
-        http_client: httpx2.AsyncClient | None = None,
-        zone: ZoneInfo | None = None,
+        tool_rounds: int | None = None,
     ):
         self.session = session
-        # The user's zone, read once from the request: the search tool's days
-        # and the proposal's dates are in it (thought-dates design decision 3).
-        self.zone = zone or ZoneInfo(DEFAULT_ZONE)
-        self.settings = settings or get_settings()
-        self.http_client = http_client
         self.user = user
         self.conversation = conversation
         self.call = call
         self.config = config
         self.context = context
-        self.filing = filing
+        # The built-in tools first, then one provider per connector that is on.
+        self.providers = providers
+        self.tools = [definition for provider in providers for definition in provider.definitions()]
+        # Connector data from earlier turns is in this turn's context too.
+        self.tool_state = TurnToolState(read_connector_data=holds_connector_data(context))
         self.forced_tool = forced_tool
-        self.command = command
-        # The held proposal's parts the context's note lists, if any.
-        self.held_parts = held_parts
+        # Every round counts, whatever its tools: a search, a similar-thought
+        # check, or a connector call.
+        self.tool_rounds = tool_rounds or config.tool_rounds
         self._first_chunks: AsyncIterator[Any] | None = None
         # The count before this turn, so the soft limit is noted once per crossing.
         self._tokens_before = conversation.last_prompt_tokens
-        # One proposal per turn: a second propose_thought call is refused.
-        self._proposed = False
-        # Set by a candidate round of the similar-thought check: the next
-        # proposal call skips layer 2, and the next round must make it.
-        self._checked = False
-        self._force_propose = False
-        # Set during the last round the limit allows: no round is left to
-        # force a proposal in, so a proposal call skips layer 2.
-        self._last_round = False
         # The round being read, until it is stored: an interrupted turn keeps its text.
         self._in_flight: RoundState | None = None
         # Set when the turn was cancelled (server shutdown): its settle step
@@ -164,15 +308,24 @@ class Turn:
         # Set once the turn's reason for ending is stored (the tool round limit).
         self._end_stored = False
 
+    async def aclose(self) -> None:
+        """Close what the providers opened (connector sessions). Every
+        provider is closed even when one fails. Safe to call more than once."""
+        for provider in self.providers:
+            try:
+                await provider.aclose()
+            except Exception:
+                logger.exception("Could not close a tool provider")
+
     def _options(self, round_number: int) -> dict[str, Any]:
-        options: dict[str, Any] = {"tools": self.filing.tools}
+        options: dict[str, Any] = {"tools": self.tools}
         if round_number == 0 and self.forced_tool is not None:
             options["tool_choice"] = self.forced_tool
-        elif self._force_propose:
-            # After a candidate round the model proposes again, choosing
-            # add_to or new for each part, so the user always gets a card.
-            options["tool_choice"] = forced_tool(PROPOSE_TOOL)
-            self._force_propose = False
+        elif self.tool_state.force_tool is not None:
+            # A provider asked for this round's tool (a proposal after a
+            # similar-thought candidate round).
+            options["tool_choice"] = forced_tool(self.tool_state.force_tool)
+            self.tool_state.force_tool = None
         return options
 
     async def open(self) -> None:
@@ -228,8 +381,8 @@ class Turn:
 
     async def _rounds(self) -> AsyncIterator[Event]:
         last_answer: Message | None = None
-        for round_number in range(self.config.tool_rounds):
-            self._last_round = round_number == self.config.tool_rounds - 1
+        for round_number in range(self.tool_rounds):
+            self.tool_state.last_round = round_number == self.tool_rounds - 1
             if round_number == 0:
                 assert self._first_chunks is not None, "open() first"
                 chunks = self._first_chunks
@@ -371,114 +524,66 @@ class Turn:
         except Exception:
             logger.exception("Could not store a failed answer")
 
+    def _provider_for(self, name: str) -> ToolProvider:
+        for provider in self.providers:
+            if provider.owns(name):
+                return provider
+        raise ToolArgumentError(f"there is no tool named '{name}'")
+
+    async def _hold(
+        self, provider: ToolProvider, name: str, arguments: dict[str, Any]
+    ) -> ToolOutcome:
+        """Store the call as an action for the user to approve, instead of
+        calling the server (decision 7). The row is committed with the tool
+        message, whose position it takes."""
+        target = provider.action_target(name)
+        action = new_action(
+            self.conversation.id,
+            self.user.id,
+            target,
+            arguments,
+            await next_position(self.session, self.conversation),
+        )
+        self.session.add(action)
+        return ToolOutcome(
+            result=ACTION_SHOWN,
+            summary=f"{tool_label(name)} is waiting for your approval",
+            details={"action_id": str(action.id)},
+            events=[("action", action_payload(action, target.title))],
+        )
+
     async def _run_tool(self, tool_call: dict[str, Any], position: int) -> AsyncIterator[Event]:
         name = tool_call["function"]["name"]
-        summary = ""
-        extra: dict[str, Any] = {}
-        details: dict[str, Any] | None = None
         try:
             arguments = tool_arguments(tool_call["function"]["arguments"])
-            if name == SEARCH_TOOL:
-                search = parse_search(arguments)
-                found = await search_tool_result(
-                    self.session,
-                    self.user,
-                    search,
-                    settings=self.settings,
-                    config=self.config.search,
-                    conversation_id=self.conversation.id,
-                    http_client=self.http_client,
-                    zone=self.zone,
-                    refs=await refs_for(self.session, self.conversation, before_next_row=True),
-                )
-                result = found.text
-                extra = {"sources": found.sources}
-                details = {"sources": found.sources}
-                summary = (
-                    f"Looked up your thoughts dated {search.days_text}"
-                    if search.by_date_only
-                    else f"Searched your thoughts for “{search.query}”"
-                )
-            elif name == PROPOSE_TOOL and self._proposed:
-                result = ALREADY_PROPOSED
-                summary = "Already proposed in this answer"
-            elif name == PROPOSE_TOOL:
-                result, summary, details, event = await self._propose(arguments)
-                if event is not None:
-                    yield event
+            provider = self._provider_for(name)
+            if provider.needs_approval(name, self.tool_state):
+                outcome = await self._hold(provider, name, arguments)
             else:
-                raise ToolArgumentError(f"there is no tool named '{name}'")
+                outcome = await provider.call(name, arguments, self.tool_state)
         except (ValueError, ToolArgumentError) as exc:
             # Sent back to the model, which gets another round to call it right.
-            result = f"Error: {exc}. Call the tool again with valid arguments."
-            summary = "The tool call was not valid"
+            outcome = ToolOutcome(
+                result=f"Error: {exc}. Call the tool again with valid arguments.",
+                summary="The tool call was not valid",
+            )
         except ApiError as exc:
             if exc.code != ErrorCode.VALIDATION_ERROR:
                 raise
-            result = f"Error: {exc.message}. Call the tool again with valid arguments."
-            summary = "The tool call was not valid"
-
-        await self._store(
-            role="tool", tool_call_id=tool_call["id"], content=result, details=details
-        )
-        self.context.append({"role": "tool", "tool_call_id": tool_call["id"], "content": result})
-        yield ("tool", {"name": name, "phase": "end", "summary": summary, **extra})
-
-    async def _propose(
-        self, arguments: dict[str, Any]
-    ) -> tuple[str, str, dict[str, Any], Event | None]:
-        """A propose_thought call: the tool result, the tool summary, the
-        tool message's details, and the proposal event when one is written.
-
-        The similar-thought check runs first (design decision 4). When a new
-        part has candidates, nothing is written: the result lists them by ref
-        and the next round must propose again, once, with no second candidate
-        round. A candidate round writes no proposal, so the one-proposal rule
-        still allows that call. In the last round the limit allows, no round
-        is left for that call, so layer 2 is skipped and the proposal is
-        written at once, with its strong matches named: the user always gets
-        a card.
-        """
-        parts = parse_proposal(arguments, self.filing.categories, self.zone)
-        refs = await refs_for(self.session, self.conversation, before_next_row=True)
-        check = await check_parts(
-            self.session,
-            self.user,
-            parts,
-            refs,
-            config=self.config,
-            settings=self.settings,
-            again=self._checked or self._last_round,
-            conversation_id=self.conversation.id,
-            http_client=self.http_client,
-        )
-        if check.has_candidates:
-            result, similar = candidates_note(
-                parts, check, refs, self.config.filing.seen_summary_chars, self.zone
+            outcome = ToolOutcome(
+                result=f"Error: {exc.message}. Call the tool again with valid arguments.",
+                summary="The tool call was not valid",
             )
-            self._checked = True
-            self._force_propose = True
-            return result, "Checked for similar thoughts", {"similar": similar}, None
 
-        drop_held_note(self.context, self.held_parts)
-        self.held_parts = None
-        proposal, replaced = await write_proposal(
-            self.session,
-            self.conversation,
-            with_similar([part.as_dict() for part in parts], check),
-            await next_position(self.session, self.conversation),
-            push=self.command == "push",
-            refs=refs,
+        for event in outcome.events:
+            yield event
+        await self._store(
+            role="tool", tool_call_id=tool_call["id"], content=outcome.result, details=outcome.details
         )
-        self._proposed = True
-        event: Event = (
-            "proposal",
-            {
-                **proposal_payload(
-                    proposal, await part_lookup(self.session, self.user, [proposal])
-                ),
-                # The earlier proposal whose card now shows as replaced.
-                "replaces": str(replaced) if replaced else None,
-            },
+        self.context.append(
+            {"role": "tool", "tool_call_id": tool_call["id"], "content": outcome.result}
         )
-        return PROPOSAL_SHOWN, "Proposed a thought to file", {"proposal_id": str(proposal.id)}, event
+        end: dict[str, Any] = {"name": name, "phase": "end", "summary": outcome.summary}
+        if outcome.failed:
+            end["failed"] = True
+        yield ("tool", {**end, **outcome.extra})

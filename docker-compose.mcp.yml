@@ -1,0 +1,30 @@
+# MCP connectors with a Google Calendar server (MCP_ENABLED=true):
+#   docker compose -f docker-compose.yml -f docker-compose.mcp.yml up --build
+# Put your Google OAuth client at .data/gcal-mcp/gcp-oauth.keys.json first and
+# sign in once. See docs/connectors.md#google-calendar for the steps.
+services:
+  gcal-mcp:
+    build: ./mcp/google-calendar
+    volumes:
+      # Your Google OAuth client. Compose stops with an error when it is missing.
+      - type: bind
+        source: ./.data/gcal-mcp/gcp-oauth.keys.json
+        target: /config/gcp-oauth.keys.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - gcal-mcp-tokens:/tokens
+    # No host port: only the backend reaches it, on the compose network.
+
+  backend:
+    environment:
+      MCP_ENABLED: "true"
+      MCP_CONNECTORS_PATH: /srv/mcp-connectors.yaml
+    volumes:
+      - ./mcp/google-calendar/connectors.yaml:/srv/mcp-connectors.yaml:ro
+    depends_on:
+      gcal-mcp:
+        condition: service_started
+
+volumes:
+  gcal-mcp-tokens:

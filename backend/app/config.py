@@ -2,6 +2,7 @@ import base64
 import binascii
 import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Self
 
 from pydantic import Field, field_validator, model_validator
@@ -55,6 +56,14 @@ class Settings(BaseSettings):
     demo_session_ttl_hours: float = Field(default=24, gt=0)
     demo_max_sessions: int = Field(default=500, gt=0)
 
+    # MCP connectors (openspec mcp-connectors design decision 5). Off unless
+    # the operator turns them on; demo mode forces them off.
+    mcp_enabled: bool = False
+    # Lets users add connectors of their own, beside the operator's.
+    mcp_user_connectors: bool = False
+    # The operator's connectors and the catalog. Unset reads app/connectors.yaml.
+    mcp_connectors_path: Path | None = None
+
     @field_validator("key_encryption_key", mode="before")
     @classmethod
     def decode_key_encryption_key(cls, value: object) -> bytes:
@@ -75,6 +84,7 @@ class Settings(BaseSettings):
         "oidc_internal_url",
         "firebase_project_id",
         "auth_allowed_emails",
+        "mcp_connectors_path",
         mode="before",
     )
     @classmethod
@@ -133,6 +143,9 @@ class Settings(BaseSettings):
                     "Remove ALLOW_CUSTOM_PROVIDER=true: demo mode turns the custom provider off"
                 )
             self.allow_custom_provider = False
+            if "mcp_enabled" in self.model_fields_set and self.mcp_enabled:
+                raise ValueError("Remove MCP_ENABLED=true: demo mode turns connectors off")
+            self.mcp_enabled = False
         return self
 
     @property

@@ -99,7 +99,7 @@ The Connectors section SHALL offer a small catalog of known servers, each with a
 
 ### Requirement: Testing a connector lists its tools
 
-A Test action SHALL connect to the server, list its tools, and store the list with each tool's name, description, input schema, and read-only hint. The settings SHALL show each tool with a switch and a badge that says whether it reads or acts. A new tool SHALL start switched off. The model SHALL be offered only tools from the last stored list, so a server that changes its tools changes nothing until the user tests again. A test that fails SHALL say why in plain words: the server could not be reached, refused the auth, or did not answer as an MCP server. A tool whose prefixed name would be too long for a tool name SHALL be listed as unavailable and SHALL NOT be switchable.
+A Test action SHALL connect to the server, list its tools, and store the list with each tool's name, description, input schema, and read-only hint. The settings SHALL show each tool with a switch and a badge that says whether it reads or acts. A new tool SHALL start switched off. The model SHALL be offered only tools from the last stored list, so a server that changes its tools changes nothing until the user tests again. A test that fails SHALL say why in plain words: the server could not be reached, refused the auth, or did not answer as an MCP server. Changing a connector's URL SHALL clear its stored tool list, so the new server's tools are offered only after a test; moving it to another server SHALL need the auth value entered again. A tool whose prefixed name would be too long for a tool name SHALL be listed as unavailable and SHALL NOT be switchable.
 
 #### Scenario: Successful test
 
@@ -117,6 +117,17 @@ A Test action SHALL connect to the server, list its tools, and store the list wi
 - **WHEN** the server refuses the connector's auth
 - **THEN** the settings say the server refused the auth, with error code `connector_auth_failed`
 
+#### Scenario: Server refuses the tool list
+
+- **WHEN** a user tests a connector whose server answers the tool listing with a JSON-RPC error
+- **THEN** the settings say the server did not answer as an MCP server, with error code `connector_protocol_error`
+
+#### Scenario: URL changed to another server
+
+- **WHEN** a user changes a connector's URL to another server without entering its token again
+- **THEN** the system responds with HTTP 422 and error code `validation_error`, and the stored token is not sent anywhere
+- **AND** once the URL is changed, the connector offers no tools until the user tests it again
+
 #### Scenario: Server changes its tools
 
 - **WHEN** the server adds a tool after the last test
@@ -124,7 +135,7 @@ A Test action SHALL connect to the server, list its tools, and store the list wi
 
 ### Requirement: A tool acts only after the user approves
 
-A tool SHALL count as read-only only when its read or act badge says it reads. The badge SHALL start from the server's read-only hint: a tool the server marks read-only starts as reads, and every other tool starts as acts. The user SHALL be able to change a tool marked reads to acts, and SHALL NOT be able to change a tool the server does not mark read-only to reads. When the model calls a tool marked acts, the system SHALL NOT call the server. It SHALL store the call as an action awaiting approval, show it in the chat as a card with the connector, the tool, and its arguments in readable form, and tell the model that the action has not run. Approving the card SHALL call the server once and show the outcome on the card; declining SHALL call nothing. The outcome, or the decline, SHALL be passed to the model in the next turn. An action SHALL be approvable only until the next turn starts in its conversation; after that, its card SHALL show that it expired. The user SHALL be able to set "always allow" on a tool marked acts, and that tool SHALL then run without a card, except as the untrusted-data requirement below says.
+A tool SHALL count as read-only only when its read or act badge says it reads. The badge SHALL start from the server's read-only hint: a tool the server marks read-only starts as reads, and every other tool starts as acts. The user SHALL be able to change a tool marked reads to acts, and SHALL NOT be able to change a tool the server does not mark read-only to reads. A tool the operator takes out of its read-only list SHALL act from then on, without waiting for a test. When the model calls a tool marked acts, the system SHALL NOT call the server. It SHALL store the call as an action awaiting approval, show it in the chat as a card with the connector, the tool, and its arguments in readable form, and tell the model that the action has not run. Approving the card SHALL call the server once and show the outcome on the card; declining SHALL call nothing. When the call was sent but no outcome came back (a timeout, a lost connection, an interrupted approval), the card SHALL say it is not known whether the action ran and SHALL NOT offer it for approval again. A turn that starts while an approved action runs SHALL wait for its outcome. The outcome, or the decline, SHALL be passed to the model in the next turn. An action SHALL be approvable only until the next turn starts in its conversation; after that, its card SHALL show that it expired. The user SHALL be able to set "always allow" on a tool marked acts, and that tool SHALL then run without a card, except as the untrusted-data requirement below says.
 
 #### Scenario: Model creates an event
 
@@ -150,6 +161,12 @@ A tool SHALL count as read-only only when its read or act badge says it reads. T
 - **WHEN** the user sends another message and then tries to approve the earlier card
 - **THEN** the system responds with HTTP 409 and error code `action_expired`, and the card shows that it expired
 
+#### Scenario: Server too slow to answer
+
+- **WHEN** the user approves the card and the server does not answer within the call time limit
+- **THEN** the card says it is not known whether the action ran, and offers no second approval
+- **AND** the next turn's context tells the model the outcome is not known
+
 #### Scenario: Approved twice
 
 - **WHEN** the approval is sent twice, from two tabs
@@ -167,7 +184,7 @@ A tool SHALL count as read-only only when its read or act badge says it reads. T
 
 ### Requirement: Tool results are untrusted data
 
-A connector tool's result SHALL be passed to the model marked as data from that connector that may contain instructions it must not follow. The text passed on SHALL be cut to a configured size, with a note that it was cut. Content that is not text SHALL be replaced by a note naming its kind. Once a connector result has been passed to the model in a turn, every later call in that turn to a tool marked acts SHALL need a card, even when the tool is set to always allow.
+A connector tool's result SHALL be passed to the model marked as data from that connector that may contain instructions it must not follow. The text passed on SHALL be cut to a configured size, with a note that it was cut. Content that is not text SHALL be replaced by a note naming its kind. Once a connector result has been passed to the model in a turn, every later call in that turn to a tool marked acts SHALL need a card, even when the tool is set to always allow. A connector result from an earlier turn, or an approved action's returned data, that is still in the turn's context counts as passed to the model in that turn.
 
 #### Scenario: Result marked as data
 
@@ -182,6 +199,11 @@ A connector tool's result SHALL be passed to the model marked as data from that 
 #### Scenario: Always-allow after reading connector data
 
 - **WHEN** the model reads a calendar event and then, in the same turn, calls an always-allowed tool marked acts
+- **THEN** the call is shown as a card and does not run until the user approves it
+
+#### Scenario: Always-allow after an earlier turn read connector data
+
+- **WHEN** an earlier turn read a calendar event, and in the next turn the model calls an always-allowed tool marked acts
 - **THEN** the call is shown as a card and does not run until the user approves it
 
 ### Requirement: Connectors are chosen per conversation

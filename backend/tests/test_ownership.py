@@ -12,7 +12,7 @@ from sqlalchemy.pool import NullPool
 from app.auth import get_current_user, get_jwks_cache, get_or_create_user
 from app.db import create_engine, get_session
 from app.errors import ApiError, ErrorCode, register_error_handlers
-from app.models import Base, User
+from app.models import Base, Connector, Conversation, ToolAction, User
 from app.ownership import get_owned_or_404, owned_by
 from tests.conftest import TEST_ISSUER
 
@@ -138,3 +138,42 @@ def test_http_response_is_identical_for_other_users_and_missing_records(
     assert other_user.status_code == 404
     assert other_user.json() == missing.json()
     assert other_user.json()["error"]["code"] == ErrorCode.NOT_FOUND
+
+
+async def test_connectors_and_actions_are_scoped_to_their_owner(sessions, alice_bob_note):
+    alice, bob, _note = alice_bob_note
+    async with sessions() as session:
+        connector = Connector(user_id=alice.id, name="calendar", source="user", url="http://mcp/x")
+        conversation = Conversation(user_id=alice.id, title="t")
+        other_conversation = Conversation(user_id=alice.id, title="u")
+        session.add_all([connector, conversation, other_conversation])
+        await session.flush()
+        action = ToolAction(
+            conversation_id=conversation.id,
+            user_id=alice.id,
+            connector_id=connector.id,
+            position=1,
+            connector_name="calendar",
+            tool="create_event",
+            arguments={},
+        )
+        session.add(action)
+        await session.commit()
+
+    async with sessions() as session:
+        assert (await get_owned_or_404(session, Connector, connector.id, alice)).name == "calendar"
+        in_conversation = ToolAction.conversation_id == conversation.id
+        found = await get_owned_or_404(session, ToolAction, action.id, alice, in_conversation)
+        assert found.tool == "create_event"
+
+        attempts = [
+            (Connector, connector.id, bob, ()),
+            (ToolAction, action.id, bob, (in_conversation,)),
+            # The owner, through another of their conversations.
+            (ToolAction, action.id, alice, (ToolAction.conversation_id == other_conversation.id,)),
+            (Connector, uuid.uuid4(), alice, ()),
+        ]
+        for model, record_id, user, where in attempts:
+            with pytest.raises(ApiError) as error:
+                await get_owned_or_404(session, model, record_id, user, *where)
+            assert (error.value.status_code, error.value.code) == (404, ErrorCode.NOT_FOUND)

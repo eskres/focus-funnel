@@ -21,6 +21,7 @@ You bring your own model provider. Each user saves their own API key for Nebius,
 - **Filing:** a proposal shows as a card you can edit. Confirm saves it as a thought, with the text you wrote as its raw text, and the card links to it. A message with several things to keep shows one card per part, and "Merge into one" joins them. Each thought has a category: one of six fixed kinds, or one you add in **Settings**.
 - **Search:** the search tool finds your filed thoughts by meaning and by words at once, in Postgres with pgvector. The thoughts an answer used show under it as sources, which you can sort newest first and filter by tag. [docs/search.md](docs/search.md) covers the embedding model, tuning, and rebuilding search indexes.
 - **Thoughts:** a source or a saved card opens the thought in a side sheet over the chat. The address names the open thought, so you can copy it, and Back closes the sheet.
+- **Connectors (off by default):** the chat can use tools from MCP servers, such as a Google Calendar server you run yourself. Reads run at once; anything that changes something shows a card and waits for your approval, unless you set that tool to always allow. [docs/connectors.md](docs/connectors.md) covers the switches, the risks, and the Google Calendar example with `docker-compose.mcp.yml`.
 
 ## Stack
 
@@ -113,6 +114,7 @@ This project uses a recent Next.js version. Before you change the frontend, read
 | `.env` | Secrets and service addresses. `.env.example` explains each value. |
 | `backend/app/providers.yaml` | The provider presets: base URL, the link to get a key, the data-handling notice, and what each provider reports. `PROVIDERS_CONFIG_PATH` points to another file. |
 | `backend/app/chat/chat.yaml` | The chat settings users cannot change: the temperature range, the reply length limit, the tool round limit, and the reasoning efforts each model accepts. `CHAT_CONFIG_PATH` points to another file. |
+| `backend/app/connectors.yaml` | The operator's MCP connectors and the catalog of known servers, read only when `MCP_ENABLED=true`. `MCP_CONNECTORS_PATH` points to another file. See [docs/connectors.md](docs/connectors.md). |
 
 The backend refuses to start when one of these files is not valid. The server configuration never chooses a model for a user.
 

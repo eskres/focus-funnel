@@ -32,11 +32,21 @@ def owned_by(model: type[OwnedModel], user: User) -> ColumnElement[bool]:
 
 
 async def get_owned_or_404(
-    session: AsyncSession, model: type[T], record_id: uuid.UUID, user: User
+    session: AsyncSession,
+    model: type[T],
+    record_id: uuid.UUID,
+    user: User,
+    *where: ColumnElement[bool],
 ) -> T:
+    """The user's record with this id, or 404.
+
+    Extra conditions narrow it further, such as an action's conversation
+    (ToolAction.conversation_id == conversation_id); a record that fails one
+    is reported as missing too.
+    """
     record = (
         await session.execute(
-            select(model).where(model.id == record_id, owned_by(model, user))
+            select(model).where(model.id == record_id, owned_by(model, user), *where)
         )
     ).scalar_one_or_none()
     if record is None:

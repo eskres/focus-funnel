@@ -28,12 +28,14 @@ export const toolEvent = (
   phase: "start" | "end",
   summary?: string,
   sources?: WireSource[],
+  failed?: boolean,
 ) =>
   `event: tool\ndata: ${JSON.stringify({
     name,
     phase,
     ...(summary ? { summary } : {}),
     ...(sources ? { sources } : {}),
+    ...(failed ? { failed } : {}),
   })}\n\n`;
 
 /** A date as the server sends it. */
@@ -93,6 +95,68 @@ export const proposalEvent = (
   replaces: string | null = null,
 ) =>
   `event: proposal\ndata: ${JSON.stringify({ ...wireProposal(id, parts, position), replaces })}\n\n`;
+
+/** A connector action as the server sends it: in the event, on the conversation, and from the approval route. */
+export const wireAction = (id: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  position: 2,
+  connector_id: "k1",
+  connector: "calendar",
+  tool: "create_event",
+  title: "Create event",
+  arguments: { summary: "Dentist", start: "2026-11-06T09:00", attendees: ["sam@example.com"] },
+  status: "pending",
+  result: null,
+  error_code: null,
+  ...extra,
+});
+
+export const actionEvent = (id: string, extra: Record<string, unknown> = {}) =>
+  `event: action\ndata: ${JSON.stringify(wireAction(id, extra))}\n\n`;
+
+/** A connector tool as `GET /api/connectors` lists it. */
+export const wireTool = (name: string, extra: Record<string, unknown> = {}) => ({
+  name,
+  title: null,
+  description: `Does ${name}.`,
+  read_only_hint: true,
+  available: true,
+  enabled: true,
+  acts: false,
+  always_allow: false,
+  reads_allowed: true,
+  ...extra,
+});
+
+/** A connector as `GET /api/connectors` lists it. */
+export const wireConnector = (
+  id: string,
+  name: string,
+  tools: unknown[] = [],
+  extra: Record<string, unknown> = {},
+) => ({
+  id,
+  name,
+  source: "user",
+  url: `https://${name}.example.com/mcp`,
+  auth_kind: "none",
+  auth_header: null,
+  auth_set: false,
+  auth_last4: null,
+  tools,
+  tools_listed_at: "2026-11-01T10:00:00Z",
+  ...extra,
+});
+
+/** The body of `GET /api/connectors`. */
+export const connectorsListing = (connectors: unknown[], extra: Record<string, unknown> = {}) => ({
+  connectors,
+  user_connectors_allowed: true,
+  catalog: [],
+  warning_accepted: true,
+  max_tools: 20,
+  ...extra,
+});
 
 /** A source as the server sends it, in the tool event and on a stored tool message. */
 export type WireSource = { id: string; title: string; created_at: string; tags: string[] };

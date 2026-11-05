@@ -7,6 +7,8 @@ export type Meter = {
   estimated: boolean;
   /** Unknown when the provider does not report it. */
   contextLength: number | null;
+  /** The estimated share of the tokens that tool definitions take, built-in and from connectors. */
+  toolTokens?: number;
 };
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
@@ -18,7 +20,7 @@ export function formatTokens(tokens: number): string {
 /** A small bar and figure: the tokens in use against the model's context length. */
 export function ContextMeter({ meter }: { meter: Meter | null }) {
   if (!meter) return null;
-  const { tokens, estimated, contextLength } = meter;
+  const { tokens, estimated, contextLength, toolTokens } = meter;
   const share = contextLength ? tokens / contextLength : null;
   const over = share !== null && share > 1;
   const figure = contextLength
@@ -31,6 +33,7 @@ export function ContextMeter({ meter }: { meter: Meter | null }) {
         "flex items-center gap-2 text-xs",
         over ? "text-destructive" : "text-muted-foreground",
       )}
+      title={toolTokens ? `tools: ${formatTokens(toolTokens)}` : undefined}
     >
       {share !== null && (
         <div
@@ -58,6 +61,12 @@ export function ContextMeter({ meter }: { meter: Meter | null }) {
           </span>
         )}
       </span>
+      {toolTokens ? (
+        // Shown on hover through the title; read out by screen readers.
+        <span className="sr-only" data-testid="context-tools">
+          tools: {formatTokens(toolTokens)}
+        </span>
+      ) : null}
     </div>
   );
 }
