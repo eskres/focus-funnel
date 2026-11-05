@@ -280,7 +280,12 @@ async def follow_turn(
     """
     await get_conversation(session, user, conversation_id)
     turn = running.get(conversation_id)
-    if turn is None or turn.user_id != user.id:
+    if turn is not None and turn.user_id != user.id:
+        turn = None
+    # The stream lasts as long as the turn, and the request's session would
+    # keep its connection until the response ends: hand it back now.
+    await session.close()
+    if turn is None:
         return Response(status_code=204)
     return log_response(running.follow(turn))
 

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx2
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.config import ChatConfig
@@ -32,7 +33,8 @@ from app.chat.tools import (
 )
 from app.config import Settings, get_settings
 from app.errors import ApiError, ErrorCode, output_limit_reached, tool_loop_limit
-from app.models import Conversation, Message, User
+from app.models import Conversation, Message, UsageEvent, User
+from app.ownership import not_found
 from app.provider_config import StreamUsage
 
 logger = logging.getLogger(__name__)
@@ -139,6 +141,8 @@ class Turn:
         # Set when the turn was cancelled (server shutdown): its settle step
         # stores the answer with `store_interrupted`.
         self.interrupted = False
+        # Set once the turn's reason for ending is stored (the tool round limit).
+        self._end_stored = False
 
     def _options(self, round_number: int) -> dict[str, Any]:
         options: dict[str, Any] = {"tools": self.filing.tools}
@@ -168,6 +172,9 @@ class Turn:
             # Nothing is stored here: an await now could be cancelled again.
             # The settle step, which runs shielded, calls store_interrupted.
             self.interrupted = True
+            raise
+        except Exception as exc:
+            await self._store_failed(exc)
             raise
 
     async def store_interrupted(self) -> None:
@@ -205,14 +212,10 @@ class Turn:
 
             state = RoundState()
             self._in_flight = state
-            try:
-                async for event in read_round(
-                    chunks, state, self.call.provider.capabilities.stream_usage
-                ):
-                    yield event
-            except Exception as exc:
-                await self._store_failed(state, exc)
-                raise
+            async for event in read_round(
+                chunks, state, self.call.provider.capabilities.stream_usage
+            ):
+                yield event
             async for event in self._note_usage(state):
                 yield event
 
@@ -245,6 +248,7 @@ class Turn:
         if last_answer is not None:
             last_answer.error_code = "tool_loop_limit"
             await self.session.commit()
+            self._end_stored = True
         raise tool_loop_limit()
 
     async def _note_usage(self, state: RoundState) -> AsyncIterator[Event]:
@@ -260,19 +264,41 @@ class Turn:
             if info is not None and info.context_length:
                 usage["context_length"] = info.context_length
             yield ("usage", usage)
-        recorded = await record_usage(
-            self.session,
-            self.call,
-            "chat",
-            state.prompt_tokens,
-            state.completion_tokens,
-            self.conversation.id,
-        )
+        recorded = await self._record_usage(state)
         if recorded is None:
             return
         notice = await usage_warning(self.session, self.user.id)
         if notice is not None:
             yield ("notice", notice)
+
+    async def _record_usage(self, state: RoundState) -> UsageEvent | None:
+        """Record the round's usage with the conversation.
+
+        A conversation deleted while its turn ran makes this commit fail. The
+        usage is then recorded without it, as a deleted conversation's
+        records are kept, and the turn ends: there is nothing left to answer.
+        """
+        conversation_id = self.conversation.id
+        try:
+            return await record_usage(
+                self.session,
+                self.call,
+                "chat",
+                state.prompt_tokens,
+                state.completion_tokens,
+                conversation_id,
+            )
+        except Exception:
+            await self.session.rollback()
+            exists = await self.session.scalar(
+                select(Conversation.id).where(Conversation.id == conversation_id)
+            )
+            if exists is not None:
+                raise
+        await record_usage(
+            self.session, self.call, "chat", state.prompt_tokens, state.completion_tokens
+        )
+        raise not_found()
 
     async def _suggest_compact(self) -> AsyncIterator[Event]:
         info = await self.call.info()
@@ -285,14 +311,37 @@ class Turn:
         if notice is not None:
             yield ("notice", notice)
 
-    async def _store_failed(self, state: RoundState, exc: Exception) -> None:
+    async def _store_failed(self, exc: Exception) -> None:
+        """Store the answer of a turn that ended with `exc` as failed with its code.
+
+        Whatever raised (reading a round, opening the next one, a tool, the
+        usage record), the answer is stored as failed, with the text of the
+        round in flight. Nothing is added when the last stored message is
+        already an answer (a reply cut at the length limit, or a complete one
+        before a later step failed) or the turn stored its own reason.
+        """
+        if self._end_stored:
+            return
         try:
-            await self._store(
-                role="assistant",
-                content=state.answer or None,
-                status="failed",
-                error_code=exc.code if isinstance(exc, ApiError) else "internal_error",
+            # Read before the rollback, which expires every loaded object.
+            conversation_id = self.conversation.id
+            # The error may have hit a write part way.
+            await self.session.rollback()
+            last = await last_message(self.session, conversation_id)
+            if last is None or ends_answered(last):
+                return
+            state = self._in_flight
+            self.session.add(
+                Message(
+                    conversation_id=conversation_id,
+                    position=last.position + 1,
+                    role="assistant",
+                    content=(state.answer if state else None) or None,
+                    status="failed",
+                    error_code=exc.code if isinstance(exc, ApiError) else "internal_error",
+                )
             )
+            await self.session.commit()
         except Exception:
             logger.exception("Could not store a failed answer")
 
