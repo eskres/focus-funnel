@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 import anyio
 
 from app.chat.sse import DONE, Event, terminal_event
-from app.errors import ErrorCode
+from app.errors import answer_interrupted
 
 logger = logging.getLogger(__name__)
 
@@ -112,10 +112,8 @@ async def _run(turn: RunningTurn, events: AsyncIterator[Event], settle: Settle) 
         async for event in events:
             turn.append(event)
     except asyncio.CancelledError:
-        terminal = (
-            "error",
-            {"error": {"code": ErrorCode.INTERNAL_ERROR, "message": "Something went wrong."}},
-        )
+        # Only shutdown cancels a turn: its followers learn it did not finish.
+        terminal = terminal_event(answer_interrupted())
         raise
     except Exception as exc:
         terminal = terminal_event(exc)
@@ -155,3 +153,21 @@ async def follow(turn: RunningTurn) -> AsyncIterator[Event]:
         if turn.ended:
             return
         await changed.wait()
+
+
+async def shutdown(timeout: float) -> None:
+    """Cancel every running turn and wait, at most `timeout` seconds, for each
+    to store its interrupted answer and release its claim.
+
+    A turn left after the wait is left to the startup sweep of the next start.
+    """
+    # Let a turn started just now take its first step: a task cancelled
+    # before it starts never runs its `finally`.
+    await asyncio.sleep(0)
+    tasks = [turn.task for turn in _running.values() if turn.task is not None]
+    for task in tasks:
+        task.cancel()
+    pending = set(tasks) | _settling
+    if pending:
+        # `wait`, not `wait_for`: a turn that runs over is not cancelled again.
+        await asyncio.wait(pending, timeout=timeout)

@@ -112,6 +112,20 @@ Alternatives:
 Alternatives:
 - **Answer from the registry alone.** Saves one query, but would answer 204 for an unknown or foreign id instead of 404. Rejected.
 
+### 10. The interrupted answer is stored in the settle step, by the sweep's rule
+
+On `CancelledError`, `Turn.events()` only marks the turn interrupted and re-raises. The settle step (Decision 8), which already runs shielded, calls `Turn.store_interrupted()` first: roll back (the cancel may have hit a write part way), then store a `failed` / `answer_interrupted` assistant message with the text of the round in flight, then commit and release as usual. Storing from the settle step keeps every write on the turn's `AsyncSession` in one shielded task; storing inside `Turn.events()` under its own shield would race the settle step's release if a second cancel arrived.
+
+Whether to store is decided the same way as the startup sweep, by the last stored message: a failed answer is stored unless it is an assistant message without tool calls (an answer already stored: complete, cut, or failed) or a `summary` (an accepted `/compact`, which answers no message; a `/compact` claim left at a crash would otherwise get a failed answer after the summary). A conversation with no messages is only freed. A turn cancelled after a tool round was stored gets an empty failed answer after that round, since the round keeps its own text. Live followers get the terminal `error` event `answer_interrupted` with the message "This answer did not finish. Send the message again to retry."
+
+Shutdown (`running.shutdown`) first yields once so a turn created just before has started (a task cancelled before its first step never runs its `finally`), then cancels every turn and waits with `asyncio.wait` and a 5-second bound, so a turn that runs over is not cancelled a second time; the startup sweep covers it. The sweep runs in the lifespan before serving, so the app now reads its tables at startup: tests that start the app use a migrated test database.
+
+uvicorn closes open connections (waiting `timeout_graceful_shutdown`, unlimited by default) before it runs the lifespan exit, so while a browser follows an answer a SIGTERM waits for the answer to end before the turns are cancelled. That is the same as before this change; a forced stop leaves the claim to the startup sweep. The `uvicorn` command is unchanged apart from the one-process comment.
+
+Alternatives:
+- **Store in `Turn.events()` under `asyncio.shield`.** Rejected for the race above.
+- **Track in memory whether the answer was stored.** A cancel during the final `commit` leaves it unknown whether the row landed; reading the last stored message after the rollback does not guess.
+
 ## Risks / Trade-offs
 
 - [One process only] → Recorded as a non-goal and in the Dockerfile comment. The registry is the single place to replace with a shared queue and pub/sub later.

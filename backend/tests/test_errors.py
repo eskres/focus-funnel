@@ -45,7 +45,7 @@ def test_validation_failure_uses_error_format():
     assert "name" in error["message"]
 
 
-def test_unknown_route_uses_error_format(settings_env):
+def test_unknown_route_uses_error_format(settings_env, test_database_url):
     with TestClient(app) as client:
         response = client.get("/does-not-exist")
     assert_error_shape(response, 404, ErrorCode.NOT_FOUND)
@@ -96,6 +96,7 @@ def test_stream_only_errors_have_their_codes():
     assert errors.output_limit_reached(False).code == ErrorCode.OUTPUT_LIMIT_REACHED
     assert "thinking" in errors.output_limit_reached(True).message
     assert errors.tool_loop_limit().code == ErrorCode.TOOL_LOOP_LIMIT
+    assert errors.answer_interrupted().code == ErrorCode.ANSWER_INTERRUPTED == "answer_interrupted"
 
 
 def test_auth_mode_error_constructors_return_their_documented_status():

@@ -1,5 +1,6 @@
 """Stored conversations: creating them, their model, and their messages."""
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -11,6 +12,8 @@ from app.chat.loadout import find_loadout_model
 from app.errors import ApiError, ErrorCode, conversation_busy
 from app.models import ChatModel, Conversation, Message, User
 from app.ownership import get_owned_or_404
+
+logger = logging.getLogger(__name__)
 
 TITLE_LENGTH = 60
 
@@ -153,3 +156,66 @@ async def release_turn(session: AsyncSession, conversation_id: uuid.UUID) -> Non
         .execution_options(synchronize_session=False)
     )
     await session.commit()
+
+
+async def last_message(session: AsyncSession, conversation_id: uuid.UUID) -> Message | None:
+    return (
+        await session.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.position.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+def ends_answered(last: Message | None) -> bool:
+    """Whether a conversation whose last message is `last` needs no failed answer.
+
+    An assistant message without tool calls is a stored answer (complete,
+    cut, or failed). A summary is an accepted /compact, which answers no
+    message. Anything else (the user's message, a tool call, a tool result)
+    is a turn that stopped before its answer was stored.
+    """
+    if last is None or last.role == "summary":
+        return True
+    return last.role == "assistant" and not last.tool_calls
+
+
+def interrupted_answer(conversation_id: uuid.UUID, position: int, content: str | None = None) -> Message:
+    """The failed answer stored for a turn the server stopped."""
+    return Message(
+        conversation_id=conversation_id,
+        position=position,
+        role="assistant",
+        content=content or None,
+        status="failed",
+        error_code=ErrorCode.ANSWER_INTERRUPTED,
+    )
+
+
+async def release_stale_turns(session: AsyncSession) -> int:
+    """Free every claimed conversation; run once at startup, before serving.
+
+    The backend runs as one process, so a claim that exists when it starts
+    belongs to a process that died mid-turn. A conversation whose turn
+    stopped before its answer was stored gets a failed `answer_interrupted`
+    answer, so it shows as not finished and can be sent again. Returns how
+    many claims were released.
+    """
+    claimed = list(
+        (
+            await session.execute(
+                select(Conversation).where(Conversation.turn_started_at.is_not(None))
+            )
+        ).scalars()
+    )
+    for conversation in claimed:
+        last = await last_message(session, conversation.id)
+        if not ends_answered(last):
+            session.add(interrupted_answer(conversation.id, last.position + 1))
+        conversation.turn_started_at = None
+    await session.commit()
+    if claimed:
+        logger.info("Released %d chat turn(s) a stopped server left claimed", len(claimed))
+    return len(claimed)
