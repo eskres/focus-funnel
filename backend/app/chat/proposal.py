@@ -33,7 +33,7 @@ from app.chat.tools import ToolArgumentError, parse_proposal
 from app.chat.usage import completion_usage, record_usage
 from app.config import Settings
 from app.errors import model_not_set
-from app.models import Conversation, Message, Proposal, User
+from app.models import Conversation, Message, Proposal, Thought, User
 from app.providers import provider_for_user
 from app.thoughts.categories import user_categories
 from app.thoughts.store import MAX_RAW_TEXT, known_tags
@@ -180,12 +180,55 @@ async def write_proposal(
     return proposal, replaced
 
 
-def proposal_payload(proposal: Proposal) -> dict[str, Any]:
-    """A proposal as the chat receives it, in the event and in the conversation."""
+def part_thought_ids(proposals: list[Proposal]) -> list[uuid.UUID]:
+    """The ids of the thoughts saved from these proposals' parts, each once."""
+    ids = {
+        uuid.UUID(str(part["thought_id"]))
+        for proposal in proposals
+        for part in proposal.parts
+        if part.get("thought_id")
+    }
+    return sorted(ids)
+
+
+async def saved_titles(
+    session: AsyncSession, user: User, proposals: list[Proposal]
+) -> dict[str, str]:
+    """The current title of each thought saved from these proposals, by its id
+    as text, in one query. A deleted thought has no entry."""
+    ids = part_thought_ids(proposals)
+    if not ids:
+        return {}
+    rows = await session.execute(
+        select(Thought.id, Thought.title).where(Thought.id.in_(ids), Thought.user_id == user.id)
+    )
+    return {str(thought_id): title for thought_id, title in rows}
+
+
+def proposal_payload(
+    proposal: Proposal, titles: dict[str, str] | None = None
+) -> dict[str, Any]:
+    """A proposal as the chat receives it, in the event and in the conversation.
+
+    Each part also carries its thought's current title (`saved_title`) and
+    whether that thought was deleted (`deleted`), from `titles`, the answer of
+    saved_titles(). Without it, as for a new proposal in the stream, a part
+    has neither.
+    """
+
+    def with_saved(part: dict[str, Any]) -> dict[str, Any]:
+        thought_id = part.get("thought_id")
+        known = titles is not None and thought_id is not None
+        return {
+            **part,
+            "saved_title": titles.get(str(thought_id)) if known else None,
+            "deleted": known and str(thought_id) not in titles,
+        }
+
     return {
         "id": str(proposal.id),
         "position": proposal.position,
-        "parts": proposal.parts,
+        "parts": [with_saved(part) for part in proposal.parts],
         "replaced_by": str(proposal.replaced_by_id) if proposal.replaced_by_id else None,
     }
 

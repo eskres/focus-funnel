@@ -10,6 +10,7 @@ zeros.
 import re
 import zlib
 from collections.abc import Callable, Iterable
+from contextlib import contextmanager
 
 EMBED_MODEL = "vendor/embed-model"
 EMBED_PRICE = "0.00000002"
@@ -69,3 +70,71 @@ def run_as(url: str, user_id, fake, work, **settings_overrides):
         return await work(session, user, get_settings(), fake.http_client())
 
     return run_db(url, main)
+
+
+def entries(url, thought_id) -> dict[str, list[int]]:
+    """The chunks each index holds for a thought, by index status and model."""
+    import uuid as uuid_module
+
+    from sqlalchemy import select
+
+    from app.models import SearchIndex, ThoughtEmbedding
+    from tests.chat_helpers import run_db
+
+    async def work(session):
+        rows = await session.execute(
+            select(SearchIndex.status, SearchIndex.embedding_model, ThoughtEmbedding.chunk)
+            .join(SearchIndex, SearchIndex.id == ThoughtEmbedding.index_id)
+            .where(ThoughtEmbedding.thought_id == uuid_module.UUID(str(thought_id)))
+            .order_by(ThoughtEmbedding.chunk)
+        )
+        found: dict[str, list[int]] = {}
+        for status, model, chunk in rows:
+            found.setdefault(f"{status}:{model}", []).append(chunk)
+        return found
+
+    return run_db(url, work)
+
+
+def found_by_words(url, user_id, words: str) -> list[str]:
+    """The titles of the user's thoughts that a word search for `words` finds."""
+    import uuid as uuid_module
+
+    from sqlalchemy import func, select, text
+
+    from app.models import Thought
+    from tests.chat_helpers import run_db
+
+    async def work(session):
+        rows = await session.execute(
+            select(Thought.title).where(
+                Thought.user_id == uuid_module.UUID(str(user_id)),
+                Thought.search_tsv.op("@@")(func.plainto_tsquery(text("'english'::regconfig"), words)),
+            )
+        )
+        return list(rows.scalars())
+
+    return run_db(url, work)
+
+
+def head_texts(fake) -> list[str]:
+    """Every text the fake provider was asked to embed, in order."""
+    return [text for body in fake.embed_requests for text in body["input"]]
+
+
+@contextmanager
+def counted_queries():
+    """The SQL statements run while the block runs, from any engine."""
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    statements: list[str] = []
+
+    def record(conn, cursor, statement, *args):
+        statements.append(statement)
+
+    event.listen(Engine, "before_cursor_execute", record)
+    try:
+        yield statements
+    finally:
+        event.remove(Engine, "before_cursor_execute", record)

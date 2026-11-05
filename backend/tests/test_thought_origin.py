@@ -3,11 +3,9 @@ and the detail answer's origin (2.2)."""
 
 import json
 import uuid
-from contextlib import contextmanager
 
 import pytest
-from sqlalchemy import event, select
-from sqlalchemy.engine import Engine
+from sqlalchemy import select
 
 from app.models import Proposal, Thought
 from app.thoughts.search import search_thoughts
@@ -25,7 +23,12 @@ from tests.chat_helpers import (
     tool_call_chunks,
     user_id_for,
 )
-from tests.thought_helpers import EMBED_MODEL, models_with_embedding, run_as
+from tests.thought_helpers import (
+    EMBED_MODEL,
+    counted_queries,
+    models_with_embedding,
+    run_as,
+)
 
 pytestmark = pytest.mark.postgres
 
@@ -199,20 +202,6 @@ def test_no_origin_without_a_proposal_or_after_the_conversation_is_deleted(
 
     assert client.delete(f"/api/conversations/{conversation_id}", headers=alice).status_code == 204
     assert origin(client, alice, thought_id) is None
-
-
-@contextmanager
-def counted_queries():
-    statements: list[str] = []
-
-    def record(conn, cursor, statement, *args):
-        statements.append(statement)
-
-    event.listen(Engine, "before_cursor_execute", record)
-    try:
-        yield statements
-    finally:
-        event.remove(Engine, "before_cursor_execute", record)
 
 
 def test_the_origin_costs_no_more_queries(client, alice, fake, conversation_id, test_database_url):
