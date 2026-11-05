@@ -1,7 +1,7 @@
 "use client";
 
 // A thought's own date as fields, shared by the thought sheet's edit mode and
-// (with thought-dates task 5.2) the proposal card (design decision 6). Native
+// the proposal card (thought-dates design decision 6). Native
 // date and time inputs, so no picker dependency. The browser does not check
 // the range itself: the server's refusal naming `when` shows in the caller's
 // alert, and the fields keep what the user typed.

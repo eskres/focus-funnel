@@ -27,33 +27,74 @@ function dayParts(day: string): { year: number; month: number; date: number; wee
   return { year, month, date, weekday };
 }
 
-/** "Fri 2 Oct 2026" for "2026-10-02"; the text as it is when it is not a day. */
-export function formatDay(day: string): string {
+/** How a date reads: with its year (the sheet), or without (a date choice on a card). */
+type Style = { year?: boolean };
+
+/** "Fri 2 Oct 2026" for "2026-10-02" ("Fri 2 Oct" with no year); the text as it is when it is not a day. */
+export function formatDay(day: string, { year = true }: Style = {}): string {
   const parts = dayParts(day);
   if (!parts) return day;
-  return `${WEEKDAYS[parts.weekday]} ${parts.date} ${MONTHS[parts.month - 1]} ${parts.year}`;
+  const short = `${WEEKDAYS[parts.weekday]} ${parts.date} ${MONTHS[parts.month - 1]}`;
+  return year ? `${short} ${parts.year}` : short;
 }
 
 /** "Fri 2 Oct 2026, 19:00", or "Fri 2 Oct 2026" for a day with no time. */
-export function formatPoint(point: string): string {
+export function formatPoint(point: string, style: Style = {}): string {
   const { day, time } = splitPoint(point);
-  return time ? `${formatDay(day)}, ${time}` : formatDay(day);
+  return time ? `${formatDay(day, style)}, ${time}` : formatDay(day, style);
 }
 
 /**
  * The whole date: "Fri 2 Oct 2026, 19:00", "Tue 3 Nov 2026 – Fri 6 Nov 2026",
  * or "Mon 5 Oct 2026, 09:30 – 11:00" for an end later the same day.
  */
-export function formatWhen(when: When): string {
-  const start = formatPoint(when.start);
+export function formatWhen(when: When, style: Style = {}): string {
+  const start = formatPoint(when.start, style);
   if (!when.end) return start;
   const end = splitPoint(when.end);
   if (end.day === splitPoint(when.start).day && end.time) return `${start} – ${end.time}`;
-  return `${start} – ${formatPoint(when.end)}`;
+  return `${start} – ${formatPoint(when.end, style)}`;
 }
 
 /** The browser's local date now, as `YYYY-MM-DD`. */
 export function localToday(now: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+const LONG_WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const LONG_MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+/** The day `count` days after a `YYYY-MM-DD` day, counted on the calendar alone. */
+export function addDays(day: string, count: number): string {
+  const parts = dayParts(day);
+  if (!parts) return day;
+  const moved = new Date(Date.UTC(parts.year, parts.month - 1, parts.date + count));
+  return moved.toISOString().slice(0, 10);
+}
+
+/**
+ * A day's heading on the Upcoming page: "Today", "Tomorrow", or "Monday 5
+ * October", with the year only when it is not this year's.
+ */
+export function dayHeading(day: string, today: string): string {
+  if (day === today) return "Today";
+  if (day === addDays(today, 1)) return "Tomorrow";
+  const parts = dayParts(day);
+  if (!parts) return day;
+  const heading = `${LONG_WEEKDAYS[parts.weekday]} ${parts.date} ${LONG_MONTHS[parts.month - 1]}`;
+  return day.slice(0, 4) === today.slice(0, 4) ? heading : `${heading} ${parts.year}`;
 }

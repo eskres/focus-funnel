@@ -9,11 +9,11 @@ fail a store. These operations run on Postgres only.
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import httpx2
-from sqlalchemy import delete, func, literal_column, select
+from sqlalchemy import delete, func, literal_column, nulls_first, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -285,6 +285,48 @@ async def known_tags(session: AsyncSession, user: User, limit: int) -> list[str]
         .limit(limit)
     )
     return list(rows.scalars())
+
+
+UPCOMING_LIMIT = 200
+
+
+async def list_upcoming(
+    session: AsyncSession, user: User, from_day: date, limit: int = UPCOMING_LIMIT
+) -> tuple[list[Any], bool]:
+    """The user's dated thoughts that end, or start when they have no end, on
+    `from_day` or later, in date order, and whether more than `limit` exist.
+
+    Date order is by start day, a day with no time before one with a time, then
+    by start time and filing time (thought-dates design decision 8). `from_day`
+    is the browser's local today; the server does not guess it.
+    """
+    rows = (
+        await session.execute(
+            select(
+                Thought.id,
+                Thought.title,
+                Thought.category,
+                Thought.starts_on,
+                Thought.starts_at,
+                Thought.ends_on,
+                Thought.ends_at,
+                Thought.time_zone,
+            )
+            .where(
+                Thought.user_id == user.id,
+                Thought.starts_on.is_not(None),
+                func.coalesce(Thought.ends_on, Thought.starts_on) >= from_day,
+            )
+            .order_by(
+                Thought.starts_on,
+                nulls_first(Thought.starts_at),
+                Thought.created_at,
+                Thought.id,
+            )
+            .limit(limit + 1)
+        )
+    ).all()
+    return list(rows[:limit]), len(rows) > limit
 
 
 async def get_thought(session: AsyncSession, user: User, thought_id: uuid.UUID) -> Thought:

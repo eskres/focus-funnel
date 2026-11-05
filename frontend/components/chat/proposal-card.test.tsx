@@ -2,6 +2,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { browserTimeZone } from "@/lib/time-zone";
 import {
   delta,
   detail,
@@ -158,6 +159,7 @@ describe("a proposal card", () => {
       summary: "Buy both.",
       tags: ["groceries", "milk"],
       category: "decision",
+      when: null,
     });
   });
 
@@ -353,7 +355,7 @@ describe("the held proposal before an action", () => {
 
     await waitFor(() =>
       expect(calls.filter((c) => c.path === "/api/chat").map((c) => c.body)).toEqual([
-        { message: "/compact", conversation_id: "c1" },
+        { message: "/compact", time_zone: browserTimeZone(), conversation_id: "c1" },
       ]),
     );
   });

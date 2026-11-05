@@ -3,6 +3,7 @@
 // because `EventSource` cannot send a request body.
 import { BackendUnreachableError, toApiError } from "@/lib/api";
 import { parseSse, type SseEvent } from "@/lib/sse";
+import { browserTimeZone } from "@/lib/time-zone";
 
 // `/delete` is left out on purpose: nothing in the product suggests it.
 export const COMMANDS = [
@@ -50,7 +51,8 @@ export async function* streamChat(
   signal?: AbortSignal,
   onStored?: (conversationId: string) => void,
 ): AsyncGenerator<SseEvent, void, undefined> {
-  const body: Record<string, unknown> = { message: request.message };
+  // The browser's zone, so the model's "today" is the user's local day.
+  const body: Record<string, unknown> = { message: request.message, time_zone: browserTimeZone() };
   if (request.conversationId) body.conversation_id = request.conversationId;
   if (request.choice) {
     body.provider_id = request.choice.providerId;

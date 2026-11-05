@@ -54,6 +54,22 @@ describe("Sidebar", () => {
     expect(screen.getByText("New conversation").closest("a")).toHaveAttribute("href", "/app");
   });
 
+  it("links to the Upcoming page under New conversation, marked while it is open", async () => {
+    fakeApi({ "GET /api/conversations": json(200, { conversations: [milk], archived: [] }) });
+    pathname = "/app/upcoming";
+    renderSidebar();
+
+    await screen.findByText("Oat milk");
+    const nav = screen.getByRole("navigation", { name: "Conversations" });
+    const anchors = Array.from(nav.querySelectorAll("a")).map((a) => a.textContent?.trim());
+    expect(anchors.slice(0, 2)).toEqual(["New conversation", "Upcoming"]);
+    const upcoming = screen.getByText("Upcoming").closest("a");
+    expect(upcoming).toHaveAttribute("href", "/app/upcoming");
+    expect(upcoming).toHaveAttribute("aria-current", "page");
+    // "upcoming" is a page, not a conversation.
+    expect(rowTitles("Recent conversations")).toEqual(["Oat milk"]);
+  });
+
   it("says there are no conversations yet", async () => {
     fakeApi({ "GET /api/conversations": json(200, { conversations: [], archived: [] }) });
     renderSidebar();
