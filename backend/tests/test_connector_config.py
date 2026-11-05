@@ -310,3 +310,57 @@ def test_app_does_not_read_the_file_when_disabled(settings_env, tmp_path):
     with TestClient(app):
         pass
     assert get_connector_config.cache_info().currsize == 0
+
+
+REPO = Path(__file__).parent.parent.parent
+OVERLAY = REPO / "docker-compose.mcp.yml"
+OVERLAY_CONNECTORS = REPO / "mcp" / "google-calendar" / "connectors.yaml"
+CALENDAR_READS = {
+    "list-calendars",
+    "list-events",
+    "search-events",
+    "get-event",
+    "list-colors",
+    "get-freebusy",
+    "get-current-time",
+}
+
+
+def test_the_compose_overlay_connector_file_offers_the_calendar_without_sign_in():
+    # Task 10.1: docker-compose.mcp.yml hands the backend this file.
+    config = load_connector_config(OVERLAY_CONNECTORS)
+    assert config.catalog == ()
+    [calendar] = config.connectors
+    assert calendar.name == "calendar"
+    assert calendar.url == "http://gcal-mcp:8000/mcp"
+    assert calendar.auth.kind == "none"
+    # manage-accounts would start a Google sign-in from inside a chat.
+    assert calendar.tools is not None and "manage-accounts" not in calendar.tools
+    assert len(calendar.tools) == 12
+    assert set(calendar.read_only) == CALENDAR_READS
+
+
+def test_the_compose_overlay_keeps_the_server_off_the_host_and_points_the_backend_at_it():
+    overlay = yaml.safe_load(OVERLAY.read_text())
+    server = overlay["services"]["gcal-mcp"]
+    assert "ports" not in server
+    assert (REPO / server["build"] / "Dockerfile").exists()
+    backend = overlay["services"]["backend"]
+    assert backend["environment"]["MCP_ENABLED"] == "true"
+    target = backend["environment"]["MCP_CONNECTORS_PATH"]
+    source, mounted, _ = backend["volumes"][0].split(":")
+    assert mounted == target
+    assert (REPO / source).resolve() == OVERLAY_CONNECTORS.resolve()
+
+
+def test_the_catalog_guide_points_at_a_section_of_the_connector_docs():
+    # Task 10.2: the shipped catalog links to docs/connectors.md#google-calendar.
+    (entry,) = load_connector_config(SHIPPED).catalog
+    page, anchor = entry.guide.rsplit("#", 1)
+    assert page.endswith("/docs/connectors.md")
+    headings = [
+        line.lstrip("#").strip().lower().replace(" ", "-")
+        for line in (REPO / "docs" / "connectors.md").read_text().splitlines()
+        if line.startswith("#")
+    ]
+    assert anchor in headings
