@@ -8,7 +8,7 @@ from app.db import Base
 
 
 class UserCategory(Base):
-    """A category a user added, next to the five fixed kinds in code.
+    """A category a user added, next to the six fixed kinds in code.
 
     The limit of 20 per user is enforced in code. name is trimmed and
     lowercased.
