@@ -243,6 +243,18 @@ The confirm, the additions list, and undo live in `app/thoughts/additions.py`. D
 
 **Alternatives:** let the hint's confirm read the version on the server (rejected: it would skip the check that the user saw the current summary); the stored part's `based_on` only (rejected: after a 409 the card could never confirm against the new version).
 
+### 20. The measurement job in detail (decided during task 5.1, 2026-11-05)
+
+The job is `app/evals/similar_thoughts.py`, and the test set is `backend/evals/similar_thoughts.yaml`. Decision 6 left these details open:
+
+- **The in-memory index.** Every filed thought of a case and every background thought makes up the corpus. Each corpus thought, and each case's later thought (the query), is embedded once as its head entry (`check_query()`, with no query instruction, as the check embeds a part). The baseline is computed in Python, as the SQL of decision 18 computes it: every pair up to 2,000, past that 2,000 random pairs of different heads from a fixed seed so a run repeats, and `percentile_cont` interpolation. The cut-offs come from the app's own `cutoffs()` and `chat.yaml`. So no database is needed.
+- **Meaning only.** The words half of the check does not depend on the model and needs Postgres full-text search, so the job leaves it out. Recall is therefore a lower bound, and false offers are exact, because a match by words only never gets the hint.
+- **The rates.** Recall is the share of pairs whose filed thought is among the later thought's candidates: past the candidate cut-off, best first, at most three. A false offer is a near-miss whose best candidate, whichever thought it is, passes the strong cut-off. As in the app, a task never gets the hint, so near-misses whose later thought is a task are left out of that rate. Repeated tasks therefore count only in the model's choice.
+- **Layer 2** (with `--chat-model`). For each case with candidates, the model sees the system prompt, the later thought's summary as the user's words, its first `propose_thought` call, and the candidate note from `candidates_note()`. The call is forced to `propose_thought`, as the round after a candidate round is. It is right when it adds to the filed thought for a pair, and when it files as new for a near-miss. That rate is reported with no target, because decision 6 gives none.
+- **Exit status.** 0 when both targets are met, 1 when one is missed, and 2 when the job cannot run (no key, an unknown provider, a malformed test set, a provider error). The provider, model, and dimensions default to the app's embedding settings.
+
+**Alternatives:** a scratch Postgres database as in `scripts/search_eval.py` (rejected: the operator would need a database, and only the words half would gain); counting a repeated task's strong match as a false offer (rejected: the app never shows it).
+
 ## Risks / Trade-offs
 
 - [Depends on `thought-editing`, not built, and on `explore`, merged and archived] → The tasks start after `thought-editing` merges. If `origin`, `check_category()`, the `saved_title` lookup, or the offer code (`asked_proposal()`, `offer_note()`, `Turn._proposed`) change shape, re-read decisions 2, 3, 4, 7, and 10.

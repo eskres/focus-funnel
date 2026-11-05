@@ -1,0 +1,737 @@
+# The similar-thought check's test set (openspec thought-appending, design
+# decision 6). Run it with:
+#
+#   uv run python -m app.evals.similar_thoughts --provider nebius --model <id>
+#
+# whenever a preset or the default embedding model is added or changed, and
+# with --chat-provider/--chat-model when a chat model is added to a preset.
+#
+# The file is data: add cases here, no code changes needed.
+#
+#   pairs        a filed thought, and the same thing revisited later in other
+#                words. The filed one should be among the later one's
+#                candidates.
+#   near_misses  a filed thought, and a later one on the same topic that is a
+#                different thing. The later one should not get the card's
+#                "Similar" hint. Repeated tasks are near-misses too: a task
+#                done every year is a new task each year, and the app never
+#                shows the hint for a task, so they count only for the model's
+#                choice (--chat-model).
+#   background   unrelated thoughts, so the baseline has a realistic corpus.
+#
+# Every filed thought and every background thought is in the corpus; each
+# later thought is checked against all of them. `filed` dates are only shown
+# to the chat model. Drafted synthetically; reviewed by the project owner
+# before task 5.1 is ticked.
+
+targets:
+  # Share of pairs whose filed thought is among the candidates.
+  recall: 0.9
+  # Share of near-misses that are not tasks and get the "Similar" hint.
+  false_offers: 0.1
+
+pairs:
+  - id: p01
+    filed: {title: "Learn to make sourdough", tags: [baking, cooking], category: idea, filed: 2024-02-11,
+            summary: "Want to try baking sourdough bread at home. Need a starter and a dutch oven."}
+    later: {title: "Bread baking at home", tags: [bread], category: idea,
+            summary: "Thinking again about baking my own naturally leavened bread. A friend offered me some of her starter."}
+  - id: p02
+    filed: {title: "Switch to a standing desk", tags: [health, office], category: idea, filed: 2024-05-02,
+            summary: "My back hurts after long days at the desk. A standing desk or a sit-stand converter might help."}
+    later: {title: "Back pain from sitting all day", tags: [back], category: note,
+            summary: "Sitting all day is wrecking my lower back again. Maybe a desk I can raise so I can stand part of the day."}
+  - id: p03
+    filed: {title: "Start a vegetable garden on the balcony", tags: [garden], category: idea, filed: 2024-03-20,
+            summary: "Grow tomatoes, basil and chillies in pots on the south-facing balcony."}
+    later: {title: "Balcony planters for herbs and tomatoes", tags: [plants], category: idea,
+            summary: "This spring I want pots on the balcony for basil, cherry tomatoes and maybe peppers."}
+  - id: p04
+    filed: {title: "Use Postgres for the recipe app", tags: [recipe-app, tech], category: decision, filed: 2024-09-14,
+            summary: "Decided on Postgres over MongoDB for the recipe app. The data is relational and I know it well."}
+    later: {title: "Database choice for the recipe app", tags: [side-project], category: decision,
+            summary: "Reconsidering where the recipe app stores its data. Still leaning to a relational database rather than a document store."}
+  - id: p05
+    filed: {title: "Read more fiction", tags: [reading], category: idea, filed: 2023-12-30,
+            summary: "I only read work books. Aim for one novel a month."}
+    later: {title: "Novels instead of business books", tags: [books], category: idea,
+            summary: "I want to get back into reading stories, not just nonfiction for work. A novel each month sounds doable."}
+  - id: p06
+    filed: {title: "Worried about Mum's memory", tags: [family, health], category: note, filed: 2024-10-03,
+            summary: "Mum forgot the stove on twice this month. Should talk to her doctor about a memory check."}
+    later: {title: "Mum keeps forgetting things", tags: [mum], category: note,
+            summary: "Mum left the gas on again and missed her appointment. I think she needs a cognitive assessment."}
+  - id: p07
+    filed: {title: "Plan a trip to Japan", tags: [travel], category: idea, filed: 2024-06-18,
+            summary: "Two weeks in Japan in spring. Tokyo, Kyoto, maybe Hiroshima. Cherry blossom season."}
+    later: {title: "Japan holiday next April", tags: [holiday], category: idea,
+            summary: "Looking at flights to Tokyo for the cherry blossoms next April, then the bullet train to Kyoto."}
+  - id: p08
+    filed: {title: "Learn Spanish", tags: [languages], category: idea, filed: 2024-01-07,
+            summary: "Duolingo every day plus a weekly conversation class, before the Mexico trip."}
+    later: {title: "Practising Spanish again", tags: [learning], category: idea,
+            summary: "Want to pick my Spanish back up. Daily app lessons and maybe a tutor to talk with."}
+  - id: p09
+    filed: {title: "Cut down on coffee", tags: [health, sleep], category: decision, filed: 2024-04-09,
+            summary: "At most two cups a day and none after 2pm, because I sleep badly."}
+    later: {title: "Caffeine and sleep", tags: [sleep], category: note,
+            summary: "Sleeping poorly again. I think it is the afternoon espresso. Should stop coffee after lunch."}
+  - id: p10
+    filed: {title: "Newsletter for the climbing gym", tags: [climbing, gym], category: idea, filed: 2024-08-22,
+            summary: "A monthly email for members with route setting news and upcoming events."}
+    later: {title: "Email update for gym members", tags: [bouldering], category: idea,
+            summary: "The bouldering gym could send members a monthly email about new routes and competitions."}
+  - id: p11
+    filed: {title: "Refinance the mortgage", tags: [money, house], category: task, filed: 2025-01-12,
+            summary: "Ask the bank about refinancing. The fixed rate ends in June."}
+    later: {title: "Mortgage fixed term ending", tags: [finance], category: task,
+            summary: "Our fixed rate is about to run out. I need to compare new mortgage deals or remortgage."}
+  - id: p12
+    filed: {title: "Home office lighting", tags: [office], category: idea, filed: 2024-11-05,
+            summary: "The room is too dark for video calls. Get a key light or a daylight lamp."}
+    later: {title: "Look better on video calls", tags: [work], category: idea,
+            summary: "On calls my face is in shadow. Some kind of lamp facing me would help."}
+  - id: p13
+    filed: {title: "Side income from photography", tags: [photography, money], category: idea, filed: 2024-07-01,
+            summary: "Sell landscape prints online, maybe on Etsy."}
+    later: {title: "Selling my photos", tags: [prints], category: idea,
+            summary: "Could I make some money from my mountain photos by offering prints in an online shop?"}
+  - id: p14
+    filed: {title: "Team retro format is stale", tags: [work, team], category: note, filed: 2024-10-17,
+            summary: "Retros feel repetitive. Try a different format like start/stop/continue or a timeline."}
+    later: {title: "Retrospectives getting boring", tags: [agile], category: idea,
+            summary: "The team's retrospectives have become the same every time. I'd like to experiment with new formats."}
+  - id: p15
+    filed: {title: "Get a dog", tags: [family, pets], category: idea, filed: 2023-09-02,
+            summary: "A medium-size rescue dog once we have a garden. Need to think about walks while we are at work."}
+    later: {title: "Adopting a rescue dog", tags: [dog], category: idea,
+            summary: "The kids keep asking for a dog. Now that we have the garden, maybe adopt one from the shelter."}
+  - id: p16
+    filed: {title: "Learn to touch type", tags: [skills], category: idea, filed: 2024-02-26,
+            summary: "Still type with four fingers. Practise on keybr for 15 minutes a day."}
+    later: {title: "Typing faster", tags: [keyboard], category: idea,
+            summary: "I want to finally learn proper ten-finger typing with daily practice."}
+  - id: p17
+    filed: {title: "The car needs replacing soon", tags: [car], category: note, filed: 2024-03-03,
+            summary: "The Golf is 14 years old. The next car should be electric, maybe used."}
+    later: {title: "Next car electric?", tags: [ev], category: note,
+            summary: "The old Golf needs expensive repairs again. Thinking a second-hand EV would be the replacement."}
+  - id: p18
+    filed: {title: "Wedding speech ideas", tags: [tom, wedding], category: note, filed: 2025-02-14,
+            summary: "Best man speech for Tom: the camping story, the job interview mix-up, keep it under five minutes."}
+    later: {title: "Tom's wedding toast", tags: [speech], category: note,
+            summary: "Working on what I will say as best man at Tom's wedding. The tent story should open it."}
+  - id: p19
+    filed: {title: "Run a half marathon", tags: [running], category: idea, filed: 2024-04-28,
+            summary: "Train for a half marathon in autumn. A 12-week plan with three runs a week."}
+    later: {title: "Half marathon training", tags: [race], category: idea,
+            summary: "Mentally signed up for a 21k race this autumn. Need a training schedule."}
+  - id: p20
+    filed: {title: "Kitchen renovation budget", tags: [house, money], category: note, filed: 2024-12-09,
+            summary: "Quotes so far: 18k for cabinets and worktop, plus appliances. Maximum 25k in total."}
+    later: {title: "How much to spend on the new kitchen", tags: [renovation], category: note,
+            summary: "The kitchen refit keeps growing. My ceiling was 25k including the appliances."}
+  - id: p21
+    filed: {title: "Meditation habit", tags: [mindfulness], category: idea, filed: 2024-01-20,
+            summary: "Ten minutes of meditation each morning with Headspace."}
+    later: {title: "Morning mindfulness", tags: [habits], category: idea,
+            summary: "I'd like to start a short daily mindfulness practice before work again."}
+  - id: p22
+    filed: {title: "Pitch: offline mode for the app", tags: [work, product], category: idea, filed: 2024-09-30,
+            summary: "Customers in the field lose signal. Let the app queue changes offline and sync them later."}
+    later: {title: "App should work without signal", tags: [field-app], category: idea,
+            summary: "Field technicians keep losing their edits when there is no reception. We need offline sync."}
+  - id: p23
+    filed: {title: "Grandpa's war letters", tags: [family, history], category: idea, filed: 2023-11-11,
+            summary: "Scan grandpa's letters from the war and make a small book for the family."}
+    later: {title: "Digitise the old family letters", tags: [scanning], category: idea,
+            summary: "Those letters grandpa wrote in the 1940s should be scanned and printed as a booklet for everyone."}
+  - id: p24
+    filed: {title: "Switch bank", tags: [money], category: decision, filed: 2024-06-05,
+            summary: "Moving to a bank with no monthly fee. The current one charges 8 euros a month."}
+    later: {title: "Bank fees too high", tags: [banking], category: note,
+            summary: "Still paying a monthly account fee. I meant to move to a free current account."}
+  - id: p25
+    filed: {title: "Podcast about local history", tags: [podcast, town], category: idea, filed: 2024-05-19,
+            summary: "Short episodes on the history of each street in our town."}
+    later: {title: "Town history audio series", tags: [audio], category: idea,
+            summary: "What about an audio series where each episode tells the story of one street in town?"}
+  - id: p26
+    filed: {title: "Book club pick", tags: [book-club], category: note, filed: 2025-03-02,
+            summary: "Suggest Klara and the Sun by Kazuo Ishiguro for the next book club."}
+    later: {title: "Ishiguro for book club", tags: [reading], category: note,
+            summary: "For the book club I want to propose the Ishiguro novel about the robot companion."}
+  - id: p27
+    filed: {title: "Smart thermostat", tags: [house, energy], category: idea, filed: 2024-10-25,
+            summary: "Replace the old thermostat with a smart one, so we only heat when someone is home."}
+    later: {title: "Heating schedule", tags: [heating], category: idea,
+            summary: "The heating runs while we are out all day. A connected thermostat could fix that."}
+  - id: p28
+    filed: {title: "Ask for a raise", tags: [career], category: task, filed: 2025-01-28,
+            summary: "Prepare numbers for the salary talk in the March review: projects shipped, market rates."}
+    later: {title: "Salary review prep", tags: [work], category: task,
+            summary: "Before my annual review I want to gather evidence to negotiate a pay rise."}
+  - id: p29
+    filed: {title: "Weekly meal plan", tags: [food, family], category: idea, filed: 2024-08-04,
+            summary: "Plan dinners on Sunday and shop once, to stop wasting food."}
+    later: {title: "Planning meals ahead", tags: [cooking], category: idea,
+            summary: "We throw away so much food. Planning the week's dinners on the weekend would help."}
+  - id: p30
+    filed: {title: "Fix the leaking tap", tags: [house, diy], category: task, filed: 2025-02-02,
+            summary: "The bathroom tap drips. Replace the washer or the cartridge."}
+    later: {title: "Dripping bathroom faucet", tags: [plumbing], category: task,
+            summary: "The bathroom faucet is still dripping all night. Need to fix the washer."}
+
+near_misses:
+  - id: n01
+    filed: {title: "Trip to Lisbon in May", tags: [travel, portugal], category: idea, filed: 2024-02-02,
+            summary: "Long weekend in Lisbon with Sara. Trams, pasteis de nata, a day trip to Sintra."}
+    later: {title: "Weekend in Porto", tags: [travel], category: idea,
+            summary: "A separate trip to Porto with my brother in October, for the port cellars along the river."}
+  - id: n02
+    filed: {title: "Learn the guitar", tags: [music], category: idea, filed: 2023-10-10,
+            summary: "Pick up the acoustic guitar again and practise the basic chords."}
+    later: {title: "Learn the piano", tags: [music], category: idea,
+            summary: "I'd love to learn the piano, maybe with an app and a cheap digital keyboard."}
+  - id: n03
+    filed: {title: "Migrate the work CRM to Postgres", tags: [work, tech], category: decision, filed: 2024-07-15,
+            summary: "The team agreed to move the CRM from MySQL to Postgres next quarter."}
+    later: {title: "Database for my hobby blog", tags: [blog, tech], category: decision,
+            summary: "For my own blog I will just use SQLite. No need to run a database server."}
+  - id: n04
+    filed: {title: "Dad's knee surgery", tags: [family, health], category: event, filed: 2025-01-30,
+            summary: "Dad's knee replacement is on 12 March. Drive him to the hospital and stay the night."}
+    later: {title: "My own knee pain when running", tags: [running, health], category: note,
+            summary: "My left knee aches after long runs. Maybe see a physio about it."}
+  - id: n05
+    filed: {title: "Cancel Netflix", tags: [money, subscriptions], category: decision, filed: 2024-04-01,
+            summary: "Cancelled Netflix. We barely watch it any more."}
+    later: {title: "Spotify family plan", tags: [subscriptions], category: decision,
+            summary: "Switch music to a family plan so the kids get their own accounts."}
+  - id: n06
+    filed: {title: "Birthday present for Anna", tags: [gifts, anna], category: idea, filed: 2024-09-01,
+            summary: "Anna likes pottery. A voucher for a wheel-throwing class."}
+    later: {title: "Birthday present for Ben", tags: [gifts], category: idea,
+            summary: "Ben is into cycling. Maybe a good bike light or a saddle bag."}
+  - id: n07
+    filed: {title: "Plant an apple tree", tags: [garden], category: idea, filed: 2024-09-23,
+            summary: "Plant a dwarf apple tree in the back corner of the garden this autumn."}
+    later: {title: "Wildflower patch instead of lawn", tags: [garden, bees], category: idea,
+            summary: "Let part of the lawn grow into a wildflower meadow for the bees, and mow it less."}
+  - id: n08
+    filed: {title: "Quarterly OKRs for the team", tags: [work, goals], category: note, filed: 2025-01-06,
+            summary: "Q1 OKRs: cut onboarding time in half, ship the billing rewrite."}
+    later: {title: "My personal goals for the year", tags: [goals], category: note,
+            summary: "For myself this year: run more, read twelve books, save for a sabbatical."}
+  - id: n09
+    filed: {title: "Blog post about testing", tags: [writing, testing], category: idea, filed: 2024-06-12,
+            summary: "A post on how we test async code with fake providers."}
+    later: {title: "Conference talk on property-based testing", tags: [testing, talks], category: idea,
+            summary: "Submit a talk to PyCon about property-based testing with Hypothesis."}
+  - id: n10
+    filed: {title: "Fix the garden fence", tags: [garden, diy], category: task, filed: 2024-12-28,
+            summary: "Two fence panels blew down in the storm. Replace them."}
+    later: {title: "Paint the garden shed", tags: [garden, diy], category: task,
+            summary: "The shed's wood is going grey. Sand it and paint it this summer."}
+  - id: n11
+    filed: {title: "Book the dentist check-up", tags: [health], category: task, filed: 2024-03-04,
+            summary: "Six-monthly check-up and cleaning. Call Dr Weber's practice."}
+    later: {title: "Book the dentist check-up", tags: [health], category: task,
+            summary: "Time for the next dental check-up and cleaning. Call the practice this week."}
+  - id: n12
+    filed: {title: "Renew the car insurance", tags: [car, money], category: task, filed: 2024-11-02,
+            summary: "The renewal letter came. Compare quotes before the 30th."}
+    later: {title: "Renew the car insurance", tags: [car], category: task,
+            summary: "Car insurance is up for renewal again. Get two or three quotes before it rolls over."}
+  - id: n13
+    filed: {title: "File the tax return", tags: [tax, money], category: task, filed: 2024-05-10,
+            summary: "Gather the receipts for 2023 and file the tax return before the end of July."}
+    later: {title: "File this year's tax return", tags: [tax], category: task,
+            summary: "Collect the receipts for 2025 and send off the tax return before the July deadline."}
+  - id: n14
+    filed: {title: "Change the smoke alarm batteries", tags: [house, safety], category: task, filed: 2024-10-27,
+            summary: "Swap the batteries in all three smoke alarms when the clocks go back."}
+    later: {title: "Smoke alarm batteries", tags: [house], category: task,
+            summary: "Clocks went back, so the smoke alarms need fresh batteries."}
+  - id: n15
+    filed: {title: "Service the boiler", tags: [house], category: task, filed: 2024-09-15,
+            summary: "Annual boiler service before winter. Call the heating engineer."}
+    later: {title: "Boiler service", tags: [heating], category: task,
+            summary: "Book this year's boiler service before it gets cold."}
+  - id: n16
+    filed: {title: "Birthday card for Mum", tags: [family, mum], category: task, filed: 2024-06-01,
+            summary: "Mum's birthday is on the 14th. Get a card and flowers."}
+    later: {title: "Mum's birthday", tags: [mum], category: task,
+            summary: "Mum's birthday is coming up on the 14th again. Card and flowers."}
+  - id: n17
+    filed: {title: "Winter tyres on the car", tags: [car], category: task, filed: 2024-10-20,
+            summary: "Book the garage to put the winter tyres on before November."}
+    later: {title: "Switch to winter tyres", tags: [car], category: task,
+            summary: "It's getting icy. Get the winter tyres fitted at the garage."}
+  - id: n18
+    filed: {title: "Clean the gutters", tags: [house], category: task, filed: 2024-11-16,
+            summary: "Leaves are blocking the gutters again. Get the ladder out or call someone."}
+    later: {title: "Gutters full of leaves", tags: [house], category: task,
+            summary: "The gutters overflow in the rain. Clear them out this weekend."}
+  - id: n19
+    filed: {title: "Order contact lenses", tags: [health, shopping], category: task, filed: 2025-02-20,
+            summary: "Running out of lenses. Reorder a three-month supply."}
+    later: {title: "Reorder contact lenses", tags: [shopping], category: task,
+            summary: "Down to the last few pairs of lenses. Order another three months."}
+  - id: n20
+    filed: {title: "Book the car inspection", tags: [car], category: task, filed: 2024-04-14,
+            summary: "The car's annual inspection is due in May. Book a slot at the test centre."}
+    later: {title: "Car inspection due", tags: [car], category: task,
+            summary: "Annual roadworthiness test is due next month. Book it."}
+  - id: n21
+    filed: {title: "App for watering houseplants", tags: [app-idea, plants], category: idea, filed: 2024-03-08,
+            summary: "An app that reminds you to water each houseplant based on its species and the season."}
+    later: {title: "App for splitting bills with flatmates", tags: [app-idea], category: idea,
+            summary: "An app where flatmates log shared bills and it works out who owes whom each month."}
+  - id: n22
+    filed: {title: "Running shoes are worn out", tags: [running, gear], category: note, filed: 2024-08-30,
+            summary: "My trail shoes have 900 km on them. Time for new ones."}
+    later: {title: "Hiking boots leak", tags: [hiking, gear], category: note,
+            summary: "My hiking boots let water in on the last walk. Need waterproofing or new boots."}
+  - id: n23
+    filed: {title: "Weekly team newsletter at work", tags: [work, communication], category: idea, filed: 2024-05-24,
+            summary: "A short Friday email summarising what each squad shipped this week."}
+    later: {title: "Neighbourhood newsletter", tags: [neighbours, community], category: idea,
+            summary: "Our street could have a paper newsletter with events, swaps and lost cats."}
+  - id: n24
+    filed: {title: "No phones at dinner", tags: [family, screens], category: decision, filed: 2024-01-03,
+            summary: "Nobody brings a phone to the dinner table, parents included."}
+    later: {title: "Screen time limits for the kids", tags: [kids, screens], category: decision,
+            summary: "The kids get one hour of tablet a day on weekdays, more at weekends."}
+  - id: n25
+    filed: {title: "Grandma's 90th birthday", tags: [family], category: event, filed: 2025-04-01,
+            summary: "Grandma's 90th birthday party in Hamburg on 3 August."}
+    later: {title: "Uncle Peter's 60th", tags: [family], category: event,
+            summary: "Uncle Peter's 60th birthday dinner in Munich on 9 November."}
+  - id: n26
+    filed: {title: "Learn Rust", tags: [programming, learning], category: idea, filed: 2024-02-15,
+            summary: "Work through the Rust book to write faster command-line tools."}
+    later: {title: "Learn Go", tags: [programming], category: idea,
+            summary: "Go seems good for small network services at work. Try the Go tour."}
+  - id: n27
+    filed: {title: "Work laptop is slow", tags: [work, it], category: note, filed: 2024-11-21,
+            summary: "The work laptop takes five minutes to boot. Ask IT for an SSD upgrade."}
+    later: {title: "Tablet for reading", tags: [gadgets], category: idea,
+            summary: "A tablet for reading papers and comics on the train."}
+  - id: n28
+    filed: {title: "Volunteer at the food bank", tags: [volunteering], category: idea, filed: 2024-07-07,
+            summary: "Saturday mornings at the food bank, sorting donations."}
+    later: {title: "Donate blood", tags: [health, volunteering], category: idea,
+            summary: "I have never donated blood. Book an appointment at the donor centre."}
+  - id: n29
+    filed: {title: "Interview question bank", tags: [hiring, work], category: reference, filed: 2024-06-26,
+            summary: "Good questions for backend interviews: design a rate limiter, debug a slow query, review a pull request."}
+    later: {title: "Onboarding checklist for new hires", tags: [hiring, work], category: reference,
+            summary: "What a new engineer needs in week one: laptop, accounts, a buddy, and a first small ticket."}
+  - id: n30
+    filed: {title: "Cycle to work", tags: [commute, bike], category: idea, filed: 2024-04-02,
+            summary: "Cycle to work three days a week. 8 km each way. Need a lock and panniers."}
+    later: {title: "E-scooter for the station", tags: [commute], category: idea,
+            summary: "Maybe an e-scooter to get to the train station instead of waiting for the bus."}
+
+background:
+  - {title: "Call the plumber about the boiler pressure", tags: [house], category: task,
+     summary: "The boiler pressure keeps dropping below one bar. Ask the plumber to look at it."}
+  - {title: "Buy a new vacuum cleaner", tags: [shopping, house], category: task,
+     summary: "The old one lost suction. Look at cordless ones under 300."}
+  - {title: "Renew my passport", tags: [travel, documents], category: task,
+     summary: "Passport expires in August. Book a photo and fill in the form online."}
+  - {title: "Lunch with Marta on Thursday", tags: [friends], category: event,
+     summary: "Lunch with Marta at the Italian place near her office, Thursday at 12:30."}
+  - {title: "Idea for a board game about bees", tags: [games, bees], category: idea,
+     summary: "A cooperative board game where players run a hive through the seasons."}
+  - {title: "Write thank-you notes after the party", tags: [social], category: task,
+     summary: "Send notes to everyone who brought food to the housewarming."}
+  - {title: "Quarterly planning offsite", tags: [work], category: event,
+     summary: "The team offsite is in Leipzig on 4 and 5 June."}
+  - {title: "Why the deploy pipeline is slow", tags: [work, ci], category: note,
+     summary: "Most of the 20 minutes is the Docker build without layer caching."}
+  - {title: "Use feature flags for the billing rewrite", tags: [work, billing], category: decision,
+     summary: "Ship the new billing behind a flag and turn it on per customer."}
+  - {title: "Recipe for lentil soup", tags: [recipes], category: reference,
+     summary: "Red lentils, carrot, onion, cumin, a tin of tomatoes, simmer 25 minutes, lemon at the end."}
+  - {title: "Things to pack for camping", tags: [camping], category: reference,
+     summary: "Tent, mats, stove, gas, headlamps, water filter, first aid kit, rain jackets."}
+  - {title: "Try cold showers", tags: [health, habits], category: idea,
+     summary: "Thirty seconds of cold water at the end of the morning shower for a month."}
+  - {title: "Garage door makes a grinding noise", tags: [house], category: note,
+     summary: "It grinds on the way up. Probably the rollers need grease."}
+  - {title: "Call the vet about the cat's limp", tags: [pets, cat], category: task,
+     summary: "Mila is limping on her back leg since yesterday."}
+  - {title: "Kids' swimming lessons", tags: [kids], category: task,
+     summary: "Sign both kids up for the Saturday swimming course before it fills up."}
+  - {title: "Budget spreadsheet categories", tags: [money], category: reference,
+     summary: "Housing, food, transport, kids, fun, savings, gifts, irregular."}
+  - {title: "Idea: a shared tool library on our street", tags: [community], category: idea,
+     summary: "Neighbours lend drills, ladders and hedge trimmers instead of everyone buying them."}
+  - {title: "Ask Jonas about the API rate limits", tags: [work, api], category: task,
+     summary: "Our sync job hits the partner API limit at night. Ask Jonas what the quota is."}
+  - {title: "Read about stoicism", tags: [philosophy, reading], category: idea,
+     summary: "Start with Meditations by Marcus Aurelius, then Seneca's letters."}
+  - {title: "The meeting about the reorg", tags: [work], category: note,
+     summary: "Two teams merge in April. My manager stays the same; the roadmap is unclear."}
+  - {title: "Decision: no work email on weekends", tags: [work, boundaries], category: decision,
+     summary: "Email app off the phone from Friday evening to Monday morning."}
+  - {title: "Fix the wobbly kitchen chair", tags: [house, diy], category: task,
+     summary: "One leg is loose. Wood glue and a clamp overnight."}
+  - {title: "Concert tickets for Radiohead", tags: [music], category: task,
+     summary: "Presale opens Friday at 10. Two tickets, standing."}
+  - {title: "Thoughts on remote work", tags: [work], category: note,
+     summary: "I get more done at home, but I miss the hallway conversations. Two office days seems right."}
+  - {title: "Gift ideas for the in-laws", tags: [gifts], category: idea,
+     summary: "A photo calendar with the grandkids, or a nice olive oil set."}
+  - {title: "Learn to use a sewing machine", tags: [crafts], category: idea,
+     summary: "Take the beginner class at the community centre to hem my own trousers."}
+  - {title: "Hiking route in the Dolomites", tags: [hiking, travel], category: reference,
+     summary: "Alta Via 1, the first four stages, staying in huts. Book huts in January."}
+  - {title: "Sort the photo library", tags: [photos], category: task,
+     summary: "Twenty thousand photos unsorted. Delete duplicates and make albums per year."}
+  - {title: "Car makes a squeal when braking", tags: [car], category: note,
+     summary: "Squeals at low speed. Brake pads might be worn."}
+  - {title: "Write a will", tags: [legal, family], category: task,
+     summary: "We still have no will. Find a lawyer and decide on guardians for the kids."}
+  - {title: "Better password manager", tags: [tech, security], category: decision,
+     summary: "Move all passwords to Bitwarden and turn on two-factor everywhere."}
+  - {title: "Daughter's school play", tags: [kids, school], category: event,
+     summary: "Emma is a tree in the school play on Friday at 6pm."}
+  - {title: "Restaurant to try", tags: [food], category: reference,
+     summary: "The new Georgian place on Linden Street; khachapuri is supposed to be great."}
+  - {title: "Idea: automate the weekly report", tags: [work, automation], category: idea,
+     summary: "A script that pulls the numbers from the dashboard and drafts the Monday report."}
+  - {title: "Insurance for the new bike", tags: [bike, insurance], category: task,
+     summary: "Add the new bike to the household insurance."}
+  - {title: "Notes from the parents' evening", tags: [kids, school], category: note,
+     summary: "Teacher says Noah reads well but rushes his maths. Practise times tables."}
+  - {title: "Water the neighbours' plants", tags: [neighbours], category: task,
+     summary: "They are away until the 20th. Water every three days."}
+  - {title: "Book a massage", tags: [health], category: task,
+     summary: "My shoulders are tight from the desk. Book a sports massage."}
+  - {title: "Why my sleep is bad", tags: [sleep], category: note,
+     summary: "I fall asleep fine but wake at 4am. Might be the late dinners or stress."}
+  - {title: "Choose a new phone", tags: [tech, shopping], category: decision,
+     summary: "Going with the mid-range Pixel. Good camera, long updates."}
+  - {title: "Try bouldering with Kim", tags: [friends, climbing], category: event,
+     summary: "Bouldering taster session with Kim on Sunday afternoon."}
+  - {title: "Idea: family recipe book", tags: [family, cooking], category: idea,
+     summary: "Collect grandma's recipes with photos and print a few copies."}
+  - {title: "Grocery list", tags: [shopping], category: task,
+     summary: "Eggs, oat milk, spinach, rice, washing-up liquid, coffee beans."}
+  - {title: "Learn about index funds", tags: [money, investing], category: idea,
+     summary: "Read up on low-cost index funds before opening a pension account."}
+  - {title: "The roof tile is loose", tags: [house], category: note,
+     summary: "One tile on the north side moved in the wind. Get a roofer to look before winter."}
+  - {title: "Plan Noah's birthday party", tags: [kids, party], category: task,
+     summary: "Eight kids, a treasure hunt in the park, pizza afterwards."}
+  - {title: "Conference in Berlin", tags: [work, travel], category: event,
+     summary: "Attending the data conference in Berlin, 21 to 23 May. Hotel booked."}
+  - {title: "Draft the architecture doc", tags: [work, writing], category: task,
+     summary: "Write up the event-driven design for the order service before the review."}
+  - {title: "Kids want a trampoline", tags: [kids, garden], category: note,
+     summary: "The garden might fit a small one. Safety net essential."}
+  - {title: "Library books due", tags: [reading], category: task,
+     summary: "Return the three library books by Tuesday."}
+  - {title: "Thoughts after the doctor visit", tags: [health], category: note,
+     summary: "Blood pressure slightly high. Less salt, more walking, check again in three months."}
+  - {title: "Idea: rent out the spare room", tags: [money, house], category: idea,
+     summary: "The spare room could be rented to a student during term time."}
+  - {title: "Monthly savings target", tags: [money], category: decision,
+     summary: "Put 500 into savings on payday, before anything else."}
+  - {title: "Holiday cottage in Cornwall", tags: [travel, holiday], category: reference,
+     summary: "The cottage in St Ives sleeps six. Book by February for August."}
+  - {title: "Bring the old clothes to the charity shop", tags: [declutter], category: task,
+     summary: "Two bags of clothes in the hallway."}
+  - {title: "Look into solar panels", tags: [house, energy], category: idea,
+     summary: "Get a quote for solar panels on the south roof. Check the feed-in tariff."}
+  - {title: "How to descale the kettle", tags: [house], category: reference,
+     summary: "Half water, half vinegar, boil, leave an hour, rinse twice."}
+  - {title: "Cancel the gym membership", tags: [money, gym], category: task,
+     summary: "Haven't been since October. Notice period is one month."}
+  - {title: "Write to the council about the potholes", tags: [community], category: task,
+     summary: "The potholes on Mill Lane are getting dangerous for cyclists."}
+  - {title: "New chairs for the dining table", tags: [house, furniture], category: idea,
+     summary: "Look at second-hand mid-century chairs."}
+  - {title: "Reading list for the summer", tags: [reading], category: reference,
+     summary: "Project Hail Mary, The Overstory, Educated, a Le Guin collection."}
+  - {title: "Idea: Sunday walking group", tags: [friends, walking], category: idea,
+     summary: "A loose group that walks a different trail every other Sunday."}
+  - {title: "Code review guidelines", tags: [work, engineering], category: reference,
+     summary: "Small pull requests, review within a day, comment on the code not the person."}
+  - {title: "Clear out the loft", tags: [house, declutter], category: task,
+     summary: "Old boxes from the move. Sell, give away or bin."}
+  - {title: "Fix the bike's gears", tags: [bike, repair], category: task,
+     summary: "The chain jumps on the small cogs. Adjust the derailleur."}
+  - {title: "Teacher's present at the end of term", tags: [kids, gifts], category: task,
+     summary: "Class collection for the teacher. Send 10 to the class rep."}
+  - {title: "Learn to draw", tags: [art], category: idea,
+     summary: "Twenty minutes of sketching a day from the Drawing on the Right Side of the Brain book."}
+  - {title: "Mistakes from the last release", tags: [work, incident], category: note,
+     summary: "We skipped the staging check and broke checkout for 40 minutes."}
+  - {title: "Decision: one streaming service at a time", tags: [money, subscriptions], category: decision,
+     summary: "Rotate streaming services each month instead of paying for three."}
+  - {title: "Pick up the dry cleaning", tags: [errands], category: task,
+     summary: "The suit is ready from Wednesday."}
+  - {title: "Idea: a podcast for new managers", tags: [podcast, management], category: idea,
+     summary: "Interviews with first-time managers about their first year."}
+  - {title: "Visit the Van Gogh museum", tags: [travel, art], category: idea,
+     summary: "Next time in Amsterdam, book tickets online weeks ahead."}
+  - {title: "Notes on the Kubernetes migration", tags: [work, infra], category: note,
+     summary: "The stateful services are the hard part. Start with the stateless APIs."}
+  - {title: "Buy a present for the wedding", tags: [gifts, wedding], category: task,
+     summary: "Something from their gift list before the 20th."}
+  - {title: "Kids' dentist appointment", tags: [kids, health], category: event,
+     summary: "Both kids at the dentist on 18 March at 3pm."}
+  - {title: "Book the summer camp", tags: [kids, summer], category: task,
+     summary: "Two weeks of football camp for Noah in July."}
+  - {title: "Learn to bake croissants", tags: [baking], category: idea,
+     summary: "A weekend project. Laminated dough looks hard but fun."}
+  - {title: "Why the team is missing deadlines", tags: [work, team], category: note,
+     summary: "Too many parallel projects. We start everything and finish little."}
+  - {title: "Tidy the shed", tags: [garden, declutter], category: task,
+     summary: "Hang the tools on the wall and throw away the broken pots."}
+  - {title: "Recipe for banana bread", tags: [recipes, baking], category: reference,
+     summary: "Three ripe bananas, 250g flour, 100g butter, two eggs, 175 degrees for an hour."}
+  - {title: "Idea: offer mentoring to juniors", tags: [work, mentoring], category: idea,
+     summary: "Weekly half hour with each junior developer on the team."}
+  - {title: "Return the parcel", tags: [errands], category: task,
+     summary: "The shoes are too small. Return label printed. Post office before Friday."}
+  - {title: "Decision: walk the kids to school", tags: [kids, health], category: decision,
+     summary: "We walk to school instead of driving, unless it pours."}
+  - {title: "Neighbour's loud music", tags: [neighbours], category: note,
+     summary: "Third weekend in a row. Talk to them kindly first."}
+  - {title: "Find a new hairdresser", tags: [errands], category: task,
+     summary: "My hairdresser retired. Ask Marta where she goes."}
+  - {title: "Notes from the finance webinar", tags: [money], category: note,
+     summary: "Pension contributions get tax relief. Check the employer match."}
+  - {title: "Plan the anniversary dinner", tags: [partner], category: task,
+     summary: "Ten years married in June. Book the restaurant where we had our first date."}
+  - {title: "Electric bill is too high", tags: [money, energy], category: note,
+     summary: "Up 40 percent on last year. Check the tariff and the old freezer."}
+  - {title: "Idea: learn woodworking", tags: [crafts, diy], category: idea,
+     summary: "Evening course in woodworking to build a bookshelf."}
+  - {title: "Kids' bedtime routine", tags: [kids, sleep], category: decision,
+     summary: "Screens off at 7, bath, two stories, lights out at 8."}
+  - {title: "Doctor's appointment for the rash", tags: [health], category: task,
+     summary: "The rash on my arm hasn't gone. Book the GP."}
+  - {title: "The project's budget overrun", tags: [work, budget], category: note,
+     summary: "We are 30 percent over because of contractor costs."}
+  - {title: "Water filter for the kitchen", tags: [house, shopping], category: idea,
+     summary: "A filter jug or an under-sink filter. Tap water tastes of chlorine."}
+  - {title: "Pay the parking fine", tags: [money, car], category: task,
+     summary: "Pay the fine from the airport car park before the deadline."}
+  - {title: "Ideas for the garden party", tags: [party, garden], category: idea,
+     summary: "Lanterns, a barbecue, lawn games, a cake for Grandma."}
+  - {title: "Plan the move to the cloud bucket", tags: [work, storage], category: task,
+     summary: "Copy the old file server's archive to object storage."}
+  - {title: "Join a choir", tags: [music, social], category: idea,
+     summary: "The community choir rehearses on Tuesdays and takes beginners."}
+  - {title: "List of good podcasts", tags: [podcasts], category: reference,
+     summary: "Hardcore History, Reply All archive, The Rest Is History, 99% Invisible."}
+  - {title: "Make an emergency fund", tags: [money], category: decision,
+     summary: "Three months of expenses in an instant-access account."}
+  - {title: "Fix the squeaky door", tags: [house, diy], category: task,
+     summary: "The bedroom door squeaks. WD-40 on the hinges."}
+  - {title: "School holiday dates", tags: [kids, school], category: reference,
+     summary: "Autumn break 28 October to 8 November. Winter break from 23 December."}
+  - {title: "Idea: monthly date night", tags: [partner], category: idea,
+     summary: "First Friday of every month, a babysitter and dinner out."}
+  - {title: "The new manager's first week", tags: [work], category: note,
+     summary: "She wants weekly one-to-ones and a written plan for each project."}
+  - {title: "Get the windows cleaned", tags: [house], category: task,
+     summary: "Call the window cleaner; the last time was in spring."}
+  - {title: "Learn photography basics", tags: [photography, learning], category: idea,
+     summary: "Understand aperture, shutter speed and ISO; shoot in manual for a month."}
+  - {title: "Cat food is running out", tags: [pets, shopping], category: task,
+     summary: "Order the big bag of the grain-free food."}
+  - {title: "Friend's baby shower", tags: [friends, event], category: event,
+     summary: "Lena's baby shower on Saturday 2pm at her sister's."}
+  - {title: "Thinking about a career change", tags: [career], category: note,
+     summary: "I enjoy the teaching part of my job most. Could I become a trainer?"}
+  - {title: "Pitch for the hackathon", tags: [work, hackathon], category: idea,
+     summary: "A Slack bot that answers questions from our internal docs."}
+  - {title: "Clean the oven", tags: [house, cleaning], category: task,
+     summary: "The oven is a mess after the roast. Baking soda paste overnight."}
+  - {title: "Visit the dentist about the cracked filling", tags: [health, teeth], category: task,
+     summary: "A filling cracked on the left side. Call for an emergency slot."}
+  - {title: "Buy a bike helmet for Emma", tags: [kids, bike], category: task,
+     summary: "She outgrew hers. Size small, bright colour."}
+  - {title: "Ideas for the living room", tags: [house, decor], category: idea,
+     summary: "Darker green walls, a big plant, a lamp in the corner."}
+  - {title: "Notes from the security training", tags: [work, security], category: note,
+     summary: "Phishing is the main risk. Report suspicious mail with the button."}
+  - {title: "Kids' passports", tags: [kids, documents], category: task,
+     summary: "Both kids need passports before the summer trip."}
+  - {title: "Decision: buy a used car, not new", tags: [car, money], category: decision,
+     summary: "A three-year-old car loses less value. Budget 15k."}
+  - {title: "Write a letter to my future self", tags: [reflection], category: idea,
+     summary: "A letter to open in five years, about what matters now."}
+  - {title: "Insulate the attic", tags: [house, energy], category: task,
+     summary: "Get quotes for loft insulation; there is a grant this year."}
+  - {title: "Workout plan", tags: [fitness], category: reference,
+     summary: "Monday strength, Wednesday run, Friday strength, Sunday long walk."}
+  - {title: "Plan the Christmas visit", tags: [family, holiday], category: task,
+     summary: "Christmas at my parents', then Boxing Day with the in-laws."}
+  - {title: "Idea: an allotment", tags: [garden, food], category: idea,
+     summary: "Put our name on the waiting list for an allotment at the edge of town."}
+  - {title: "Office plants keep dying", tags: [work, plants], category: note,
+     summary: "Not enough light by the window desk. Try a snake plant."}
+  - {title: "Book flights for the wedding in Spain", tags: [travel, wedding], category: task,
+     summary: "Wedding in Seville on 14 September. Flights before prices rise."}
+  - {title: "Neighbour offered to sell her piano", tags: [music, house], category: note,
+     summary: "She wants 300 for her upright piano. Would it fit in the hall?"}
+  - {title: "Learn first aid", tags: [health, safety], category: idea,
+     summary: "A weekend first aid course, especially for kids."}
+  - {title: "Notes from the sprint review", tags: [work], category: note,
+     summary: "Stakeholders liked the new search. They want filters next."}
+  - {title: "Idea: a Friday demo session", tags: [work, team], category: idea,
+     summary: "Fifteen minutes every Friday where anyone can demo what they built."}
+  - {title: "Fix the leaking gutter downpipe", tags: [house], category: task,
+     summary: "The downpipe joint leaks onto the patio."}
+  - {title: "Plan a weekend in the mountains", tags: [travel, hiking], category: idea,
+     summary: "A hut weekend in the Alps with the old university friends."}
+  - {title: "Sell the old sofa", tags: [declutter, money], category: task,
+     summary: "Post the sofa on the marketplace. 150 or best offer."}
+  - {title: "Wifi is weak upstairs", tags: [tech, house], category: note,
+     summary: "The kids' rooms barely get signal. A mesh system might help."}
+  - {title: "Learn to make pasta", tags: [cooking], category: idea,
+     summary: "Fresh pasta from scratch with flour and eggs, no machine."}
+  - {title: "Decision: one coffee shop meeting a week", tags: [work, focus], category: decision,
+     summary: "Batch all coffee chats into Thursday afternoons."}
+  - {title: "Get the piano tuned", tags: [music, house], category: task,
+     summary: "The piano hasn't been tuned in two years."}
+  - {title: "Thoughts on the kids' screen use", tags: [kids, screens], category: note,
+     summary: "Noah gets grumpy after long gaming sessions. Shorter, earlier sessions."}
+  - {title: "Notes on the house survey", tags: [house], category: note,
+     summary: "Damp in the cellar, the windows need replacing within five years."}
+  - {title: "Car seat for the baby", tags: [baby, car], category: task,
+     summary: "Choose an infant car seat that fits our car's isofix."}
+  - {title: "Idea: a family newsletter at Christmas", tags: [family], category: idea,
+     summary: "A one-page update with photos instead of individual cards."}
+  - {title: "Donate old books", tags: [declutter, books], category: task,
+     summary: "Three boxes of books to the library sale."}
+  - {title: "Present for Dad's 70th", tags: [gifts, dad], category: idea,
+     summary: "A day out on a steam railway, or a framed old map of his hometown."}
+  - {title: "The client wants a discount", tags: [work, sales], category: note,
+     summary: "They ask for 15 percent off for a two-year contract. Check with finance."}
+  - {title: "Plan the vegetable shopping at the market", tags: [food], category: idea,
+     summary: "Saturday market for vegetables, cheaper and less plastic."}
+  - {title: "Yoga class schedule", tags: [fitness, yoga], category: reference,
+     summary: "Monday 7pm beginners, Thursday 6:30 am flow."}
+  - {title: "Repair the cracked phone screen", tags: [tech, repair], category: task,
+     summary: "Repair shop quoted 120. Or replace the phone?"}
+  - {title: "Idea: a reading corner for the kids", tags: [kids, reading], category: idea,
+     summary: "Cushions, a small shelf and a lamp under the stairs."}
+  - {title: "Make a will for the dog", tags: [pets], category: idea,
+     summary: "Ask my sister if she would take the dog if anything happened."}
+  - {title: "Notes from the call with the architect", tags: [house, renovation], category: note,
+     summary: "Extension needs planning permission. Six months for approval."}
+  - {title: "Order more printer ink", tags: [office, shopping], category: task,
+     summary: "Black cartridge is empty."}
+  - {title: "Learn to sail", tags: [sailing, hobby], category: idea,
+     summary: "A dinghy sailing course on the lake in summer."}
+  - {title: "Plan the garden layout", tags: [garden], category: idea,
+     summary: "Raised beds along the fence, a path of stepping stones, a bench under the cherry."}
+  - {title: "Decision: a fixed day for groceries", tags: [food, routine], category: decision,
+     summary: "Groceries on Saturday morning only, with a list."}
+  - {title: "Talk to HR about parental leave", tags: [work, family], category: task,
+     summary: "Ask how much leave I can take and when to tell my manager."}
+  - {title: "Kids are fighting a lot", tags: [kids, family], category: note,
+     summary: "Mostly over the tablet and who sits in front. Need clearer rules."}
+  - {title: "Idea: a gratitude journal", tags: [habits, reflection], category: idea,
+     summary: "Three things each evening, in a small notebook by the bed."}
+  - {title: "Repaint the hallway", tags: [house, diy], category: task,
+     summary: "Scuffed walls from the pram. Light grey, washable paint."}
+  - {title: "Concert with the choir", tags: [music, event], category: event,
+     summary: "The choir's winter concert at St Mary's on 14 December."}
+  - {title: "Notes from the investment meeting", tags: [money, investing], category: note,
+     summary: "Adviser suggests 80/20 shares to bonds given our age."}
+  - {title: "Switch electricity supplier", tags: [energy, money], category: task,
+     summary: "Compare tariffs; the fixed deal ends next month."}
+  - {title: "Idea: weekend coding club for kids", tags: [kids, coding], category: idea,
+     summary: "Scratch and simple robots on Saturday mornings at the library."}
+  - {title: "Fix the dishwasher drain", tags: [house, repair], category: task,
+     summary: "Water stays in the bottom. Clean the filter, then call a repair service."}
+  - {title: "Pick a nursery for the baby", tags: [baby, childcare], category: task,
+     summary: "Visit the three nurseries near us and compare waiting lists."}
+  - {title: "Thoughts on burnout", tags: [health, work], category: note,
+     summary: "Tired every evening, irritable, dreading Mondays. Talk to someone."}
+  - {title: "Plan the bathroom tiles", tags: [house, renovation], category: idea,
+     summary: "Large grey tiles on the floor, white metro tiles on the walls."}
+  - {title: "Visit the new science museum", tags: [kids, outing], category: idea,
+     summary: "The new science museum has a kids' lab on weekends."}
+  - {title: "Write the quarterly self-review", tags: [work, career], category: task,
+     summary: "Due Friday. List the wins and what to improve."}
+  - {title: "Idea: share a car with the neighbours", tags: [car, community], category: idea,
+     summary: "We barely use the second car. Share it with the family next door?"}
+  - {title: "Recipe for chilli", tags: [recipes], category: reference,
+     summary: "Beans, mince or lentils, onions, peppers, smoked paprika, cumin, dark chocolate."}
+  - {title: "Book the hotel for the conference", tags: [work, travel], category: task,
+     summary: "Hotel near the venue for three nights."}
+  - {title: "Notes from the book on habits", tags: [reading, habits], category: note,
+     summary: "Make it obvious, attractive, easy and satisfying. Start tiny."}
+  - {title: "Check the tyre pressure", tags: [car], category: task,
+     summary: "The warning light came on this morning."}
+  - {title: "Idea: a family hike every month", tags: [family, hiking], category: idea,
+     summary: "Pick a new trail within an hour's drive each month."}
+  - {title: "The kitchen extractor is noisy", tags: [house], category: note,
+     summary: "Rattles on the highest setting. Maybe a loose filter."}
+  - {title: "Learn to juggle", tags: [hobby], category: idea,
+     summary: "Three balls, ten minutes a day."}
+  - {title: "Decision: stop buying fast fashion", tags: [clothes, environment], category: decision,
+     summary: "Buy second-hand or fewer, better clothes."}
+  - {title: "Collect the parcel from the neighbour", tags: [errands], category: task,
+     summary: "The courier left it at number 12."}
+  - {title: "Project kickoff with the design team", tags: [work, design], category: event,
+     summary: "Kickoff for the onboarding redesign, Tuesday 10am, room 3."}
+  - {title: "Thoughts on moving to the countryside", tags: [house, life], category: note,
+     summary: "More space and calm, but a long commute and fewer friends nearby."}
+  - {title: "Idea: a tiny library box outside", tags: [community, books], category: idea,
+     summary: "A weatherproof box by the gate where people swap books."}
+  - {title: "Change the bed linen", tags: [house], category: task,
+     summary: "Sunday chores. Spare set is in the wardrobe."}
+  - {title: "Notes on the new pricing model", tags: [work, pricing], category: note,
+     summary: "Per-seat pricing hurts small teams. Consider usage tiers."}
+  - {title: "Get a flu jab", tags: [health], category: task,
+     summary: "The pharmacy does walk-in flu jabs from October."}
+  - {title: "Idea: start a compost bin", tags: [garden, environment], category: idea,
+     summary: "A compost bin by the shed for kitchen scraps and grass."}
+  - {title: "Picnic in the park with friends", tags: [friends, summer], category: event,
+     summary: "Picnic at the lake on Sunday from noon. Bring the blanket and salad."}
+  - {title: "Find a babysitter", tags: [kids, childcare], category: task,
+     summary: "Ask the neighbours' daughter if she babysits on Saturday evenings."}
+  - {title: "Thoughts on the election", tags: [politics], category: note,
+     summary: "Undecided. Read the parties' housing and climate plans."}
+  - {title: "Learn to make kimchi", tags: [cooking, fermenting], category: idea,
+     summary: "Napa cabbage, gochugaru, garlic, ginger, a week on the counter."}
+  - {title: "Upgrade the home network router", tags: [tech, house], category: task,
+     summary: "The router is from 2016 and drops connections."}
+  - {title: "Idea: a quiet hour at work", tags: [work, focus], category: idea,
+     summary: "No meetings or chat between 9 and 10 every day for the whole team."}
+  - {title: "Write down Grandma's stories", tags: [family, history], category: idea,
+     summary: "Record her stories about the farm on my phone next visit."}
+  - {title: "Decide on a summer holiday", tags: [holiday, family], category: decision,
+     summary: "Camping in France this year; Italy next year."}
+  - {title: "Order a new mattress", tags: [sleep, shopping], category: task,
+     summary: "The mattress sags. Try the shop with the 100-night trial."}
+  - {title: "Kids' football training times", tags: [kids, sport], category: reference,
+     summary: "Tuesday and Thursday 5pm at the club, matches on Saturday mornings."}
+  - {title: "Notes from the user interviews", tags: [work, research], category: note,
+     summary: "Users don't find the export button. Three of five gave up."}
+  - {title: "Idea: a weekly digital detox", tags: [habits, screens], category: idea,
+     summary: "One evening a week with all screens off for the whole family."}
+  - {title: "Clean the car inside", tags: [car, cleaning], category: task,
+     summary: "Crumbs everywhere from the road trip. Vacuum and wipe the seats."}
+  - {title: "Bike route to the office", tags: [bike, commute], category: reference,
+     summary: "Along the canal, then through the park. 35 minutes."}
+  - {title: "Learn to cook Thai food", tags: [cooking], category: idea,
+     summary: "Green curry, pad thai and tom yum from scratch."}
+  - {title: "The fridge is making noise", tags: [house, appliances], category: note,
+     summary: "It hums loudly at night. Check if it is level."}
+  - {title: "Visit Aunt Ruth in hospital", tags: [family, health], category: task,
+     summary: "She's in ward 7 until Friday. Bring grapes and a book."}
+  - {title: "Ask the neighbours about the hedge", tags: [neighbours, garden], category: task,
+     summary: "The hedge between our gardens is two metres tall. Agree who trims which side."}

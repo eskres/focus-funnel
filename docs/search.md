@@ -66,6 +66,19 @@ To check speed with a given vector size:
 uv run python -m scripts.search_bench --database-url <same URL> --dimension 256
 ```
 
+## Measuring the similar-thought check
+
+Before filing a thought, the chat checks for similar filed thoughts. Its cut-offs come from each user's own index, so a new embedding model needs no setting. Still, when you add or change a preset's embedding model or the default one, or add a chat model to a preset, measure the check:
+
+```sh
+cd backend
+NEBIUS_API_KEY=... uv run python -m app.evals.similar_thoughts \
+    --provider nebius --model Qwen/Qwen3-Embedding-8B --dimensions 256 \
+    [--chat-provider nebius --chat-model <id>] [--report similar.md]
+```
+
+The provider, model, and dimensions default to the app's settings. It embeds the labelled test set in `backend/evals/similar_thoughts.yaml`, about 260 short thoughts and one embedding request per 64, and needs no database. It reports recall (a thought revisited later finds the filed one among its candidates) and false offers (a different thing on the same topic gets the card's "Similar" hint), each against the target in the file. It exits 1 when a target is missed. With a chat model it also reports how often the model chooses rightly between adding and filing as new, about 60 calls. To add cases, edit the YAML file. No code changes are needed.
+
 ## Rebuilding search indexes
 
 Each user has their own search index, which records the model that built it. A user keeps searching with that model even after you change `EMBEDDING_MODEL`: only new users, and users whose first thought comes later, get the new one. To move everyone to the new model, rebuild:
