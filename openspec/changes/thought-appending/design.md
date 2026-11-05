@@ -163,6 +163,23 @@ An addition always changes the raw text or the summary, so `apply_update()` re-e
 
 The card shows two columns on wide screens, stacked on narrow ones: "Now" (the current summary, read-only) and "After" (the proposed summary, editable). Words removed and added are marked with a word-level diff computed on the client: a small longest-common-subsequence helper in `lib/word-diff.ts`, fine for summaries up to 4,000 characters, with no new dependency. The diff follows the user's edits.
 
+### 13. `apply_update()` takes the loaded thought (decided during task 1.2, 2026-11-05)
+
+`apply_update(session, user, thought, ...)` takes the `Thought` row the caller loaded, not its id, so confirm-add and undo can lock the row (`SELECT ... FOR UPDATE`), compare its `updated_at`, and change that same row in one transaction. It checks the fields, re-indexes what changed, and flushes; it never commits. `update_thought()` keeps its signature: it loads the thought with `get_thought()` (404 for a missing or foreign one), calls `apply_update()`, commits, and refreshes.
+
+**Alternatives:** pass the id and load inside (rejected: a second load could miss the caller's lock and the version it checked).
+
+### 14. Raw text blocks in detail (decided during task 1.3, 2026-11-05)
+
+The rule from decision 8 lives in `app/chat/raw_text.py` as pure functions: `added_texts()` picks the messages, `extend_raw_text()` appends and fits, and `split_blocks()`/`join_blocks()` read and write the blocks. Details decision 8 left open:
+
+- The messages are the user's messages with a position in `[max(from_position, held_to + 1), to_position]` of the proposal, where `held_to` is the highest `to_position` the thought already holds from this conversation (its origin proposal and its additions there), or none. This fits the spec's "that the proposal covers and that the thought does not already hold" and decision 8's "after the last one this thought already holds". Messages go through `text_for_model()`, as a proposal's raw text does; empty ones are skipped.
+- No raw text is an empty first block. The raw text then starts with the separator, without the blank lines before it, because the store strips the raw text.
+- The marker line follows the first block, before the oldest separator kept: `<first>\n\n--- earlier additions left out ---\n\n--- added ... ---`. A marker already in the raw text stays, once.
+- A first block over 10,000 characters is cut to 10,000 including the `…`. The newest block, when it alone does not fit, keeps its end, after a `…`, so the result is exactly 20,000.
+
+**Alternatives:** keep blocks in a JSON column (rejected: the raw text is what search and the detail view read, and a second copy would drift).
+
 ## Risks / Trade-offs
 
 - [Depends on `thought-editing`, not built, and on `explore`, merged and archived] → The tasks start after `thought-editing` merges. If `origin`, `check_category()`, the `saved_title` lookup, or the offer code (`asked_proposal()`, `offer_note()`, `Turn._proposed`) change shape, re-read decisions 2, 3, 4, 7, and 10.

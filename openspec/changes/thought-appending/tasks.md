@@ -2,9 +2,9 @@ Start after `thought-editing` is merged into `main`. `explore` is merged into `m
 
 ## 1. Data and store
 
-- [ ] 1.1 Add the migration from design Migration Plan step 1: `thought_additions` (decision 9) and the three baseline columns on `search_indexes` (decision 5). Check that `alembic upgrade head` then `downgrade -1` runs cleanly on SQLite and on Postgres with pgvector, that there is a single head, and that `alembic check` is clean
-- [ ] 1.2 Split `update_thought()` into `apply_update()`, which does not commit, and the committing wrapper, from design decision 7. Check that every existing `test_thought_store.py` test passes unchanged, and with pytest that `apply_update()` followed by a rollback leaves the thought and its entries as they were
-- [ ] 1.3 Add the raw text rule from design decision 8 as a pure function over blocks and messages. Check with pytest: a plain append with the dated separator; no repeat when two additions cover the same messages; no change when no message is left; the first block kept and cut at 10,000; the newest block cut at its start when it alone does not fit; oldest additions left out with the one marker line; and the result never over 20,000
+- [x] 1.1 Add the migration from design Migration Plan step 1: `thought_additions` (decision 9) and the three baseline columns on `search_indexes` (decision 5). Check that `alembic upgrade head` then `downgrade -1` runs cleanly on SQLite and on Postgres with pgvector, that there is a single head, and that `alembic check` is clean
+- [x] 1.2 Split `update_thought()` into `apply_update()`, which does not commit, and the committing wrapper, from design decision 7. Check that every existing `test_thought_store.py` test passes unchanged, and with pytest that `apply_update()` followed by a rollback leaves the thought and its entries as they were
+- [x] 1.3 Add the raw text rule from design decision 8 as a pure function over blocks and messages. Check with pytest: a plain append with the dated separator; no repeat when two additions cover the same messages; no change when no message is left; the first block kept and cut at 10,000; the newest block cut at its start when it alone does not fit; oldest additions left out with the one marker line; and the result never over 20,000
 
 ## 2. Refs and the seen-thoughts note
 

@@ -1,6 +1,7 @@
 """Deleting a user's content, usage history, or account (thought-storage task 8.1)."""
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import func, select
@@ -10,6 +11,7 @@ from app.models import (
     Proposal,
     SearchIndex,
     Thought,
+    ThoughtAddition,
     ThoughtEmbedding,
     User,
     UserCategory,
@@ -42,23 +44,37 @@ def everything(url, user_id) -> dict[str, int]:
     return run_db(url, lambda session: counts(session, uuid.UUID(user_id)))
 
 
-def add_proposal_and_category(url, user_id):
+def add_proposal_category_and_addition(url, user_id):
     async def work(session):
         conversation = (
             await session.execute(select(Conversation).where(Conversation.user_id == uuid.UUID(user_id)))
         ).scalar_one()
+        proposal = Proposal(
+            conversation_id=conversation.id,
+            user_id=conversation.user_id,
+            position=1,
+            from_position=0,
+            to_position=0,
+            raw_text="hi",
+            parts=[{"title": "t", "summary": "s", "tags": [], "category": None, "thought_id": None}],
+        )
+        session.add(proposal)
+        session.add(UserCategory(user_id=conversation.user_id, name="recipe"))
+        await session.flush()
+        thought = (
+            await session.execute(select(Thought).where(Thought.user_id == conversation.user_id))
+        ).scalar_one()
         session.add(
-            Proposal(
-                conversation_id=conversation.id,
+            ThoughtAddition(
+                thought_id=thought.id,
                 user_id=conversation.user_id,
-                position=1,
+                proposal_id=proposal.id,
                 from_position=0,
                 to_position=0,
-                raw_text="hi",
-                parts=[{"title": "t", "summary": "s", "tags": [], "category": None, "thought_id": None}],
+                after_updated_at=datetime.now(UTC),
+                before={"title": "t", "summary": "s", "tags": [], "category": None, "raw_text": None},
             )
         )
-        session.add(UserCategory(user_id=conversation.user_id, name="recipe"))
         await session.commit()
 
     run_db(url, work)
@@ -70,7 +86,7 @@ def give_data(client, headers, fake_llm, url) -> str:
     fake_llm.queue(text_chunks("Hello!"))
     assert chat(client, headers, "hi").status_code == 200
     store(url, user_id, fake_llm)
-    add_proposal_and_category(url, user_id)
+    add_proposal_category_and_addition(url, user_id)
     return user_id
 
 
@@ -81,7 +97,7 @@ def test_delete_removes_everything_of_the_user_only(client, alice, bob, fake_llm
     bob_before = everything(test_database_url, bob_id)
     assert all(
         before[model.__tablename__] > 0
-        for model in (Thought, SearchIndex, ThoughtEmbedding, Proposal, UserCategory)
+        for model in (Thought, SearchIndex, ThoughtEmbedding, Proposal, UserCategory, ThoughtAddition)
     )
 
     response = client.delete("/api/me", headers=alice)
@@ -105,6 +121,7 @@ CONTENT = {
     "conversations",
     "messages",
     "proposals",
+    "thought_additions",
 }
 
 

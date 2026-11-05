@@ -7,6 +7,7 @@ from sqlalchemy import (
     JSON,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -137,6 +138,13 @@ class SearchIndex(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The 95th and 99th percentile of cosine similarity between the head
+    # entries of random pairs of the user's thoughts in this index, and how
+    # many thoughts the user had when they were measured. The similar-thought
+    # check sets its cut-offs from them. Null until measured.
+    similarity_p95: Mapped[float | None] = mapped_column(Float, nullable=True)
+    similarity_p99: Mapped[float | None] = mapped_column(Float, nullable=True)
+    baseline_thoughts: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class ThoughtEmbedding(Base):
