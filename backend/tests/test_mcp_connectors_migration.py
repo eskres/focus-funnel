@@ -11,11 +11,15 @@ PREVIOUS = "0162bb890895"
 TABLES = {"connectors", "conversation_connectors", "tool_actions"}
 
 
-def test_single_head_is_this_revision():
+def test_this_revision_is_below_the_single_head():
+    # Later revisions exist, so these tests downgrade to PREVIOUS, not "-1".
     res = run_alembic("sqlite+aiosqlite:///:memory:", "heads")
     assert res.returncode == 0, res.stderr
-    heads = [line for line in res.stdout.splitlines() if line.strip()]
-    assert heads == [f"{REVISION} (head)"]
+    heads = [line.split()[0] for line in res.stdout.splitlines() if line.strip()]
+    assert len(heads) == 1, res.stdout
+    res = run_alembic("sqlite+aiosqlite:///:memory:", "history", "-r", f"{REVISION}:{heads[0]}")
+    assert res.returncode == 0, res.stderr
+    assert f"{PREVIOUS} -> {REVISION}" in res.stdout
 
 
 def test_upgrade_and_downgrade_on_sqlite(tmp_path):
@@ -27,7 +31,7 @@ def test_upgrade_and_downgrade_on_sqlite(tmp_path):
     assert "connector_warning_accepted_at" in sqlite_columns(db_file, "users")
     assert "auth_ciphertext" in sqlite_columns(db_file, "connectors")
 
-    res = run_alembic(db_url, "downgrade", "-1")
+    res = run_alembic(db_url, "downgrade", PREVIOUS)
     assert res.returncode == 0, res.stderr
     assert not TABLES & sqlite_tables(db_file)
     assert "connector_warning_accepted_at" not in sqlite_columns(db_file, "users")
@@ -42,7 +46,7 @@ def test_upgrade_and_downgrade_on_postgres():
     # A name of its own: other suites create and drop their sibling databases.
     db_url, drop = with_database("ff07_mcp_connectors_migration")
     try:
-        steps = (("upgrade", "head"), ("check",), ("downgrade", "-1"), ("upgrade", "head"), ("check",))
+        steps = (("upgrade", "head"), ("check",), ("downgrade", PREVIOUS), ("upgrade", "head"), ("check",))
         for step in steps:
             res = run_alembic(db_url, *step)
             assert res.returncode == 0, (step, res.stdout + res.stderr)

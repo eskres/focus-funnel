@@ -25,9 +25,11 @@ from app.routers import (
     providers,
     settings_categories,
     settings_models,
+    setup,
     thoughts,
     usage,
 )
+from app.setup.state import open_setup
 from app.thoughts import check_vector_extension
 from app.thoughts.embeddings import check_embedding_provider
 
@@ -57,6 +59,9 @@ async def lifespan(app: FastAPI):
     # One process serves the app, so every claim left now is from a stopped one.
     async with get_sessionmaker()() as session:
         await release_stale_turns(session)
+    # Prints a new setup token while setup is open, last, so a token is not
+    # printed by a start that then fails.
+    await open_setup(settings)
     cleanup = None
     if settings.auth_mode == "demo":
         cleanup = asyncio.create_task(cleanup_loop(get_sessionmaker))
@@ -88,3 +93,4 @@ app.include_router(actions.router)
 app.include_router(chat.router)
 app.include_router(thoughts.router)
 app.include_router(usage.router)
+app.include_router(setup.router)

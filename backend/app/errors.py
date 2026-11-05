@@ -51,6 +51,8 @@ class ErrorCode:
     TOO_MANY_TOOLS = "too_many_tools"
     ACTION_EXPIRED = "action_expired"
     ACTION_RUNNING = "action_running"
+    SETUP_TOKEN_INVALID = "setup_token_invalid"
+    SETUP_INCOMPLETE = "setup_incomplete"
 
 
 class ApiError(Exception):
@@ -164,6 +166,20 @@ def not_allowed() -> ApiError:
         "This instance does not accept your account. Ask its operator to add your "
         "verified email address.",
     )
+
+
+def setup_token_invalid() -> ApiError:
+    # One message for a missing, empty, wrong, or old token.
+    return ApiError(
+        403,
+        ErrorCode.SETUP_TOKEN_INVALID,
+        "The setup token is missing or not valid. Use the token the backend printed "
+        "in its log at its last start.",
+    )
+
+
+def setup_incomplete(message: str) -> ApiError:
+    return ApiError(409, ErrorCode.SETUP_INCOMPLETE, message)
 
 
 def demo_session_expired() -> ApiError:
