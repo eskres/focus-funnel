@@ -1,11 +1,11 @@
 """One stored thought and its origin, for the detail view, and changing or deleting it."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import httpx2
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,7 @@ from app.thoughts.store import (
     delete_thought,
     get_thought,
     get_thought_with_origin,
+    list_upcoming,
     update_thought,
 )
 
@@ -82,6 +83,37 @@ async def thought_answer(session: AsyncSession, user: User, thought_id: uuid.UUI
         created_at=thought.created_at,
         updated_at=thought.updated_at,
         origin=OriginOut(**vars(origin)) if origin else None,
+    )
+
+
+class UpcomingItem(BaseModel):
+    id: uuid.UUID
+    title: str
+    category: str | None
+    when: dict[str, str | None]
+
+
+class UpcomingOut(BaseModel):
+    items: list[UpcomingItem]
+    # True when more dated thoughts from that day on exist than the list shows.
+    more: bool
+
+
+# Declared before /{thought_id}, so "upcoming" is never read as an id.
+@router.get("/upcoming", response_model=UpcomingOut)
+async def upcoming_thoughts(
+    from_day: date = Query(alias="from", description="The browser's local today, YYYY-MM-DD."),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UpcomingOut:
+    """The user's dated thoughts from that day on, in date order, at most 200."""
+    rows, more = await list_upcoming(session, user, from_day)
+    return UpcomingOut(
+        items=[
+            UpcomingItem(id=row.id, title=row.title, category=row.category, when=when_of(row))
+            for row in rows
+        ],
+        more=more,
     )
 
 

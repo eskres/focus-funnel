@@ -52,6 +52,9 @@ const expected: SseEvent[] = [
         summary: "Buy it.",
         tags: ["shopping"],
         category: "task",
+        // This server sends no date fields, as an older one does: no date.
+        when: null,
+        whenChoices: null,
         thoughtId: null,
         savedTitle: null,
         deleted: false,
@@ -227,5 +230,24 @@ describe("toProposal", () => {
   it("reads a part from an older server, with neither field, as not changed", () => {
     const proposal = toProposal({ id: "p1", position: 2, parts: [{ ...part, thought_id: "t1" }] });
     expect(proposal?.parts[0]).toMatchObject({ thoughtId: "t1", savedTitle: null, deleted: false });
+  });
+
+  it("reads a part's date, and its two choices, with the zone the server stamped", () => {
+    const dinner = { start: "2026-10-02T19:00", end: null, time_zone: "Europe/Oslo" };
+    const later = { start: "2026-10-09T19:00", end: null, time_zone: "Europe/Oslo" };
+    const proposal = toProposal({
+      id: "p1",
+      position: 2,
+      parts: [
+        { ...part, when: dinner, when_choices: null },
+        { ...part, when: null, when_choices: [dinner, later] },
+        { ...part, when: { start: "2026-11-03", end: "2026-11-06" }, when_choices: [] },
+      ],
+    });
+    expect(proposal?.parts.map(({ when, whenChoices }) => ({ when, whenChoices }))).toEqual([
+      { when: dinner, whenChoices: null },
+      { when: null, whenChoices: [dinner, later] },
+      { when: { start: "2026-11-03", end: "2026-11-06", time_zone: "UTC" }, whenChoices: null },
+    ]);
   });
 });

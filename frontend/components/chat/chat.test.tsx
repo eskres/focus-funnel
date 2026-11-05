@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { redirectToLogin } from "@/lib/redirect-to-login";
+import { browserTimeZone } from "@/lib/time-zone";
 import {
   conversationEvent,
   delta,
@@ -215,7 +216,7 @@ describe("Chat", () => {
 
       send("again");
       await screen.findByText("Again");
-      expect(chatBodies(calls)[1]).toEqual({ message: "again", conversation_id: "c7" });
+      expect(chatBodies(calls)[1]).toEqual({ message: "again", time_zone: browserTimeZone(), conversation_id: "c7" });
     });
   });
 
@@ -290,13 +291,14 @@ describe("Chat", () => {
       expect(chatBodies(calls)).toEqual([
         {
           message: "next",
+          time_zone: browserTimeZone(),
           conversation_id: "c1",
           provider_id: "nebius",
           model: BIG,
           reasoning_effort: "high",
         },
         // The choice is stored with the conversation, so it is not sent again.
-        { message: "and more", conversation_id: "c1" },
+        { message: "and more", time_zone: browserTimeZone(), conversation_id: "c1" },
       ]);
     });
 
@@ -532,7 +534,7 @@ describe("Chat", () => {
       send("hello");
       await screen.findByText("Hi");
 
-      expect(chatBodies(calls)[1]).toEqual({ message: "hello", conversation_id: "c5" });
+      expect(chatBodies(calls)[1]).toEqual({ message: "hello", time_zone: browserTimeZone(), conversation_id: "c5" });
       // The server keeps one copy of a resent message, and so does the chat.
       const list = screen.getByRole("list", { name: "Conversation" });
       expect(within(list).getAllByText("hello")).toHaveLength(1);
@@ -556,7 +558,7 @@ describe("Chat", () => {
 
       const list = screen.getByRole("list", { name: "Conversation" });
       expect(within(list).getAllByText("hello")).toHaveLength(1);
-      expect(chatBodies(calls)).toEqual([{ message: "hello", conversation_id: "c1" }]);
+      expect(chatBodies(calls)).toEqual([{ message: "hello", time_zone: browserTimeZone(), conversation_id: "c1" }]);
     });
 
     it("shows a message when the server cannot be reached", async () => {

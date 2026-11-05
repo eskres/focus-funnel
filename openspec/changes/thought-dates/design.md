@@ -201,6 +201,17 @@ The partial index `ix_thoughts_user_id_starts_on` is declared like the GIN index
 
 **Alternatives:** send `when` on every save (rejected: an unchanged field is never sent, so a stale browser zone would overwrite the stored one on any title edit); leave "Add date" with an empty start (rejected: a save would then be refused for a missing start the user never saw as a field to fill).
 
+### 14. Details of the card, the Upcoming page, and the zone on requests, settled while building them
+
+- `streamChat()` puts `time_zone` on every `POST /api/chat` body, and `offerProposal()` posts `{time_zone}`; both read `lib/time-zone.ts` at send time. The exact-body chat tests gained the zone.
+- The proposal card always sends `when` on confirm, an object with the browser's zone or null, so the server never has to guess between a missing key and no date; the existing confirm-body test gained `when: null`. A part from an older server, with no date fields, reads as no date.
+- A part with `when_choices` shows the choices ("Fri 2 Oct, 19:00", no year, as decision 6 shows) and "No date" as a group named "Which date?", and no fields until a pick, with "Pick a date, or No date." beside the disabled Confirm. The choice buttons stay after a pick, the picked one pressed, so the user can switch; the fields then work as in decision 13.
+- `GET /api/thoughts/upcoming` needs `from` as a `YYYY-MM-DD` query parameter; a missing or bad one is 422 `validation_error` naming `from`. Items are `{id, title, category, when}`. The query is plain SQL with no search columns, so its tests run on SQLite in the default suite (and pass on Postgres).
+- The page shows "Nothing is coming up." for an empty list and "More dated thoughts are coming up than this page shows." when `more` is true. A day heading carries the year only when it is not this year's ("Monday 4 January 2027"). An item shows "until Fri 6 Nov" (with ", 18:00" when the end has a time) for a date over several days, "19:00" or "09:30 – 10:15" for a timed day, and nothing for an untimed day. The list loads again when the sheet closes and on the `thought-changed` event, and only the latest load may answer.
+- The sidebar link "Upcoming" sits under "New conversation" (the button's text; decision 8 says "New chat") and is marked `aria-current="page"` while the page is open.
+
+**Alternatives:** send `when` from the card only when it has a date (rejected: a missing key on a part with choices is a refusal, so the card would need two rules); hide the choices after a pick (rejected: "No date" after a pick would then need the "Clear date" button, a second way to say the same thing).
+
 ## Risks / Trade-offs
 
 - [The model gives two choices for a clear day, or one date for an unclear day] → Task 2.5 measures both on the preferred model. A wrong single date still shows on the card, where the user checks it before confirming.

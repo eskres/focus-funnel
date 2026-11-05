@@ -1,6 +1,6 @@
 "use client";
 
-import { EllipsisIcon, PlusIcon } from "lucide-react";
+import { CalendarIcon, EllipsisIcon, PlusIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -53,6 +53,14 @@ export function Sidebar() {
     <nav aria-label="Conversations" className="flex w-64 shrink-0 flex-col gap-2 border-r p-3">
       <Button variant="outline" nativeButton={false} render={<Link href="/app" onClick={startNewChat} />}>
         <PlusIcon /> New conversation
+      </Button>
+      <Button
+        variant={pathname === "/app/upcoming" ? "secondary" : "ghost"}
+        className="justify-start"
+        nativeButton={false}
+        render={<Link href="/app/upcoming" aria-current={pathname === "/app/upcoming" ? "page" : undefined} />}
+      >
+        <CalendarIcon /> Upcoming
       </Button>
       {loadError && <p className="px-2 text-sm text-destructive">{loadError}</p>}
       {lists && lists.conversations.length === 0 && (

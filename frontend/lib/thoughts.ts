@@ -63,6 +63,20 @@ export async function updateThought(id: string, fields: ThoughtChange): Promise<
   return thought;
 }
 
+/** A dated thought on the Upcoming page. */
+export type UpcomingItem = { id: string; title: string; category: string | null; when: When };
+
+/** At most 200 items; `more` says that more exist. */
+export type Upcoming = { items: UpcomingItem[]; more: boolean };
+
+/**
+ * The dated thoughts that end, or start when they have no end, on `from` or
+ * later, in date order. `from` is the browser's local today, `YYYY-MM-DD`.
+ */
+export function getUpcoming(from: string): Promise<Upcoming> {
+  return apiFetch<Upcoming>(`/api/thoughts/upcoming?from=${encodeURIComponent(from)}`);
+}
+
 /** Deletes the thought for good. */
 export async function deleteThought(id: string): Promise<void> {
   await apiFetch<void>(thoughtPath(id), { method: "DELETE" });
