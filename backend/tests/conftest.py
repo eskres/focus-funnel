@@ -26,6 +26,8 @@ REQUIRED_ENV = {
     "AUTH_MODE": "oidc",
     "OIDC_ISSUER": "https://login.focus-funnel.test",
     "OIDC_CLIENT_ID": "focus-funnel-test-client",
+    # Tests that start the app open no setup; the setup tests turn it on.
+    "SETUP_WIZARD": "false",
 }
 TEST_ISSUER = REQUIRED_ENV["OIDC_ISSUER"]
 TEST_KID = "test-key-1"

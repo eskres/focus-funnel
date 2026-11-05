@@ -19,9 +19,11 @@ from app.routers import (
     providers,
     settings_categories,
     settings_models,
+    setup,
     thoughts,
     usage,
 )
+from app.setup.state import open_setup
 from app.thoughts import check_vector_extension
 from app.thoughts.embeddings import check_embedding_provider
 
@@ -35,6 +37,8 @@ async def lifespan(app: FastAPI):
     get_chat_config()
     async with get_engine().connect() as connection:
         await check_vector_extension(connection)
+    # Prints a new setup token while setup is open.
+    await open_setup(settings)
     cleanup = None
     if settings.auth_mode == "demo":
         cleanup = asyncio.create_task(cleanup_loop(get_sessionmaker))
@@ -59,3 +63,4 @@ app.include_router(conversations.router)
 app.include_router(chat.router)
 app.include_router(thoughts.router)
 app.include_router(usage.router)
+app.include_router(setup.router)

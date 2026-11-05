@@ -5,6 +5,7 @@ from app.models.category import UserCategory
 from app.models.chat_settings import ChatModel, UserSettings
 from app.models.conversation import Conversation, Message, Proposal
 from app.models.provider_key import ProviderKey
+from app.models.setup_state import SetupState
 from app.models.thought import SearchIndex, Thought, ThoughtEmbedding
 from app.models.usage_event import UsageEvent
 from app.models.user import User
@@ -17,6 +18,7 @@ __all__ = [
     "Proposal",
     "ProviderKey",
     "SearchIndex",
+    "SetupState",
     "Thought",
     "ThoughtEmbedding",
     "UsageEvent",

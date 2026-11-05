@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # Lets an operator turn off the custom provider (an arbitrary base URL).
     # Demo mode forces it off.
     allow_custom_provider: bool = True
+    # Opens the first-run setup wizard (with a token printed at start) until
+    # the operator finishes it. Demo mode forces it off.
+    setup_wizard: bool = True
 
     # The embedding model that builds new search indexes, called with each
     # user's own key for this provider. An existing index keeps the model it
@@ -133,6 +136,11 @@ class Settings(BaseSettings):
                     "Remove ALLOW_CUSTOM_PROVIDER=true: demo mode turns the custom provider off"
                 )
             self.allow_custom_provider = False
+            if "setup_wizard" in self.model_fields_set and self.setup_wizard:
+                raise ValueError(
+                    "Remove SETUP_WIZARD=true: demo mode has no setup to open"
+                )
+            self.setup_wizard = False
         return self
 
     @property
