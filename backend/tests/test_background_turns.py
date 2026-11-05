@@ -115,7 +115,10 @@ async def test_a_turn_finishes_and_is_stored_after_its_client_disconnects(async_
     assert "sources" in messages[2].details
     assert messages[3].tool_calls[0]["function"]["name"] == "propose_thought"
     [proposal_id] = await api.db(lambda s: _proposal_ids(s, conversation_id))
-    assert messages[4].details == {"proposal_id": str(proposal_id)}
+    assert messages[4].details == {
+        "proposal_id": str(proposal_id),
+        "summary": "Proposed a thought to file",
+    }
     assert messages[5].content == "Filed it for you."
     rows = await usage_rows(api)
     assert len(rows) == len(api.fake.chat_requests) == 3
@@ -205,10 +208,12 @@ async def test_the_tool_round_limit_is_stored(async_api):
         tool_round("search_thoughts", '{"query": "a"}', "call_1", text="Let me look. "),
         tool_round("search_thoughts", '{"query": "b"}', "call_2"),
         tool_round("search_thoughts", '{"query": "c"}', "call_3"),
+        tool_round("search_thoughts", '{"query": "d"}', "call_4"),
     )
 
     messages = await messages_of(async_api, conversation_id)
-    assert len(async_api.fake.chat_requests) == 3
+    # chat.yaml: tool_rounds 4 (thought-status design decision 11).
+    assert len(async_api.fake.chat_requests) == 4
     assert messages[-2].role == "assistant"
     assert messages[-2].error_code == ErrorCode.TOOL_LOOP_LIMIT
 

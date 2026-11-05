@@ -89,7 +89,10 @@ def test_result_has_the_documented_form_and_sources_go_in_the_event_and_the_mess
         {"id": thought_id, "title": "Oat milk", "created_at": "2026-09-20T00:00:00+00:00", "tags": ["groceries"]},
         {"id": other_id, "title": "Shopping list", "created_at": "2026-09-21T00:00:00+00:00", "tags": ["shopping"]},
     ]
-    assert stored_tool_details(client, alice) == [{"sources": end["sources"]}]
+    # The chat's line is stored too (thought-status design decision 5).
+    assert stored_tool_details(client, alice) == [
+        {"sources": end["sources"], "summary": end["summary"]}
+    ]
     assert events_of(response, "done")
 
 
@@ -131,7 +134,7 @@ def test_no_match(client, alice, fake_llm, test_database_url):
     assert content == NO_MATCH
     [end] = [e for e in events_of(response, "tool") if e["phase"] == "end"]
     assert end["sources"] == []
-    assert stored_tool_details(client, alice) == [{"sources": []}]
+    assert stored_tool_details(client, alice) == [{"sources": [], "summary": end["summary"]}]
 
 
 def test_missing_key_searches_by_words_and_the_turn_ends_normally(

@@ -1,0 +1,261 @@
+# The status probe (thought-status task 3.10): one case per conversation-agent
+# scenario that a model call decides. Every case runs on `today`.
+#
+# A case gives the conversation (`turns`, the latest user message last), the
+# thoughts it has seen (`seen`, numbered T1, T2, … in that order), a held
+# proposal (`held`), /push (`push`: the first call is forced), what a search
+# finds (`search`, keys of `thoughts`, in that order, or [] for no match),
+# what layer 1 finds for a new part whose title or tags hold a key
+# (`candidates`), a first call already answered with a candidate round
+# (`prior_call`), statuses that differ from the seen note (`db_status`), and
+# the offer's asked call (`offer`). `expect` is checked on the run:
+#
+#   first:          the first call (name, status, category, no_status)
+#   accepted:       the proposal shown: its marks (keys), a part about each
+#                   word of `about` and none about `not_about`, no addition
+#                   (`no_additions`), `new: true` on the part about `about`
+#                   (`new`), and the index of its call (`index`)
+#   no_marks:       no call in the turn carries a mark
+#   no_part_about:  no call in the turn proposes a part about these words
+#   reply:          the reply is not empty
+#   no_claim:       the reply does not say the thought was marked done
+
+today: "2026-11-05"
+
+thoughts:
+  plumber:
+    title: Call the plumber
+    summary: Call the plumber about the leak under the kitchen sink.
+    tags: [home]
+    category: task
+    filed: "2026-10-28"
+  milk:
+    title: Buy oat milk
+    summary: Oat milk from the corner shop.
+    tags: [groceries]
+    category: task
+    filed: "2026-10-05"
+  milk_new:
+    title: Buy oat milk
+    summary: Oat milk for the week.
+    tags: [groceries]
+    category: task
+    filed: "2026-11-04"
+  milk_done:
+    title: Buy oat milk
+    summary: Oat milk from the corner shop.
+    tags: [groceries]
+    category: task
+    filed: "2026-10-20"
+    status: done
+    status_changed_at: "2026-10-22"
+
+oat_milk_part: &oat_milk
+  title: Buy oat milk
+  summary: Buy oat milk.
+  tags: [groceries]
+  category: task
+
+cases:
+  - id: called-plumber
+    scenario: I called the plumber
+    turns:
+      - {user: /push call the plumber}
+      - proposal: {thoughts: [{title: Call the plumber, summary: Call the plumber about the leak., tags: [home], category: task}]}
+        reply: It is ready for you to confirm.
+      - {user: I called the plumber}
+    seen: [plumber]
+    expect:
+      accepted: {marks: [plumber], not_about: [plumber]}
+
+  - id: reply-before-confirm
+    scenario: Reply before confirm
+    turns:
+      - {user: I called the plumber}
+    seen: [plumber]
+    expect:
+      accepted: {marks: [plumber]}
+      no_claim: true
+
+  - id: done-and-new
+    scenario: Done and something new
+    turns:
+      - {user: "I called the plumber, and I need to buy oat milk"}
+    seen: [plumber]
+    expect:
+      accepted: {marks: [plumber], about: [oat milk]}
+
+  - id: mark-kept
+    scenario: Mark kept through a similar-thought question
+    turns:
+      - {user: "I called the plumber, and I need to buy oat milk"}
+    seen: [plumber]
+    candidates: {oat milk: [milk]}
+    expect:
+      accepted: {marks: [plumber], about: [oat milk]}
+
+  - id: another-conversation
+    scenario: Task filed in another conversation
+    turns:
+      - {user: I called the plumber}
+    search: [plumber]
+    expect:
+      first: {name: search_thoughts, status: open}
+      accepted: {marks: [plumber], not_about: [plumber], index: 1}
+
+  - id: nothing-open
+    scenario: Nothing open matches
+    turns:
+      - {user: I called the plumber}
+    search: []
+    expect:
+      no_marks: true
+      reply: true
+
+  - id: unseen-and-new
+    scenario: Unseen finished task and something new
+    turns:
+      - {user: "I called the plumber, and I need to buy oat milk"}
+    search: [plumber]
+    expect:
+      first: {name: search_thoughts, status: open}
+      accepted: {marks: [plumber], about: [oat milk], index: 1}
+
+  - id: guessed-ref
+    scenario: Guessed ref, then search
+    turns:
+      - {user: I called the plumber}
+    search: [plumber]
+    expect:
+      accepted: {marks: [plumber], not_about: [plumber]}
+
+  - id: push-unseen
+    scenario: Push a finished task the conversation has not seen
+    turns:
+      - {user: /push I called the plumber}
+    push: true
+    search: [plumber]
+    candidates: {plumber: [plumber]}
+    expect:
+      accepted: {marks: [plumber], not_about: [plumber], no_additions: true}
+
+  - id: similar-finished
+    scenario: Finished task listed as a similar thought
+    turns:
+      - {user: I called the plumber}
+    prior_call:
+      thoughts:
+        - {title: Called the plumber, summary: The user called the plumber., tags: [home], category: note}
+    candidates: {plumber: [plumber]}
+    expect:
+      accepted: {marks: [plumber], not_about: [plumber], no_additions: true, index: 0}
+
+  - id: task-part-question
+    scenario: Finished task question for a task part
+    turns:
+      - {user: /push I called the plumber}
+    push: true
+    prior_call:
+      thoughts:
+        - {title: Called the plumber, summary: The user called the plumber., tags: [home], category: task}
+    search: [plumber]
+    candidates: {plumber: [plumber]}
+    expect:
+      accepted: {marks: [plumber], not_about: [plumber], no_additions: true}
+
+  - id: repeated-task
+    scenario: Repeated task
+    turns:
+      - {user: /push buy oat milk}
+    push: true
+    candidates: {oat milk: [milk]}
+    expect:
+      accepted: {marks: [], about: [oat milk], new: true}
+
+  - id: several-open
+    scenario: Several open matches
+    turns:
+      - {user: I bought the oat milk}
+    search: [milk, milk_new]
+    expect:
+      first: {name: search_thoughts}
+      accepted: {marks: [milk_new], index: 1}
+
+  - id: finished-before-filed
+    scenario: Finished before it was filed
+    turns:
+      - {user: /push call the plumber}
+      - proposal: {thoughts: [{title: Call the plumber, summary: Call the plumber about the leak., tags: [home], category: task}]}
+        reply: It is ready for you to confirm.
+      - {user: I called the plumber}
+    held:
+      - {title: Call the plumber, summary: Call the plumber about the leak., tags: [home], category: task}
+    search: []
+    expect:
+      no_marks: true
+      no_part_about: [plumber]
+      reply: true
+
+  - id: held-unseen
+    scenario: Held proposal and an unseen finished task
+    turns:
+      - {user: I need to buy oat milk}
+      - proposal: {thoughts: [*oat_milk]}
+        reply: It is ready for you to confirm.
+      - {user: I called the plumber}
+    held: [*oat_milk]
+    search: [plumber]
+    expect:
+      first: {name: search_thoughts, status: open}
+      accepted: {marks: [plumber], about: [oat milk], index: 1}
+
+  - id: held-seen
+    scenario: Held proposal and a seen finished task
+    turns:
+      - {user: I need to buy oat milk}
+      - proposal: {thoughts: [*oat_milk]}
+        reply: It is ready for you to confirm.
+      - {user: I called the plumber}
+    seen: [plumber]
+    held: [*oat_milk]
+    expect:
+      accepted: {marks: [plumber], about: [oat milk], index: 0}
+
+  - id: refused-beside-new
+    scenario: Refused mark beside a new thought
+    turns:
+      - {user: "I called the plumber, and I need to buy oat milk"}
+    seen: [plumber]
+    # Marked done in the sheet since the note was built: a mark is refused.
+    db_status: {plumber: done}
+    expect:
+      accepted: {marks: [], about: [oat milk]}
+
+  - id: tasks-still-open
+    scenario: What tasks are still open
+    turns:
+      - {user: "what tasks are still open?"}
+    search: [plumber]
+    expect:
+      first: {name: search_thoughts, status: open, category: task}
+
+  - id: did-i-do-it
+    scenario: Did I do it
+    turns:
+      - {user: "did I buy the oat milk?"}
+    search: [milk_done]
+    expect:
+      first: {name: search_thoughts, no_status: true}
+
+  - id: compact-finished
+    scenario: Only a finished task at /compact
+    turns:
+      - {user: I called the plumber}
+      - proposal: {thoughts: [], marks: [{ref: T1}]}
+        result: status
+        reply: The change is ready for you to confirm.
+    seen: [plumber]
+    seen_status: {plumber: done}
+    offer: true
+    expect:
+      no_part_about: [plumber]

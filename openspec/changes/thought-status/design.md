@@ -345,6 +345,31 @@ Decision 12 fixes the summaries for a status and a category, for a date-only sea
 
 **Alternatives:** keep `Looked up your thoughts dated <days>` for a date-only search (rejected: decision 12 and task 2.2 name `Listed your thoughts`, and one form for every list with no query reads the same in the chat).
 
+### 18. Build note: where the mark check runs, and its helpers
+
+A mark is parsed as a `ProposalPart` with `mark` set to its ref (written as the server writes refs, or the text as given when it is not a ref) and no other field; `parse_proposal()` returns the `thoughts` entries first, then one mark per ref, and `as_dict()` keeps a mark as `{"mark_ref": ...}`, as an addition keeps `add_to_ref`. The check itself is `resolve_marks()` in `app/chat/proposal.py`: the one owner-filtered query of decision 6, then `mark_refusal()`, a pure function that writes the lines and the closing line, and raises them as one `ToolRefusal`. The turn calls `resolve_marks()` right after `parse_proposal()`, before `check_parts()` (so a refused call makes no embedding call), and passes the resolved parts to `write_proposal()`; `write_proposal()` resolves only parts that still carry `mark_ref`, so a direct call (task 3.2's foreign-thought check) is checked too, and a turn's call is checked once. `mark_ids()` tells an unseen ref from a deleted thought by the refs alone: text that is not a ref, or a number past `refs.numbered`, is unseen; a deleted thought keeps its number, so its id goes to the query, which finds no row. When a refused call mixes reasons, the closing line takes the search form whenever any refused mark was unseen, and names every refused ref, the last two joined by `and` (`without T9 and T12`). The status probe reuses `mark_ids()` and `mark_refusal()`, so its canned refusals are the server's own text.
+
+**Alternatives:** check marks only in `write_proposal()` (rejected: the turn must refuse before layer 1, which runs before `write_proposal()`); a second query on every turn's call (rejected: no need, the turn passes resolved parts).
+
+### 19. Build note: `filed_titles()` is gone; the "filed" test is `discussion_start()` and `saved_ids()`
+
+`thought-appending` replaced `filed_titles()` and `FILED_NOTE` with the seen-thoughts note, and the offer keeps every thought the conversation saved in it through `refs.saved_ids()`. So decision 8's rule lives in `filed_part()` (a part with a `thought_id` and no `mark`), which `discussion_start()` reads, and in `saved_ids()`, which skips mark parts; task 3.6's "`filed_titles()` does not list the marked task" is checked as "`saved_ids()` does not include it". `appearances()` also reads each part's `mark`, so the conversation's refs hold the marked thought and `lookup_from_refs()` gives the status card its `target` with no extra query; a mark only names a seen thought, so it never takes a new number.
+
+### 20. Build note: the held note, the summary, the offer, and confirm
+
+- The held note is found by identity: `held_note_of()` takes the entry `build_context()` appended last when the held proposal has an unsaved part, the chat route passes it to `BuiltinTools(held_note=...)`, and `drop_held_note(context, note)` removes that object. It is dropped after any written proposal row, a marks-only one included (that turn can no longer propose).
+- `_run_tool()` stores `{**details, "summary": summary}` on every tool message, so a connector's stored failure summary is unchanged, and the existing tests that compared `details` exactly now include `summary`.
+- In the offer, `parse_proposal(..., offered=True)` drops the `marks` key and gives no part for a call with no entry in `thoughts`; `asked_proposal()` then offers nothing, with no log line.
+- Confirm keeps today's order: the lock, the index range, `parts: name one part, or every part to merge them`, then `parts: a status change is confirmed on its own`. A mark id that is not a UUID gets the same 404 as a deleted thought. `confirm_addition()`'s "Another part of this proposal was saved to that thought already" ignores a confirmed mark on the same thought, so an addition and a mark confirm in either order.
+
+### 21. Build note: the status probe
+
+`scripts/probe_prompt.py status` runs each case of `scripts/probe_data/status.yaml` through `StatusWorld`, which answers every call as the server would: a search with `format_search_result()` and refs, a proposal's marks with `mark_ids()` and `mark_refusal()`, and a candidate round with `candidates_note()` (with the repeated-task line for a `task` part). A case may start from a first call already answered with a candidate round (`prior_call`, for "Finished task listed as a similar thought" and "Finished task question for a task part"), and "Refused mark beside a new thought" shows the plumber task open in the seen note while the mark check reads it done (`db_status`), so a call that marks it is refused with the server's text. Besides one case per listed scenario, it has "Reply before confirm" (a mark and a reply that `CLAIMS_DONE` must not match) and "Guessed ref, then search" (any path that ends with the mark). `CLAIMS_DONE` does not match "will be marked done" or "to be marked done". The real-model run needs a Nebius key and is not run in this build (tasks.md 3.10).
+
+### 22. Build note: test fakes for the SQLite suite
+
+`tests/status_fakes.py` sets its fakes with monkeypatch: `canned_search(monkeypatch, thought_id)` replaces the turn's `search_tool_result`, and `fake_similar(monkeypatch, candidates)` replaces both `similar.search_by_vector` and `similar.check_runs` (layer 1 is gated to Postgres before any lookup). `seed_active_index()` gives the user an active index, so layer 1 sends its embedding request to the fake provider and the "no embedding call" checks are not vacuous.
+
 ## Risks / Trade-offs
 
 - [The model marks the wrong thought done] → The card names the thought by its current title, and nothing changes until the user confirms. The sheet's toggle sets it back.

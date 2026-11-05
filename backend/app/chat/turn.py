@@ -26,9 +26,17 @@ from app.chat.prompt import (
     SEARCH_TOOL,
     drop_held_note,
     forced_tool,
+    held_note_of,
     tool_arguments,
 )
-from app.chat.proposal import Filing, part_lookup, proposal_payload, refs_for, write_proposal
+from app.chat.proposal import (
+    Filing,
+    part_lookup,
+    proposal_payload,
+    refs_for,
+    resolve_marks,
+    write_proposal,
+)
 from app.chat.similar import candidates_note, check_parts, with_similar
 from app.chat.sse import Event
 from app.chat.tool_providers import (
@@ -42,7 +50,9 @@ from app.chat.usage import record_usage, usage_warning
 from app.chat.tools import (
     ALREADY_PROPOSED,
     PROPOSAL_SHOWN,
+    PROPOSAL_SHOWN_STATUS,
     ToolArgumentError,
+    ToolRefusal,
     parse_proposal,
     parse_search,
     search_tool_result,
@@ -135,6 +145,7 @@ class BuiltinTools:
         settings: Settings | None = None,
         http_client: httpx2.AsyncClient | None = None,
         zone: ZoneInfo | None = None,
+        held_note: dict[str, Any] | None = None,
     ):
         self.session = session
         self.user = user
@@ -146,6 +157,9 @@ class BuiltinTools:
         self.command = command
         # The held proposal's parts the context's note lists, if any.
         self.held_parts = held_parts
+        # The note itself, the dict build_context() appended last: a written
+        # proposal removes it by identity (thought-status design decision 6).
+        self.held_note = held_note if held_note is not None else held_note_of(context, held_parts)
         self.settings = settings or get_settings()
         self.http_client = http_client
         # The user's zone, read once from the request: the search tool's days
@@ -196,17 +210,33 @@ class BuiltinTools:
     async def _propose(self, arguments: dict[str, Any], turn: TurnToolState) -> ToolOutcome:
         """A propose_thought call.
 
-        The similar-thought check runs first (thought-appending design
-        decision 4). When a new part has candidates, nothing is written: the
-        result lists them by ref and the turn's next round must propose
-        again, once, with no second candidate round. A candidate round writes
-        no proposal, so the one-proposal rule still allows that call. In the
-        last round the limit allows, no round is left for that call, so
-        layer 2 is skipped and the proposal is written at once, with its
-        strong matches named: the user always gets a card.
+        Its marks are checked first, in one query, before the similar-thought
+        check and any embedding call; a mark that cannot apply refuses the
+        whole call with a ToolRefusal (thought-status design decisions 5
+        and 6). The similar-thought check runs next, on the new parts only
+        (thought-appending design decision 4). When a new part has
+        candidates, nothing is written: the result lists them by ref and the
+        turn's next round must propose again, once, with no second candidate
+        round. A candidate round writes no proposal, so the one-proposal rule
+        still allows that call; a refused call does not count for the skip
+        either. In the last round the limit allows, no round is left for
+        that call, so layer 2 is skipped and the proposal is written at once,
+        with its strong matches named: the user always gets a card.
+
+        The held note is dropped, and the held parts cleared, only once a
+        proposal row is written: a refusal or a candidate round keeps both.
         """
         parts = parse_proposal(arguments, self.filing.categories, self.zone)
         refs = await refs_for(self.session, self.conversation, before_next_row=True)
+        marks = iter(
+            await resolve_marks(
+                self.session,
+                self.user.id,
+                refs,
+                [part.mark for part in parts if part.mark is not None],
+                sum(1 for part in parts if part.mark is None),
+            )
+        )
         check = await check_parts(
             self.session,
             self.user,
@@ -230,20 +260,23 @@ class BuiltinTools:
                 result=result, summary="Checked for similar thoughts", details={"similar": similar}
             )
 
-        drop_held_note(self.context, self.held_parts)
-        self.held_parts = None
+        stored = [next(marks) if part.mark is not None else part.as_dict() for part in parts]
         proposal, replaced = await write_proposal(
             self.session,
             self.conversation,
-            with_similar([part.as_dict() for part in parts], check),
+            with_similar(stored, check),
             await next_position(self.session, self.conversation),
             push=self.command == "push",
             refs=refs,
         )
+        drop_held_note(self.context, self.held_note)
+        self.held_note = None
+        self.held_parts = None
         self._proposed = True
+        marked = [bool(part.get("mark")) for part in proposal.parts]
         return ToolOutcome(
-            result=PROPOSAL_SHOWN,
-            summary="Proposed a thought to file",
+            result=PROPOSAL_SHOWN_STATUS if any(marked) else PROPOSAL_SHOWN,
+            summary="Proposed marking a thought done" if all(marked) else "Proposed a thought to file",
             details={"proposal_id": str(proposal.id)},
             events=[
                 (
@@ -557,6 +590,10 @@ class Turn:
                 outcome = await self._hold(provider, name, arguments)
             else:
                 outcome = await provider.call(name, arguments, self.tool_state)
+        except ToolRefusal as exc:
+            # A mark that cannot apply: the text says why and what to do, so
+            # it goes back as it is (thought-status design decision 6).
+            outcome = ToolOutcome(result=str(exc), summary="Could not propose that change")
         except (ValueError, ToolArgumentError) as exc:
             # Sent back to the model, which gets another round to call it right.
             outcome = ToolOutcome(
@@ -573,8 +610,13 @@ class Turn:
 
         for event in outcome.events:
             yield event
+        # The chat's line is stored too, so a reload shows the same
+        # (thought-status design decision 5).
         await self._store(
-            role="tool", tool_call_id=tool_call["id"], content=outcome.result, details=outcome.details
+            role="tool",
+            tool_call_id=tool_call["id"],
+            content=outcome.result,
+            details={**(outcome.details or {}), "summary": outcome.summary},
         )
         self.context.append(
             {"role": "tool", "tool_call_id": tool_call["id"], "content": outcome.result}

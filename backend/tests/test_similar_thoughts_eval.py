@@ -14,6 +14,7 @@ import pytest
 
 from app.chat.config import load_chat_config
 from app.chat.prompt import PROPOSE_TOOL
+from app.chat.similar import REPEATED_TASK
 from app.evals import similar_thoughts as job
 from app.thoughts.baseline import MAX_PAIRS
 from tests.chat_helpers import FakeLLM, completion, tool_call
@@ -234,7 +235,7 @@ def test_layer2_counts_the_model_picking_right(fake, tmp_path, capsys):
     note = first["messages"][-1]["content"]
     assert first["messages"][-1]["role"] == "tool"
     assert "T1 · Sourdough · filed" in note
-    assert "A repeated task is usually a new task." in second["messages"][-1]["content"]
+    assert REPEATED_TASK in second["messages"][-1]["content"]
     assert "T1 · Dentist 2024 · filed 2024-03-04" in second["messages"][-1]["content"]
 
 

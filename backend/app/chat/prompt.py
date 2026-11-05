@@ -12,7 +12,13 @@ from app.chat.commands import parse_message
 from app.errors import ApiError
 from app.models import Message, ToolAction
 from app.thoughts.categories import FIXED_CATEGORIES
-from app.thoughts.dates import DEFAULT_ZONE, local_day, thought_date_text, today_in
+from app.thoughts.dates import (
+    DEFAULT_ZONE,
+    local_day,
+    status_mark,
+    thought_date_text,
+    today_in,
+)
 
 SEARCH_TOOL = "search_thoughts"
 PROPOSE_TOOL = "propose_thought"
@@ -36,6 +42,25 @@ points the user agreed with. When a message holds several separate things to \
 keep, propose each as its own entry in one call; otherwise propose one. A \
 detail, reason, or step of one thing stays in that thing's entry. The user \
 reviews and edits the proposal before anything is saved.
+
+When the user says they finished something, such as "I called the plumber", \
+propose marking it done: put its ref in marks of propose_thought. Send a mark \
+only with a ref this conversation has seen, from the seen thoughts, a search \
+result, or a list of similar thoughts; never guess a ref. When the finished \
+thing is not among the thoughts this conversation has seen, first search for \
+it with status open, before any proposal in this turn, then make one \
+proposal with the mark on the ref the search gives and anything new to file. \
+When that search finds no open thought for it, propose no mark. When it \
+finds several open thoughts for it, mark only the most recently filed one, \
+and name the older ones in your reply so the user can close them. When a \
+list of similar thoughts holds a thing the user says they finished, mark \
+that ref done instead of proposing it as new or as an addition, also after \
+/push. Nothing changes until the user confirms a mark, so never say a \
+thought was marked done.
+
+When the user asks what is open, left, or still to do, search with status \
+open, and with category task for tasks. When they ask about a thing \
+whatever its status, such as whether they did it, pass no status.
 
 Answer questions about filed thoughts only from what search_thoughts \
 returns. When it finds nothing, say so plainly, and never answer as if the \
@@ -79,8 +104,10 @@ SEARCH_TOOL_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "enum": ["open"],
                     "description": (
-                        "Only thoughts not marked done. Leave it out to find done "
-                        "thoughts too."
+                        "Only thoughts not marked done. Pass it for what is open, left, "
+                        "or still to do, and to find a thing the user says they "
+                        "finished. Leave it out to find done thoughts too, such as "
+                        "when the user asks whether they did something."
                     ),
                 },
                 "category": {
@@ -137,6 +164,15 @@ ADD_TO_DESCRIPTION = (
 NEW_DESCRIPTION = (
     "true to keep this entry a new thought after similar thoughts were listed for it."
 )
+# Marks (thought-status design decisions 5 and 11).
+MARKS_DESCRIPTION = (
+    "Thoughts the user says they finished, to mark done: one entry per thought, with "
+    "only its ref. Give only a ref this conversation has seen, from the seen thoughts, "
+    "a search result, or a list of similar thoughts; never guess one. A mark carries "
+    "nothing else: put an addition or a date in its own entry in thoughts. With only "
+    "marks, send thoughts as []."
+)
+MARK_REF_DESCRIPTION = "The ref, such as T3, of the thought to mark done."
 
 # The model gives a start and an end only; the server adds the user's zone
 # (thought-dates design decisions 2 and 5).
@@ -173,8 +209,12 @@ WHEN_CHOICES_DESCRIPTION = (
 )
 
 
-def propose_tool_schema(categories: list[str], known_tags: list[str]) -> dict[str, Any]:
-    """The propose_thought tool for one user: their categories, and the tags they use."""
+def propose_tool_schema(
+    categories: list[str], known_tags: list[str], marks: bool = True
+) -> dict[str, Any]:
+    """The propose_thought tool for one user: their categories, and the tags
+    they use. With `marks`, it also takes marks; the offer's asked calls get
+    it without them (thought-status design decision 6)."""
     tags_description = TAGS_DESCRIPTION
     if known_tags:
         tags_description += (
@@ -214,35 +254,54 @@ def propose_tool_schema(categories: list[str], known_tags: list[str]) -> dict[st
         },
         "required": ["title", "summary", "tags", "category"],
     }
+    properties: dict[str, Any] = {
+        "thoughts": {
+            "type": "array",
+            "items": part,
+            "maxItems": MAX_PARTS,
+            "description": "One entry per separate thing to keep.",
+        }
+    }
+    description = (
+        "Propose thoughts for the user to file. Usually one. Give several only "
+        "when the text holds separate things to keep; a detail of one thing "
+        "stays in its entry. Nothing is saved until the user confirms."
+    )
+    if marks:
+        properties["marks"] = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"ref": {"type": "string", "description": MARK_REF_DESCRIPTION}},
+                "required": ["ref"],
+            },
+            "maxItems": MAX_PARTS,
+            "description": MARKS_DESCRIPTION,
+        }
+        description += (
+            " To mark a thought the user finished done, put its ref in marks, in the "
+            "same call as anything new."
+        )
     return {
         "type": "function",
         "function": {
             "name": PROPOSE_TOOL,
-            "description": (
-                "Propose thoughts for the user to file. Usually one. Give several only "
-                "when the text holds separate things to keep; a detail of one thing "
-                "stays in its entry. Nothing is saved until the user confirms."
-            ),
+            "description": description,
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "thoughts": {
-                        "type": "array",
-                        "items": part,
-                        "minItems": 1,
-                        "maxItems": MAX_PARTS,
-                        "description": "One entry per separate thing to keep.",
-                    }
-                },
+                "properties": properties,
                 "required": ["thoughts"],
             },
         },
     }
 
 
-def tools_for(categories: list[str], known_tags: list[str]) -> list[dict[str, Any]]:
-    """The two tools, with the proposal tool built for one user."""
-    return [SEARCH_TOOL_SCHEMA, propose_tool_schema(categories, known_tags)]
+def tools_for(
+    categories: list[str], known_tags: list[str], marks: bool = True
+) -> list[dict[str, Any]]:
+    """The two tools, with the proposal tool built for one user, with marks
+    unless `marks` is False (the offer's asked calls)."""
+    return [SEARCH_TOOL_SCHEMA, propose_tool_schema(categories, known_tags, marks)]
 
 
 # The tools for a user with no added categories and no tags, for the model test.
@@ -259,11 +318,19 @@ answer, decide whether the user's latest message is still about this \
 proposal's topic. If it is about something else (a new question, a new task, \
 or a new subject), your first action must be a propose_thought call with the \
 held proposal, updated with anything discussed since. Then answer the new \
-message."""
+message. If the latest message says the user finished something, make one \
+propose_thought call that holds the held proposal and the mark; when the thing \
+is not among the thoughts this conversation has seen, search for it with \
+status open first. If the user says they finished something a held part is \
+about, that part was never filed: leave it out of your next proposal, propose \
+no mark for it, and tell the user the card was never filed and can be passed \
+over."""
 
 
 def unsaved_parts(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [part for part in parts if not part.get("thought_id")]
+    """The parts not yet saved that hold a proposal: a mark never does
+    (thought-status design decision 9)."""
+    return [part for part in parts if not part.get("thought_id") and not part.get("mark")]
 
 
 def _date_text(when: dict[str, Any]) -> str:
@@ -328,12 +395,18 @@ def thought_entry(
     ref: str, thought: Any, summary_chars: int, zone: ZoneInfo | None = None
 ) -> str:
     """A filed thought as the model reads it by ref: ref, title, filing date,
-    the thought's own date when it has one, tags, and category, then the
+    ` · done <day>` when it is done, the thought's own date when it has one,
+    tags, and category, then the
     summary cut at `summary_chars`. The filing day is the user's local day in
     `zone` (UTC when not given), and the own date reads as in the search
     tool's text (thought-dates design decision 12)."""
-    filed = local_day(thought.created_at, zone or ZoneInfo(DEFAULT_ZONE))
-    heading = f"{ref} · {thought.title} · filed {filed.isoformat()}"
+    zone = zone or ZoneInfo(DEFAULT_ZONE)
+    filed = local_day(thought.created_at, zone)
+    # A thought that is not open says so (thought-status design decision 12).
+    done = status_mark(
+        getattr(thought, "status", None), getattr(thought, "status_changed_at", None), zone
+    )
+    heading = f"{ref} · {thought.title} · filed {filed.isoformat()}{done}"
     dated = thought_date_text(thought)
     if dated:
         heading += f" · on {dated}"
@@ -364,8 +437,10 @@ OFFER_NOTE = (
     "The user is about to archive or compact this conversation. If the "
     "conversation since the last filed thought holds something worth keeping, "
     "such as a decision, a task, an idea, or facts to look up later, call "
-    "propose_thought for it. Leave out greetings, thanks, and small talk. If "
-    "nothing is worth keeping, reply with one word, nothing, and call no tool."
+    "propose_thought for it. Leave out greetings, thanks, and small talk. "
+    "A finished task this conversation already proposed to mark done needs no new "
+    "thought. If nothing is worth keeping, reply with one word, nothing, and call "
+    "no tool."
 )
 
 # In the offer, after the seen-thoughts note. It replaces the list of titles
@@ -383,17 +458,26 @@ def offer_note(seen: bool) -> str:
     return OFFER_NOTE + "\n\n" + OFFER_SEEN_NOTE if seen else OFFER_NOTE
 
 
-def drop_held_note(context: list[dict[str, Any]], held_parts: list[dict[str, Any]] | None) -> None:
-    """Remove the held-proposal note once the turn has proposed, so the model
-    does not follow the note again in the next round. The note is found by its
-    first line, since an addition's part names its ref in it."""
-    if not held_parts:
+def drop_held_note(context: list[dict[str, Any]], note: dict[str, Any] | None) -> None:
+    """Remove the held-proposal note once the turn has written a proposal, so
+    the model does not follow the note again in the next round. The note is
+    the dict build_context() appended, removed by identity: a second render
+    could differ (thought-status design decision 6)."""
+    if note is None:
         return
-    head = HELD_PROPOSAL_NOTE.split("\n", 1)[0]
-    for message in context:
-        if message.get("role") == "system" and (message.get("content") or "").startswith(head):
-            context.remove(message)
+    for index, message in enumerate(context):
+        if message is note:
+            del context[index]
             return
+
+
+def held_note_of(
+    context: list[dict[str, Any]], held_parts: list[dict[str, Any]] | None
+) -> dict[str, Any] | None:
+    """The held-proposal note build_context() appended last, when it did."""
+    if held_parts and unsaved_parts(held_parts) and context:
+        return context[-1]
+    return None
 
 
 def forced_tool(name: str) -> dict[str, Any]:
