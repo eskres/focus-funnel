@@ -118,6 +118,16 @@ def test_the_edited_card_is_stored_with_the_proposals_raw_text(
     assert held_id(test_database_url, conversation_id) == uuid.UUID(proposal_id)
 
 
+def test_a_card_confirmed_as_event_stores_event(client, alice, conversation_id, test_database_url):
+    proposal_id = three_parts(test_database_url, conversation_id)
+
+    response = confirm(client, alice, conversation_id, proposal_id, category="event")
+
+    assert response.status_code == 200, response.text
+    [thought] = thoughts(test_database_url)
+    assert thought.category == "event"
+
+
 def test_confirmed_twice_stores_one_thought_and_answers_its_id(
     client, alice, conversation_id, test_database_url
 ):

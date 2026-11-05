@@ -1,4 +1,4 @@
-"""Thought categories: five fixed kinds for everyone, and the ones a user adds."""
+"""Thought categories: six fixed kinds for everyone, and the ones a user adds."""
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.errors import ApiError, ErrorCode
 from app.models import User, UserCategory
 
-FIXED_CATEGORIES = ("task", "idea", "decision", "note", "reference")
+FIXED_CATEGORIES = ("task", "idea", "decision", "note", "reference", "event")
 MAX_ADDED = 20
 MAX_NAME = 30
 

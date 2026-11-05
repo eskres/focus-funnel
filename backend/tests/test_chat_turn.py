@@ -841,11 +841,25 @@ def test_the_tool_lists_the_users_own_categories_only(client, alice, bob, fake_l
     chat(client, bob, "hello")
 
     alice_request, bob_request = fake_llm.chat_requests
-    fixed = ["task", "idea", "decision", "note", "reference"]
+    fixed = ["task", "idea", "decision", "note", "reference", "event"]
     assert propose_schema(alice_request)["category"]["enum"] == [*fixed, "recipe"]
     assert propose_schema(bob_request)["category"]["enum"] == fixed
     # No thoughts, so no known tags: the plain description.
     assert propose_schema(alice_request)["tags"]["description"] == "A few short tags."
+
+
+def test_the_category_description_says_what_an_event_is(client, alice, fake_llm):
+    ready_user(client, alice)
+    fake_llm.queue(text_chunks("Hi."))
+
+    chat(client, alice, "hello")
+
+    [request] = fake_llm.chat_requests
+    assert (
+        "event: something planned for a set date or time, such as an appointment, a meeting, "
+        "a trip, or a dinner. Something to do or arrange is a task, even on a set day; "
+        "something that already happened is a note."
+    ) in propose_schema(request)["category"]["description"]
 
 
 # --- the search tool (thought-storage 6.2 has the tests with stored thoughts) ---
