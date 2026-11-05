@@ -176,6 +176,20 @@ def test_a_valid_date_reaches_the_event_the_stored_part_and_the_conversation_wit
     assert body["proposals"][0]["parts"][0]["when"] == when
 
 
+def test_a_dated_part_can_be_an_event(client, alice, fake_llm, test_database_url):
+    # event-category made event a fixed kind; a dated part filed as one keeps both.
+    ready_user(client, alice)
+    propose(fake_llm, {**DINNER, "category": "event", "when": {"start": "2026-10-02T19:00"}})
+
+    response = chat(client, alice, "/push dinner with Sam Friday at 7", time_zone="Europe/Oslo")
+
+    part = proposal_event(response)["parts"][0]
+    assert part["category"] == "event"
+    assert part["when"] == {"start": "2026-10-02T19:00", "end": None, "time_zone": "Europe/Oslo"}
+    stored = stored_parts(test_database_url, proposal_event(response)["id"])[0]
+    assert (stored["category"], stored["when"]) == ("event", part["when"])
+
+
 def test_the_model_cannot_name_the_zone(client, alice, fake_llm):
     ready_user(client, alice)
     propose(

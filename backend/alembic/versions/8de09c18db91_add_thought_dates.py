@@ -1,7 +1,7 @@
 """add thought dates
 
 Revision ID: 8de09c18db91
-Revises: 8a4d6f2b9c13
+Revises: 2bea7235fdf6
 Create Date: 2026-11-05 09:00:00.000000
 
 Adds a thought's optional date: starts_on, starts_at, ends_on, ends_at, and
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '8de09c18db91'
-down_revision: Union[str, Sequence[str], None] = '8a4d6f2b9c13'
+down_revision: Union[str, Sequence[str], None] = '2bea7235fdf6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

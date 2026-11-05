@@ -14,7 +14,7 @@ from tests.test_provider_key_migration import run_alembic
 from tests.test_thought_migration import with_database
 
 REVISION = "8de09c18db91"
-PREVIOUS = "8a4d6f2b9c13"
+PREVIOUS = "2bea7235fdf6"
 COLUMNS = {"starts_on", "starts_at", "ends_on", "ends_at", "time_zone"}
 INDEX = "ix_thoughts_user_id_starts_on"
 
