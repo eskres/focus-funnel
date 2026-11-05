@@ -15,6 +15,7 @@ from app.db import get_session
 from app.models import User
 from app.providers import get_provider_http_client
 from app.thoughts.categories import check_category
+from app.thoughts.dates import when_of
 from app.thoughts.store import (
     delete_thought,
     get_thought,
@@ -40,6 +41,8 @@ class ThoughtOut(BaseModel):
     tags: list[str]
     category: str | None
     raw_text: str | None
+    # The thought's own date, {start, end, time_zone}; null when it has none.
+    when: dict[str, str | None] | None
     created_at: datetime
     updated_at: datetime
     # The conversation and proposal it was saved from; null when there is none,
@@ -59,6 +62,9 @@ class ThoughtPatch(BaseModel):
     tags: Any = None
     # Null or empty clears it.
     category: str | None = None
+    # {start, end, time_zone}, with the browser's zone; null clears the date.
+    # The thought store checks it, so a refusal names `when`.
+    when: Any = None
 
 
 async def thought_answer(session: AsyncSession, user: User, thought_id: uuid.UUID) -> ThoughtOut:
@@ -72,6 +78,7 @@ async def thought_answer(session: AsyncSession, user: User, thought_id: uuid.UUI
         tags=list(thought.tags or []),
         category=thought.category,
         raw_text=thought.raw_text,
+        when=when_of(thought),
         created_at=thought.created_at,
         updated_at=thought.updated_at,
         origin=OriginOut(**vars(origin)) if origin else None,
@@ -99,7 +106,8 @@ async def change_thought(
 ) -> ThoughtOut:
     """Change the fields the body names, and answer the thought as GET does.
 
-    Only what changed is embedded again. An embedding failure does not fail
+    Only what changed is embedded again; a new date or category is not
+    embedded at all. An embedding failure does not fail
     the change, as for confirm: search finds it by its words at once, and the
     missing entries are filled in by the next call that reaches the provider.
     """

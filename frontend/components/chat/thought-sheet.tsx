@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 
+import { DateFields, type DateText, dateTextOf, sameWhen, whenOfText } from "@/components/chat/date-fields";
 import { DeleteDialog } from "@/components/chat/delete-dialog";
 import {
   type FieldText,
@@ -20,6 +21,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { NotFoundError, UnauthenticatedError } from "@/lib/api";
+import { formatWhen } from "@/lib/dates";
 import { redirectToLogin } from "@/lib/redirect-to-login";
 import {
   closeThought,
@@ -28,6 +30,7 @@ import {
   originHref,
   useOpenThought,
 } from "@/lib/thought-link";
+import { browserTimeZone } from "@/lib/time-zone";
 import {
   deleteThought,
   getThought,
@@ -42,7 +45,8 @@ type Loaded =
   | { id: string; state: "gone" }
   | { id: string; state: "failed"; message: string };
 
-function when(value: string): string {
+/** A moment the server stamped (filed, changed, proposed), in the browser's zone. */
+function stamp(value: string): string {
   return new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
@@ -93,9 +97,11 @@ export function ThoughtSheet() {
       <SheetContent side="right" showOverlay={false} className="w-full overflow-y-auto sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>{thought?.title ?? "Thought"}</SheetTitle>
+          {/* The thought's own date, as written, apart from when it was filed and changed. */}
+          {thought?.when && <p className="text-sm">When: {formatWhen(thought.when)}</p>}
           <SheetDescription>
             {thought
-              ? `Filed ${when(thought.created_at)} · changed ${when(thought.updated_at)}`
+              ? `Filed ${stamp(thought.created_at)} · changed ${stamp(thought.updated_at)}`
               : current?.state === "gone"
                 ? "This thought no longer exists."
                 : current?.state === "failed"
@@ -139,8 +145,11 @@ function sameTags(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((tag, index) => tag === b[index]);
 }
 
-/** Only the fields the user changed, so an unchanged field is never sent. */
-function changesOf(thought: Thought, text: FieldText): ThoughtChange {
+/**
+ * Only the fields the user changed, so an unchanged field is never sent. A
+ * changed date goes with the browser's zone; a cleared one as null.
+ */
+function changesOf(thought: Thought, text: FieldText, date: DateText | null): ThoughtChange {
   const change: ThoughtChange = {};
   const title = text.title.trim();
   const summary = text.summary.trim();
@@ -150,6 +159,8 @@ function changesOf(thought: Thought, text: FieldText): ThoughtChange {
   if (summary !== thought.summary) change.summary = summary;
   if (!sameTags(tags, thought.tags)) change.tags = tags;
   if (category !== thought.category) change.category = category;
+  const when = whenOfText(date, browserTimeZone());
+  if (!sameWhen(when, thought.when)) change.when = when;
   return change;
 }
 
@@ -174,6 +185,7 @@ function ThoughtBody({
   onDeleted: () => void;
 }) {
   const [text, setText] = useState<FieldText | null>(null);
+  const [date, setDate] = useState<DateText | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -182,6 +194,7 @@ function ThoughtBody({
 
   function edit() {
     setText(textOf(thought));
+    setDate(dateTextOf(thought.when));
     setError(null);
   }
 
@@ -192,7 +205,7 @@ function ThoughtBody({
 
   async function save() {
     if (!text || hasEmptyField(text)) return;
-    const change = changesOf(thought, text);
+    const change = changesOf(thought, text, date);
     if (Object.keys(change).length === 0) {
       cancel();
       return;
@@ -224,6 +237,7 @@ function ThoughtBody({
       {text ? (
         <section aria-label="Edit thought" className="flex flex-col gap-2">
           <ThoughtFields value={text} onChange={setText} keep={thought.category} />
+          <DateFields value={date} onChange={setDate} disabled={busy} />
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" onClick={save} disabled={busy || Boolean(note)}>
               Save
@@ -311,7 +325,7 @@ function Origin({ origin }: { origin: ThoughtOrigin }) {
         <a href={href} onClick={open} className="text-primary underline-offset-4 hover:underline">
           {origin.conversation_title}
         </a>
-        <span className="text-muted-foreground">proposed {when(origin.proposed_at)}</span>
+        <span className="text-muted-foreground">proposed {stamp(origin.proposed_at)}</span>
         {origin.archived && <Badge variant="outline">Archived</Badge>}
       </p>
     </section>
