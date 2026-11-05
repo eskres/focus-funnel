@@ -20,8 +20,15 @@ from app.chat.config import ChatConfig
 from app.chat.context import compact_suggestion
 from app.chat.conversations import ends_answered, interrupted_answer, last_message, next_position
 from app.chat.model_call import ModelCall
-from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, drop_held_note, tool_arguments
+from app.chat.prompt import (
+    PROPOSE_TOOL,
+    SEARCH_TOOL,
+    drop_held_note,
+    forced_tool,
+    tool_arguments,
+)
 from app.chat.proposal import Filing, proposal_payload, refs_for, write_proposal
+from app.chat.similar import candidates_note, check_parts, with_similar
 from app.chat.sse import Event
 from app.chat.usage import record_usage, usage_warning
 from app.chat.tools import (
@@ -142,6 +149,10 @@ class Turn:
         self._tokens_before = conversation.last_prompt_tokens
         # One proposal per turn: a second propose_thought call is refused.
         self._proposed = False
+        # Set by a candidate round of the similar-thought check: the next
+        # proposal call skips layer 2, and the next round must make it.
+        self._checked = False
+        self._force_propose = False
         # The round being read, until it is stored: an interrupted turn keeps its text.
         self._in_flight: RoundState | None = None
         # Set when the turn was cancelled (server shutdown): its settle step
@@ -154,6 +165,11 @@ class Turn:
         options: dict[str, Any] = {"tools": self.filing.tools}
         if round_number == 0 and self.forced_tool is not None:
             options["tool_choice"] = self.forced_tool
+        elif self._force_propose:
+            # After a candidate round the model proposes again, choosing
+            # add_to or new for each part, so the user always gets a card.
+            options["tool_choice"] = forced_tool(PROPOSE_TOOL)
+            self._force_propose = False
         return options
 
     async def open(self) -> None:
@@ -383,28 +399,9 @@ class Turn:
                 result = ALREADY_PROPOSED
                 summary = "Already proposed in this answer"
             elif name == PROPOSE_TOOL:
-                parts = parse_proposal(arguments, self.filing.categories, self.zone)
-                drop_held_note(self.context, self.held_parts)
-                self.held_parts = None
-                proposal, replaced = await write_proposal(
-                    self.session,
-                    self.conversation,
-                    [part.as_dict() for part in parts],
-                    await next_position(self.session, self.conversation),
-                    push=self.command == "push",
-                )
-                details = {"proposal_id": str(proposal.id)}
-                yield (
-                    "proposal",
-                    {
-                        **proposal_payload(proposal),
-                        # The earlier proposal whose card now shows as replaced.
-                        "replaces": str(replaced) if replaced else None,
-                    },
-                )
-                self._proposed = True
-                result = PROPOSAL_SHOWN
-                summary = "Proposed a thought to file"
+                result, summary, details, event = await self._propose(arguments)
+                if event is not None:
+                    yield event
             else:
                 raise ToolArgumentError(f"there is no tool named '{name}'")
         except (ValueError, ToolArgumentError) as exc:
@@ -422,3 +419,57 @@ class Turn:
         )
         self.context.append({"role": "tool", "tool_call_id": tool_call["id"], "content": result})
         yield ("tool", {"name": name, "phase": "end", "summary": summary, **extra})
+
+    async def _propose(
+        self, arguments: dict[str, Any]
+    ) -> tuple[str, str, dict[str, Any], Event | None]:
+        """A propose_thought call: the tool result, the tool summary, the
+        tool message's details, and the proposal event when one is written.
+
+        The similar-thought check runs first (design decision 4). When a new
+        part has candidates, nothing is written: the result lists them by ref
+        and the next round must propose again, once, with no second candidate
+        round. A candidate round writes no proposal, so the one-proposal rule
+        still allows that call.
+        """
+        parts = parse_proposal(arguments, self.filing.categories, self.zone)
+        refs = await refs_for(self.session, self.conversation)
+        check = await check_parts(
+            self.session,
+            self.user,
+            parts,
+            refs,
+            config=self.config,
+            settings=self.settings,
+            again=self._checked,
+            conversation_id=self.conversation.id,
+            http_client=self.http_client,
+        )
+        if check.has_candidates:
+            result, similar = candidates_note(
+                parts, check, refs, self.config.filing.seen_summary_chars
+            )
+            self._checked = True
+            self._force_propose = True
+            return result, "Checked for similar thoughts", {"similar": similar}, None
+
+        drop_held_note(self.context, self.held_parts)
+        self.held_parts = None
+        proposal, replaced = await write_proposal(
+            self.session,
+            self.conversation,
+            with_similar([part.as_dict() for part in parts], check),
+            await next_position(self.session, self.conversation),
+            push=self.command == "push",
+            refs=refs,
+        )
+        self._proposed = True
+        event: Event = (
+            "proposal",
+            {
+                **proposal_payload(proposal),
+                # The earlier proposal whose card now shows as replaced.
+                "replaces": str(replaced) if replaced else None,
+            },
+        )
+        return PROPOSAL_SHOWN, "Proposed a thought to file", {"proposal_id": str(proposal.id)}, event

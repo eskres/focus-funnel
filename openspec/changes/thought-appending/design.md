@@ -202,6 +202,32 @@ Refs live in `app/chat/refs.py`. Details decision 2 left open:
 
 **Alternatives:** keep the model's title on the part for "File as new" (rejected: the spec says the model's title for an addition is ignored, and the card names the thought by its current title; the user can rename a card filed as new).
 
+### 17. The similar-thought check in detail (decided during tasks 3.1 and 3.3, 2026-11-05)
+
+The check lives in `app/chat/similar.py`; `search.py` gains `search_by_vector()`, which runs `rank()` with a vector the caller already has and with the check's own cut-off and limit (`rank()` takes optional `min_similarity` and `limit`). Details decision 4 left open:
+
+- **What is embedded and matched.** A part's query is its head entry's text (`head_text(title, tags, summary)`), with no query instruction, so its similarities are on the scale of the baseline, which compares head entries. The words half matches title and tags only: with the whole summary as the query, the word-share rule is rarely reached.
+- **No index, no key, no thoughts.** The check never creates an index. With no active index, or a provider error, it matches by words only, and a words-only candidate never counts as a strong match. It runs only on Postgres and only for a user who has thoughts, so it makes no embedding call otherwise.
+- **Which parts.** A part whose `add_to` names a seen thought is not checked, and the thoughts such parts name are no other part's candidates. On the first call, a part with neither `add_to` nor `new: true` gets candidates for layer 2. Any part that is not an addition and not a `task` is checked for layer 3's strong match, on the first call and after a candidate round, so a part the model marks `new` at once can still get the hint.
+- **The candidate round.** The tool result lists each part's candidates (ref, title, filing date, tags, category, summary cut at `filing.seen_summary_chars`) and asks for the call again; the tool event's summary is "Checked for similar thoughts". The tool message stores the candidates as `details.similar`, each `{id, title, created_at, tags}` like a source, kept apart from `details.sources` so the chat does not list them as an answer's sources. A candidate new to the conversation is numbered after every other ref in the listed order, which is the order the next turn computes from the stored rows.
+- **The round after a candidate round is forced** to call `propose_thought` (the model still chooses `add_to` or `new` for each part), because only round 0 is forced otherwise, and a model answering in words would leave the user with no card. `tool_rounds` stays 3: a turn that searches, gets candidates, and proposes reaches the limit before its closing words. The proposal is shown and stored all the same; raising `tool_rounds` to 4 is the owner's call.
+- **The offer** numbers its candidates in memory (`Refs.see()`), appends the candidate note as a system message for the second asked call, and resolves that call's refs with the same refs, so an `add_to` naming a candidate becomes an addition though no stored row names it yet.
+- **`similar` on a stored part** is `{thought_id}`. The payload's title and filing date for it come with task 4.2.
+
+**Alternatives:** embed the query with the search's query instruction (rejected: its similarities would not compare with the head-to-head baseline); store the candidates in `details.sources` (rejected: the chat would show them as the answer's sources).
+
+### 18. The baseline in detail (decided during task 3.2, 2026-11-05)
+
+The baseline lives in `app/thoughts/baseline.py`. Details decision 5 left open:
+
+- **Pairs.** While the index's head entries make at most 2,000 pairs, every pair is compared, so the result is exact and repeatable. Past that, 2,000 random pairs of two different heads are drawn by row number (a pair can repeat). Postgres computes `percentile_cont(ARRAY[0.95, 0.99])` over `1 - (a.embedding <=> b.embedding)`, on `chunk = 0` rows only.
+- **When.** `app/reembed.py` measures the new index right after the swap commits. After a store (`store_thought()` and confirm), once its commit is done, the active index is measured when the user has at least `min_thoughts` thoughts and the index has no baseline yet or the count reached 1.5 times `baseline_thoughts`; so an index that became active below the minimum gets its first baseline as the user grows. The minimum counts the index's head entries; `baseline_thoughts` records the user's thought count.
+- **Failure.** The measurement runs in a savepoint and catches every error: it is logged, the old values stay, and the store has already committed.
+- **Cut-offs.** Decision 5 is read literally: candidate = max(p95 + `candidate_margin`, search cut-off - `floor_delta`), strong = max(p99 + `strong_margin`, search cut-off - `floor_delta`); the floor guards the low side, as "never lower than" says, and the Risks line about the floor capping the cut-off means that. With no baseline, they are the floor and the search cut-off. Cut-offs over 1 are possible for a user whose thoughts are near copies of each other; meaning then finds nothing, and words still run.
+- **`chat.yaml`.** `filing.similar` holds `candidate_margin`, `strong_margin`, `floor_delta`, and `min_thoughts`, each with a code default when the file has none.
+
+**Alternatives:** an O(n²) self-join always (rejected: too slow for a large index); `TABLESAMPLE` (rejected: it samples pages, not pairs, and is not deterministic for the small case).
+
 ## Risks / Trade-offs
 
 - [Depends on `thought-editing`, not built, and on `explore`, merged and archived] → The tasks start after `thought-editing` merges. If `origin`, `check_category()`, the `saved_title` lookup, or the offer code (`asked_proposal()`, `offer_note()`, `Turn._proposed`) change shape, re-read decisions 2, 3, 4, 7, and 10.

@@ -74,6 +74,23 @@ class SearchConfig:
 
 
 @dataclass(frozen=True)
+class SimilarConfig:
+    """The similar-thought check's cut-offs (thought-appending design decision 5).
+
+    The candidate cut-off is the index's p95 plus candidate_margin, the strong
+    one its p99 plus strong_margin, neither below the search cut-off for the
+    model minus floor_delta. Below min_thoughts thoughts no baseline is
+    measured: the candidate cut-off is then the search cut-off minus
+    floor_delta, and the strong one the search cut-off.
+    """
+
+    candidate_margin: float = 0.02
+    strong_margin: float = 0.02
+    floor_delta: float = 0.1
+    min_thoughts: int = 30
+
+
+@dataclass(frozen=True)
 class FilingConfig:
     """Filing thoughts. See openspec push-and-pull design decision 6."""
 
@@ -83,6 +100,7 @@ class FilingConfig:
     # recently seen thoughts it lists, and each one's summary cut to this.
     seen_thoughts: int = 3
     seen_summary_chars: int = 1500
+    similar: SimilarConfig = SimilarConfig()
 
 
 @dataclass(frozen=True)
@@ -194,7 +212,23 @@ def _parse_filing(raw: object) -> FilingConfig:
         for name in ("seen_thoughts", "seen_summary_chars")
         if name in raw
     }
+    if "similar" in raw:
+        optional["similar"] = _parse_similar(raw["similar"])
     return FilingConfig(known_tags=_positive_int(raw, "known_tags", "filing."), **optional)
+
+
+def _parse_similar(raw: object) -> SimilarConfig:
+    """filing.similar: each value takes its default when the file has none."""
+    if not isinstance(raw, dict):
+        raise ChatConfigError("'filing.similar' must be a mapping of check settings")
+    values: dict[str, float | int] = {
+        name: _similarity(raw[name], f"filing.similar.{name}")
+        for name in ("candidate_margin", "strong_margin", "floor_delta")
+        if name in raw
+    }
+    if "min_thoughts" in raw:
+        values["min_thoughts"] = _positive_int(raw, "min_thoughts", "filing.similar.")
+    return SimilarConfig(**values)
 
 
 def _parse_temperature(raw: object) -> TemperatureConfig:

@@ -31,7 +31,8 @@ from app.chat.prompt import (
     unsaved_parts,
 )
 from app.chat.refs import Refs, conversation_refs, resolve_additions
-from app.chat.tools import ToolArgumentError, parse_proposal
+from app.chat.similar import Check, candidates_note, check_parts, with_similar
+from app.chat.tools import ProposalPart, ToolArgumentError, parse_proposal
 from app.chat.usage import completion_usage, record_usage
 from app.config import Settings
 from app.errors import model_not_set
@@ -153,15 +154,18 @@ async def write_proposal(
     position: int,
     *,
     push: bool = False,
+    refs: Refs | None = None,
 ) -> tuple[Proposal, uuid.UUID | None]:
     """Write a proposal and hold it. Returns it, and the id of the held
     proposal it replaced, if any. A part's ref is resolved now, into an
-    addition to a seen thought or a new thought (design decision 3). The
-    caller commits."""
+    addition to a seen thought or a new thought (design decision 3), from
+    `refs` when the caller has them. The caller commits."""
     messages = await list_messages(session, conversation)
     raw = await raw_text_for(session, conversation, messages, push=push)
     if any(part.get("add_to_ref") is not None for part in parts):
-        parts = resolve_additions(parts, await refs_for(session, conversation, messages))
+        if refs is None:
+            refs = await refs_for(session, conversation, messages)
+        parts = resolve_additions(parts, refs)
     proposal = Proposal(
         id=uuid.uuid4(),
         conversation_id=conversation.id,
@@ -249,7 +253,7 @@ async def asked_proposal(
     filing: Filing,
     conversation_id: uuid.UUID | None = None,
     zone: ZoneInfo | None = None,
-) -> list[dict[str, Any]] | None:
+) -> list[ProposalPart] | None:
     """Ask the model for a proposal, which it may decline. Returns its parts,
     or None when it calls no tool or its arguments do not make a proposal.
 
@@ -263,10 +267,9 @@ async def asked_proposal(
         if tool_call.function.name != PROPOSE_TOOL:
             continue
         try:
-            parts = parse_proposal(
+            return parse_proposal(
                 tool_arguments(tool_call.function.arguments), filing.categories, zone
             )
-            return [part.as_dict() for part in parts]
         except (ValueError, ToolArgumentError):
             logger.info("The offered proposal call returned arguments that do not fit")
     return None
@@ -319,16 +322,46 @@ async def offer_proposal(
     )
     refs = await conversation_refs(session, user.id, messages, proposals)
     seen_note = refs.note(config.filing)
+
+    async def check(parts: list[ProposalPart], again: bool) -> Check:
+        return await check_parts(
+            session,
+            user,
+            parts,
+            refs,
+            config=config,
+            settings=settings,
+            again=again,
+            conversation_id=conversation.id,
+            http_client=http_client,
+        )
+
     try:
         context = build_context(
             messages, today=today_in(zone), seen_note=seen_note, refs=refs.by_id()
         )
         context.append({"role": "system", "content": offer_note(seen_note is not None)})
         parts = await asked_proposal(session, call, context, filing, conversation.id, zone)
+        if parts is None:
+            return None
+        checked = await check(parts, again=False)
+        if checked.has_candidates:
+            # Layer 2 (design decision 4): the model is asked once more, with
+            # the candidates, numbered after the conversation's refs. It may
+            # decline again, and then nothing is offered.
+            note, _ = candidates_note(parts, checked, refs, config.filing.seen_summary_chars)
+            context.append({"role": "system", "content": note})
+            parts = await asked_proposal(
+                session, call, context, filing, conversation.id, zone
+            )
+            if parts is None:
+                return None
+            checked = await check(parts, again=True)
     finally:
         await call.aclose()
-    if parts is None:
-        return None
-    proposal, _ = await write_proposal(session, conversation, parts, messages[-1].position)
+    stored = with_similar([part.as_dict() for part in parts], checked)
+    proposal, _ = await write_proposal(
+        session, conversation, stored, messages[-1].position, refs=refs
+    )
     await session.commit()
     return proposal

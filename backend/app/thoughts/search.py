@@ -389,11 +389,14 @@ async def rank(
     zone: tzinfo | None = None,
     dated_from: date | None = None,
     dated_to: date | None = None,
+    min_similarity: float | None = None,
+    limit: int | None = None,
 ) -> SearchResult:
     """Run the ranking SQL for a query already embedded (or not, for words only).
 
     The evaluation calls this directly with stored vectors; use_words=False
-    ranks by meaning alone, for comparison.
+    ranks by meaning alone, for comparison. `min_similarity` and `limit`
+    replace the configured cut-off for the index's model and the result limit.
     """
     with_meaning = index is not None and query_vector is not None
     params = {
@@ -407,13 +410,17 @@ async def rank(
         "candidates": config.candidates,
         "rrf_k": config.rrf_k,
         "min_word_share": config.min_word_share,
-        "limit": config.limit,
+        "limit": limit if limit is not None else config.limit,
         "min_similarity": 2.0,
     }
     if with_meaning:
         params["query_vector"] = _vector_literal(query_vector)
         params["index_id"] = index.id
-        params["min_similarity"] = config.min_similarity_for(index.embedding_model)
+        params["min_similarity"] = (
+            min_similarity
+            if min_similarity is not None
+            else config.min_similarity_for(index.embedding_model)
+        )
     # Plan for these values each time: a generic plan for the prepared
     # statement, which Postgres switches to after five runs, is twice as slow.
     await session.execute(text("SET LOCAL plan_cache_mode = force_custom_plan"))
@@ -449,3 +456,36 @@ async def rank(
             )
         )
     return SearchResult(hits=hits, total=rows[0].total)
+
+
+async def search_by_vector(
+    session: AsyncSession,
+    user: User,
+    words: str,
+    *,
+    index: SearchIndex | None,
+    vector: list[float] | None,
+    min_similarity: float,
+    limit: int,
+    config: SearchConfig,
+) -> SearchResult:
+    """The user's thoughts that match a vector the caller already has, or
+    `words` by the word-share rule, best first, with no embedding call.
+
+    The similar-thought check (thought-appending design decision 4) embeds
+    every part's query in one request and then calls this once per part.
+    The ranking is the search's: meaning and words merged, with no age
+    penalty. Without an index or a vector it matches by words only.
+    """
+    if session.bind.dialect.name != "postgresql":
+        return SearchResult()
+    return await rank(
+        session,
+        user,
+        words,
+        index=index if vector is not None else None,
+        query_vector=vector,
+        config=config,
+        min_similarity=min_similarity,
+        limit=limit,
+    )

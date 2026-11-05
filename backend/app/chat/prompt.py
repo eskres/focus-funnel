@@ -304,20 +304,26 @@ def _cut(text: str, limit: int) -> str:
     return text[:limit].rsplit(" ", 1)[0].rstrip(",;:.") + "…"
 
 
+def thought_entry(ref: str, thought: Any, summary_chars: int) -> str:
+    """A filed thought as the model reads it by ref: ref, title, filing date,
+    tags, and category, then the summary cut at `summary_chars`."""
+    heading = f"{ref} · {thought.title} · filed {thought.created_at.date().isoformat()}"
+    if thought.tags:
+        heading += " · " + " ".join(f"#{tag}" for tag in thought.tags)
+    if thought.category:
+        heading += f" · {thought.category}"
+    return heading + "\n   " + _cut(thought.summary, summary_chars)
+
+
 def seen_thoughts_note(seen: Sequence[Any], limit: int, summary_chars: int) -> str | None:
     """The note naming the thoughts this conversation has seen, by ref and
     never by id (thought-appending design decision 2): the first `limit` of
     `seen`, which comes most recently seen first, each with its title, filing
     date, tags, category, and summary cut at `summary_chars`. None when
     nothing was seen."""
-    entries = []
-    for thought in list(seen)[:limit]:
-        heading = f"{thought.ref} · {thought.title} · filed {thought.created_at.date().isoformat()}"
-        if thought.tags:
-            heading += " · " + " ".join(f"#{tag}" for tag in thought.tags)
-        if thought.category:
-            heading += f" · {thought.category}"
-        entries.append(heading + "\n   " + _cut(thought.summary, summary_chars))
+    entries = [
+        thought_entry(thought.ref, thought, summary_chars) for thought in list(seen)[:limit]
+    ]
     if not entries:
         return None
     return SEEN_THOUGHTS_NOTE.format(thoughts="\n".join(entries))

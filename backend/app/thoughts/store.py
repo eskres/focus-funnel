@@ -21,6 +21,7 @@ from app.chat.config import get_chat_config
 from app.config import Settings
 from app.errors import ApiError, ErrorCode
 from app.models import Conversation, Proposal, SearchIndex, Thought, ThoughtEmbedding, User
+from app.thoughts.baseline import measure_after_store
 from app.thoughts.chunking import Piece, pieces
 from app.thoughts.dates import parse_when
 from app.thoughts.indexing import (
@@ -262,6 +263,8 @@ async def store_thought(
         **fields,
     )
     await session.commit()
+    # After the commit: the baseline is never part of the store's transaction.
+    await measure_after_store(session, user)
     await session.refresh(outcome.thought)
     return outcome
 

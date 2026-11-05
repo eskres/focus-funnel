@@ -40,6 +40,7 @@ from app.db import get_session
 from app.errors import ApiError, ErrorCode
 from app.models import Conversation, Proposal, User
 from app.providers import get_provider_http_client
+from app.thoughts.baseline import measure_after_store
 from app.thoughts.categories import check_category
 from app.thoughts.dates import FIELD as WHEN_FIELD
 from app.thoughts.dates import zone_from
@@ -523,4 +524,7 @@ async def confirm_proposal(
     ):
         conversation.held_proposal_id = None
     await session.commit()
-    return ConfirmOutcome(saved=True, thought_id=outcome.thought.id, message="Saved.")
+    # After the commit, so the baseline never fails or slows the confirm's
+    # transaction (thought-appending design decision 5).
+    await measure_after_store(session, user)
+    return ConfirmOutcome(saved=True, thought_id=thought_id, message="Saved.")

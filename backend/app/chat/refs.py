@@ -141,6 +141,24 @@ class Refs:
             self._numbers[thought_id] = len(self.numbered)
         return f"T{self._numbers[thought_id]}"
 
+    def see(self, thought: Thought) -> str:
+        """Number a thought the user's row shows now, as add() does, and keep
+        it as a seen thought, so a ref to it resolves before any stored row
+        names it (the offer's candidates)."""
+        ref = self.add(thought.id)
+        if thought.id not in self.thoughts:
+            self.thoughts[thought.id] = SeenThought(
+                ref=ref,
+                id=thought.id,
+                title=thought.title,
+                summary=thought.summary,
+                tags=list(thought.tags or []),
+                category=thought.category,
+                created_at=thought.created_at,
+                updated_at=thought.updated_at,
+            )
+        return ref
+
     def resolve(self, ref: str) -> SeenThought | None:
         """The user's existing thought a ref names, or None for a ref the
         conversation has not seen, or one whose thought is gone."""
