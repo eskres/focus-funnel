@@ -2,7 +2,7 @@
 
 ### Requirement: Filters and order
 
-A search SHALL accept an optional set of tags and SHALL then return only thoughts that carry at least one of them. It SHALL accept an optional start date and end date and SHALL then return only thoughts created within them. It SHALL accept a newest-first option, which SHALL order the results that pass by created time, newest first, instead of by relevance. It SHALL accept an optional first and last day for the thought's own date, and SHALL then return only dated thoughts whose date overlaps those days: a thought from its start day to its end day, or on its start day when it has no end. A thought with no date SHALL NOT pass this filter. The created-time filter and the thought-date filter SHALL be separate and SHALL be usable together. All these days SHALL be the user's local days. It SHALL accept an optional status, `open` or `done`, and SHALL then return only thoughts with that status; without a status filter, it SHALL return open and done thoughts alike. It SHALL accept an optional category and SHALL then return only thoughts with that category. All these filters SHALL work together and with a query. Each result SHALL carry the thought's status. When a thought-date filter, a status filter, or a category filter is given, the query SHALL be optional. A search with any of these filters and no query SHALL return every thought that passes the filters, up to the configured number of results, with the number that matched. With a thought-date filter, it SHALL be ordered by date: by start day, a thought with no time before one with a time, then by start time. Without one, it SHALL be ordered newest filed first. It SHALL make no embedding call.
+A search SHALL accept an optional set of tags and SHALL then return only thoughts that carry at least one of them. It SHALL accept an optional start date and end date and SHALL then return only thoughts created within them. It SHALL accept a newest-first option, which SHALL order the results that pass by created time, newest first, instead of by relevance. It SHALL accept an optional first and last day for the thought's own date, and SHALL then return only dated thoughts whose date overlaps those days: a thought from its start day to its end day, or on its start day when it has no end. A thought with no date SHALL NOT pass this filter. The created-time filter and the thought-date filter SHALL be separate and SHALL be usable together. All these days SHALL be the user's local days. It SHALL accept an optional status, `open` or `done`, and SHALL then return only thoughts with that status; without a status filter, it SHALL return open and done thoughts alike. It SHALL accept an optional category and SHALL then return only thoughts with that category. All these filters SHALL work together and with a query. Each result SHALL carry the thought's status. When a thought-date filter, a status filter, or a category filter is given, the query SHALL be optional. A search with any of these filters and no query SHALL return every one of the user's own thoughts that passes the filters, up to the configured number of results, with the number of the user's thoughts that matched; it SHALL NOT return or count another user's thoughts. With a thought-date filter, it SHALL be ordered by date: by start day, a thought with no time before one with a time, then by start time. Without one, it SHALL be ordered newest filed first. It SHALL make no embedding call.
 
 #### Scenario: Tag filter
 
@@ -71,6 +71,12 @@ A search SHALL accept an optional set of tags and SHALL then return only thought
 
 - **WHEN** a user with more open tasks than the configured number of results searches with no query, the status `open`, and the category `task`
 - **THEN** the result holds the configured number and says that more matched
+
+#### Scenario: Only the user's thoughts
+
+- **WHEN** another user has open tasks, one titled `Call the plumber`, and a user searches with no query, the status `open`, and the category `task`
+- **THEN** the result holds only the searching user's thoughts
+- **AND** the number that matched counts only theirs
 
 #### Scenario: No query and no filter
 

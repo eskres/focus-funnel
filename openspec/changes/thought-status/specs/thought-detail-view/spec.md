@@ -1,3 +1,31 @@
+## MODIFIED Requirements
+
+### Requirement: A thought opens in a side sheet
+
+Opening a thought SHALL show a side sheet over the chat with its title, summary, tags, category, raw text, and the dates it was filed and last changed. The sheet SHALL also show whether the thought is done, and the date it was marked done when it is. The chat SHALL stay in place behind it. A thought with no raw text SHALL show no raw text section. A raw text that is the same as the summary SHALL NOT be shown twice. The raw text SHALL be read-only: the sheet SHALL offer no way to change it.
+
+#### Scenario: Open from a saved card
+
+- **WHEN** a user clicks the link on a saved proposal card
+- **THEN** a side sheet shows the thought's title, summary, tags, category, raw text, and dates
+- **AND** the conversation is still visible behind it
+
+#### Scenario: Close
+
+- **WHEN** the user closes the sheet
+- **THEN** the chat is as it was, with the same scroll position and any unsent text in the input
+
+#### Scenario: No changes from the sheet
+
+- **WHEN** a user views a thought in the sheet and does not choose Edit, Delete, or Done
+- **THEN** the thought is unchanged when the sheet closes
+
+#### Scenario: Raw text stays as written
+
+- **WHEN** a user opens a thought that has raw text and chooses Edit
+- **THEN** the title, summary, tags, and category become editable
+- **AND** the raw text shows as before, with no field to change it
+
 ## ADDED Requirements
 
 ### Requirement: The sheet marks a thought done
