@@ -2,6 +2,8 @@
 
 This page takes a new install from an empty checkout to a working app: generate the secrets, set up login, start the stack, and finish the setup wizard at the app's `/setup`. [docs/login.md](login.md) has the details of each login mode.
 
+For a host with no internet, [docs/offline.md](offline.md) adds the steps to build and move the images, run a local Ollama server, and check that nothing calls out.
+
 ## 1. Generate `.env`
 
 ```sh

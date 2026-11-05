@@ -71,6 +71,8 @@ To use the same compose files in every command without `-f`, set `COMPOSE_FILE` 
 
 The backend applies database migrations each time it starts. Postgres keeps its data in `.data/`.
 
+To install on a host with no internet, with a local Ollama server for chat and search, follow [docs/offline.md](docs/offline.md).
+
 To expose the backend on port 8000 and Postgres on port 55432 for debugging, run:
 
 ```sh
@@ -151,8 +153,10 @@ frontend/
   app/           pages: /app (chat), /app/[id], /settings
   components/    chat UI, settings sections, shadcn components
   lib/           API clients and the event stream parser
-scripts/         init-env.sh: creates .env with new secrets
-docs/            login, setup, and search guides
+scripts/         init-env.sh: creates .env with new secrets; bundle-images.sh and
+                 offline-check.sh for offline installs
+deploy/offline/  the offline providers file and the offline check's files
+docs/            login, setup, offline install, and search guides
 openspec/        specs and planned changes
 ```
 

@@ -1,0 +1,22 @@
+# The offline install's providers file (docs/offline.md): one preset, the
+# Ollama server that docker-compose.offline.yml runs on the compose network.
+# It needs no key, so every user can choose its models without saving one.
+#
+# Measured against ollama/ollama:0.40.14 (openspec self-hosting-setup design
+# decision 15): streamed usage arrives on a final chunk with empty choices,
+# and the model list reports only ids.
+
+providers:
+  ollama:
+    label: Ollama (this server)
+    base_url: http://ollama:11434/v1/
+    # Shown as the "get a key" link. Nothing loads it; it names the model
+    # library, from which models are pulled on an online machine.
+    key_url: https://ollama.com/library
+    notice: >-
+      Runs on the operator's own server: prompts and answers stay inside this
+      install. The models are pulled by the operator, as docs/offline.md says.
+    key_required: false
+    capabilities:
+      model_list: { prices: false, context_length: false, features: false }
+      stream_usage: final_chunk

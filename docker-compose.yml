@@ -16,6 +16,9 @@ services:
 
   backend:
     build: ./backend
+    # A fixed name, so `docker save` and `docker load` can move the image to an
+    # offline host (scripts/bundle-images.sh, docs/offline.md).
+    image: focus-funnel-backend:${FOCUS_FUNNEL_TAG:-local}
     env_file:
       - path: .env
         required: false
@@ -28,6 +31,7 @@ services:
 
   frontend:
     build: ./frontend
+    image: focus-funnel-frontend:${FOCUS_FUNNEL_TAG:-local}
     env_file:
       - path: .env
         required: false
