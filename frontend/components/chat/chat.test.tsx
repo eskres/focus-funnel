@@ -305,6 +305,40 @@ describe("Chat", () => {
         "Used calendar: list_events",
       );
     });
+    it("still marks a failed connector call in a reloaded conversation", async () => {
+      const failure = "calendar: list_events failed: the connector could not be reached";
+      fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "GET /api/conversations/c1": json(
+          200,
+          conversation({
+            messages: [
+              storedMessage(0, "user", "what is on?"),
+              storedMessage(1, "assistant", null, {
+                tool_calls: [
+                  {
+                    id: "t",
+                    type: "function",
+                    function: { name: "calendar__list_events", arguments: "{}" },
+                  },
+                ],
+              }),
+              storedMessage(2, "tool", "Error: the calendar connector could not be reached.", {
+                tool_call_id: "t",
+                details: { failed: true, summary: failure },
+              }),
+              storedMessage(3, "assistant", "The calendar is down."),
+            ],
+          }),
+        ),
+      });
+      render(<Chat conversationId="c1" />);
+
+      const list = await screen.findByRole("list", { name: "Conversation" });
+      const indication = within(list).getByTestId("tool-indication");
+      expect(indication).toHaveTextContent(failure);
+      expect(indication).toHaveAttribute("data-failed", "true");
+    });
   });
 
   describe("resuming a conversation", () => {

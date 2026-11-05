@@ -102,6 +102,15 @@ describe("ActionCard", () => {
     expect(within(card).getByRole("button", { name: "Decline" })).toBeEnabled();
   });
 
+  it("labels a stored call that asked for approval as asked, not used", async () => {
+    api({}, { status: "expired" });
+    await openChat();
+
+    expect(screen.getByTestId("tool-indication")).toHaveTextContent(
+      "Asked to use calendar: create_event",
+    );
+  });
+
   it("names the tool when it has no title", async () => {
     api({}, { title: null });
     render(<Chat conversationId="c1" />);

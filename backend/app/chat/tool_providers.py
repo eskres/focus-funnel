@@ -204,9 +204,12 @@ class ConnectorTools:
 
     def _failed(self, label: str, reason: str) -> ToolOutcome:
         """A connector failure as a plain tool error (decision 9)."""
+        summary = f"{label} failed: the connector {reason}"
         return ToolOutcome(
             result=f"Error: the {self.name} connector {reason}. Tell the user.",
-            summary=f"{label} failed: the connector {reason}",
+            summary=summary,
+            # Stored on the tool message, so a reloaded chat still shows the failure.
+            details={"failed": True, "summary": summary},
             failed=True,
         )
 

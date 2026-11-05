@@ -92,7 +92,9 @@ class MessageOut(BaseModel):
     status: str
     error_code: str | None
     compacted: bool
-    # {"proposal_id"} on a propose_thought result, {"sources"} on a search.
+    # {"proposal_id"} on a propose_thought result, {"sources"} on a search,
+    # {"action_id"} on a call waiting for approval, {"failed", "summary"} on a
+    # connector call that failed.
     details: dict[str, Any] | None
     created_at: datetime
 
