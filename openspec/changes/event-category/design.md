@@ -47,7 +47,7 @@ The "even on a set day" clause is new next to the proposal's wording. Without it
 
 ### 4. Keep the frontend copy of the list
 
-`frontend/lib/thoughts.ts` keeps `FIXED_CATEGORIES`, now with `event`. It is only a first value before the settings answer arrives. Deleting it would leave the card's dropdown empty for that moment. The two lists are kept in step by the tests that list the kinds on each side.
+`frontend/lib/thoughts.ts` keeps `FIXED_CATEGORIES`, now with `event`. It is only a first value before the settings answer arrives. Deleting it would leave the card's dropdown empty for that moment. The two lists are kept in step by the tests that list the kinds on each side: on the frontend, `components/chat/proposal-card.test.tsx` has a case where `GET /api/settings/categories` fails, so the card's dropdown shows this constant and nothing else.
 
 ### 5. The `event` sentence follows `reference`
 
@@ -62,7 +62,7 @@ The sentence from decision 3 goes right after the `reference` sentence and befor
 ## Migration Plan
 
 1. Deploy. The container runs `alembic upgrade head`, which deletes the added `event` rows before the app serves requests.
-2. Rollback: deploy the previous image and run `alembic downgrade -1`. Nothing is restored (see decision 2). Users who want `event` back add it again.
+2. Rollback: first, from the new image (the only one that has this revision's file), run `alembic downgrade -1`, or equivalently `alembic stamp 8a4d6f2b9c13` since the downgrade changes no data. Then deploy the previous image. The order matters: the previous image's entrypoint runs `alembic upgrade head` under `set -e`, and against a database stamped with this revision it fails with "Can't locate revision identified by '2bea7235fdf6'", so its container would exit before serving and could not run the downgrade either. Nothing is restored (see decision 2). Users who want `event` back add it again.
 
 ### Revision order
 
