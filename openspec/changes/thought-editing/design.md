@@ -131,6 +131,28 @@ The `thought-store` spec said "Updating only tags or category SHALL NOT need a n
 
 **Alternatives:** add the fields only in the router (rejected: the stream event would then lack them, and the card would get two shapes); leave the offer without them as decision 4 first said (rejected: a held proposal with one saved part would show the proposed title there and the current title on reload).
 
+### 11. An empty title or summary in the sheet: Save off, and a note that names the field
+
+Save stays disabled while the title or summary is empty, as on the card (decision 7), and the sheet shows a note under the buttons that names the field: "Title must not be empty." or "Summary must not be empty.". This is the error the `thought-detail-view` "Empty title" scenario asks for: it names the title, the fields keep the user's text, and no request is sent, so the thought is unchanged. Any other refused value, such as a title over 200 characters, reaches the server, and its 422 message shows in the alert under the buttons with the text kept.
+
+**Alternatives:** let Save send the empty title and show the server's 422 (rejected: decision 7 and the card both turn Save off, and a request that must fail costs a round trip); keep Save off with no note (rejected: the scenario asks for an error that names the title).
+
+### 12. `DeleteDialog` takes optional wording, and the thought's dialog sits inside the sheet
+
+`DeleteDialog` keeps its `title` prop (the name of what is deleted) and gains optional `heading`, `description`, and `failure` (the message when the error has none). Their defaults are today's conversation wording, so the conversation's two call sites (`chat.tsx`, `sidebar.tsx`) and their tests stay as they are. The sheet passes "Delete this thought?" and "“<title>” is deleted for good. This cannot be undone.". The failed delete's message now has `role="alert"`.
+
+The thought's dialog is rendered inside the sheet's content, so Base UI treats it as a dialog nested in the sheet: a press inside it, or Escape, closes only the dialog, and the non-modal sheet stays open behind it.
+
+**Alternatives:** rename `title` to the dialog heading (rejected: it would change `chat.tsx`, which the parallel `background-turns` change also edits, and `sidebar.tsx`, for no gain); a second dialog component for thoughts (rejected: decision 7 asks for one component).
+
+### 13. The `thought-changed` event is `ff:thought-changed`
+
+`lib/thoughts.ts` exports `THOUGHT_CHANGED_EVENT = "ff:thought-changed"` and dispatches it on `window` as a `CustomEvent` whose detail is `{id, title}` after a `PATCH` answers, with the title from the answer, or `{id, deleted: true}` after a `DELETE` answers. A failed call dispatches nothing. The `ff:` prefix follows the page's other window events (`ff:thought-change` for the address, `ff:demo-session-expired`). A saved `ProposalCard` listens while it has a `thoughtId` and keeps the change in its own state; a deleted card keeps the last title it showed.
+
+### 14. The sheet's edit is dropped by unmounting it
+
+The view and edit modes live in a child of the sheet, keyed by the thought's id and rendered only while the sheet shows a loaded thought. Closing the sheet (its button, Escape, a press outside, `closeThought()`) and Back all clear the address, so the child unmounts and the edit with it. Opening the same thought again mounts it fresh, in view mode. This needs no state reset in an effect, which the React hooks lint rules warn against. A save replaces the sheet's loaded thought with the answer; a delete marks it gone before `closeThought()`, so opening its address again cannot show the old copy while the 404 loads.
+
 ## Risks / Trade-offs
 
 - [Depends on `explore`, merged and archived] → If `origin` or `get_thought_with_origin()` changes shape before this is built, re-read decisions 1 and 6.

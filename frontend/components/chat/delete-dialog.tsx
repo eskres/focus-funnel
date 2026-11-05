@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,17 +12,29 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-/** Asks before a conversation is deleted for good. Opened only by the user. */
+/**
+ * Asks before something is deleted for good. Opened only by the user. By
+ * default it asks about a conversation; `heading`, `description`, and
+ * `failure` word it for something else, such as a thought.
+ */
 export function DeleteDialog({
   title,
   open,
   onCancel,
   onConfirm,
+  heading = "Delete this conversation?",
+  description,
+  failure = "Could not delete the conversation.",
 }: {
+  /** The name of what is deleted. */
   title: string;
   open: boolean;
   onCancel: () => void;
   onConfirm: () => Promise<void>;
+  heading?: string;
+  description?: ReactNode;
+  /** Shown when the delete fails with no message of its own. */
+  failure?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +45,7 @@ export function DeleteDialog({
     try {
       await onConfirm();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete the conversation.");
+      setError(err instanceof Error ? err.message : failure);
     } finally {
       setBusy(false);
     }
@@ -43,12 +55,18 @@ export function DeleteDialog({
     <Dialog open={open} onOpenChange={(next) => !next && onCancel()}>
       <DialogContent showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>Delete this conversation?</DialogTitle>
+          <DialogTitle>{heading}</DialogTitle>
           <DialogDescription>
-            “{title}” and all of its messages are deleted for good. This cannot be undone.
+            {description ?? (
+              <>“{title}” and all of its messages are deleted for good. This cannot be undone.</>
+            )}
           </DialogDescription>
         </DialogHeader>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onCancel} disabled={busy}>
             Cancel

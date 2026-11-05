@@ -15,7 +15,7 @@ vi.mock("@/lib/oidc", () => ({ refreshOidcSession }));
 import { resetRenewals } from "@/lib/auth-mode";
 import { SESSION_COOKIE, sessionCookies, type Session } from "@/lib/session";
 
-import { DELETE, GET, POST, PUT } from "./route";
+import { DELETE, GET, PATCH, POST, PUT } from "./route";
 
 const SECRET = "0123456789abcdef0123456789abcdef";
 const OIDC_ENV = {
@@ -144,6 +144,47 @@ describe("API proxy", () => {
     expect(forwarded.headers.authorization).toBe("Bearer test-access-token");
     expect(forwarded.headers["content-type"]).toBe("application/json");
     expect(forwarded.headers.cookie).toBeUndefined();
+  });
+
+  it("forwards a thought change (PATCH with a JSON body) and a delete with the access token", async () => {
+    backend = await startBackend((req, _body, res) => {
+      if (req.method === "DELETE") {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ id: "t1", title: "Dentist in May" }));
+    });
+    vi.stubEnv("BACKEND_URL", backend.url);
+
+    const changed = await PATCH(
+      authed("http://localhost:3000/api/thoughts/t1", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Dentist in May", tags: ["health"] }),
+      }),
+      ctx("thoughts", "t1"),
+    );
+    const deleted = await DELETE(
+      authed("http://localhost:3000/api/thoughts/t1", { method: "DELETE" }),
+      ctx("thoughts", "t1"),
+    );
+
+    expect(changed.status).toBe(200);
+    expect(await changed.json()).toEqual({ id: "t1", title: "Dentist in May" });
+    expect(deleted.status).toBe(204);
+    expect(await deleted.text()).toBe("");
+    expect(backend.requests).toHaveLength(2);
+    const [patch, del] = backend.requests;
+    expect(patch.method).toBe("PATCH");
+    expect(patch.url).toBe("/api/thoughts/t1");
+    expect(patch.body).toBe(JSON.stringify({ title: "Dentist in May", tags: ["health"] }));
+    expect(patch.headers["content-type"]).toBe("application/json");
+    expect(patch.headers.authorization).toBe("Bearer test-access-token");
+    expect(del.method).toBe("DELETE");
+    expect(del.url).toBe("/api/thoughts/t1");
+    expect(del.headers.authorization).toBe("Bearer test-access-token");
   });
 
   it("passes backend status codes and empty bodies through", async () => {
