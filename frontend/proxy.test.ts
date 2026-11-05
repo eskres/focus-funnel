@@ -1,7 +1,14 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DEMO_SESSION_COOKIE, sessionCookies, type Session } from "@/lib/session";
+import {
+  DEMO_DEAD_COOKIE,
+  DEMO_KEYS_COOKIE,
+  DEMO_SESSION_COOKIE,
+  demoSessionDigest,
+  sessionCookies,
+  type Session,
+} from "@/lib/session";
 
 import { proxy, resetDemoLimits } from "./proxy";
 
@@ -160,6 +167,39 @@ describe("proxy in demo mode", () => {
 
   it("keeps an existing session", async () => {
     const response = await proxy(request("/app", `${DEMO_SESSION_COOKIE}=existing`));
+    expect(location(response)).toBeNull();
+    expect(response.headers.getSetCookie()).toEqual([]);
+    expect(backend).not.toHaveBeenCalled();
+  });
+
+  it("replaces a session whose value the API proxy marked dead", async () => {
+    started("new-session");
+    const old = "wiped-session";
+    const response = await proxy(
+      request(
+        "/app",
+        `${DEMO_SESSION_COOKIE}=${old}; ${DEMO_KEYS_COOKIE}=old-keys; ${DEMO_DEAD_COOKIE}=${demoSessionDigest(old)}; other=1`,
+      ),
+    );
+
+    expect(location(response)).toBeNull();
+    expect(backend).toHaveBeenCalledOnce();
+    const set = response.headers.getSetCookie();
+    expect(set[0]).toMatch(new RegExp(`^${DEMO_SESSION_COOKIE}=new-session;`));
+    expect(set).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(new RegExp(`^${DEMO_KEYS_COOKIE}=;.*Max-Age=0`)),
+        expect.stringMatching(new RegExp(`^${DEMO_DEAD_COOKIE}=;.*Max-Age=0`)),
+      ]),
+    );
+    // The page itself sees only the new session.
+    expect(response.headers.get("x-middleware-request-cookie")).toBe(`other=1; ${DEMO_SESSION_COOKIE}=new-session`);
+  });
+
+  it("keeps a newer session when the dead mark names an older value", async () => {
+    const response = await proxy(
+      request("/app", `${DEMO_SESSION_COOKIE}=newer; ${DEMO_DEAD_COOKIE}=${demoSessionDigest("older")}`),
+    );
     expect(location(response)).toBeNull();
     expect(response.headers.getSetCookie()).toEqual([]);
     expect(backend).not.toHaveBeenCalled();

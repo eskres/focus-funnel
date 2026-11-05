@@ -3,7 +3,7 @@
 // from SESSION_SECRET, so the browser can neither read nor change them. Nothing
 // is stored on the server.
 
-import { hkdfSync } from "node:crypto";
+import { createHash, hkdfSync } from "node:crypto";
 
 import { CompactEncrypt, compactDecrypt } from "jose";
 
@@ -11,6 +11,11 @@ export const SESSION_COOKIE = "ff_session";
 // Demo mode: the anonymous session value, and the held provider keys.
 export const DEMO_SESSION_COOKIE = "ff_demo";
 export const DEMO_KEYS_COOKIE = "ff_demo_keys";
+// Demo mode: the digest of one ff_demo value the backend knows no user for.
+// It marks that value, not the cookie name, as dead: a late answer for an old
+// value cannot touch a newer session (auth-modes design, decision 14).
+export const DEMO_DEAD_COOKIE = "ff_demo_dead";
+export const DEMO_DEAD_MAX_AGE_SECONDS = 3600;
 // Browsers cap a cookie near 4 KB; leave room for the name and attributes.
 export const MAX_COOKIE_VALUE_BYTES = 3800;
 
@@ -68,6 +73,11 @@ export async function unseal<T>(
   } catch {
     return null;
   }
+}
+
+/** The value of the ff_demo_dead cookie that marks this ff_demo value as dead. */
+export function demoSessionDigest(value: string): string {
+  return createHash("sha256").update(value).digest("base64url");
 }
 
 // --- Cookie headers ------------------------------------------------------------
