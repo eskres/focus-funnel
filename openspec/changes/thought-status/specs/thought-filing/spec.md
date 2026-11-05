@@ -79,7 +79,7 @@ A change of status SHALL NOT count as a change to the thought when an addition t
 
 ### Requirement: A message with several thoughts is split
 
-When a message or discussion holds several separate thoughts, the model SHALL propose each as its own part, in one proposal, and the chat SHALL show one card per part. Each part SHALL be confirmed on its own and SHALL keep the whole raw text of the proposal. Before any part is saved, the user SHALL be able to merge all the parts into one card, with no model call: the first part's title and category, the summaries as paragraphs in order, and the tags of every part without repeats. The merged card SHALL be edited and confirmed like any other card and SHALL store one thought. Merging SHALL NOT be offered when any part of the proposal is an addition to a filed thought or marks a thought done. The system SHALL refuse a confirm that merges a part that marks a thought done with other parts, and nothing SHALL be stored or changed.
+When a message or discussion holds several separate thoughts, the model SHALL propose each as its own part, in one proposal, and the chat SHALL show one card per part. Each part SHALL be confirmed on its own, and each part that files a thought or adds to one SHALL keep the whole raw text of the proposal. Before any part is saved, the user SHALL be able to merge all the parts into one card, with no model call: the first part's title and category, the summaries as paragraphs in order, and the tags of every part without repeats. The merged card SHALL be edited and confirmed like any other card and SHALL store one thought. Merging SHALL NOT be offered when any part of the proposal is an addition to a filed thought or marks a thought done. The system SHALL refuse a confirm that merges a part that marks a thought done with other parts, and nothing SHALL be stored or changed.
 
 #### Scenario: Three things in one message
 
@@ -117,9 +117,81 @@ When a message or discussion holds several separate thoughts, the model SHALL pr
 
 - **WHEN** a proposal has a part that marks `Call the plumber` done and a part that proposes `Buy oat milk`
 - **THEN** the chat shows two cards and no merge button
-- **AND** confirming the second card stores `Buy oat milk` and leaves `Call the plumber` open
+- **AND** confirming the `Buy oat milk` card stores `Buy oat milk` and leaves `Call the plumber` open
 
 #### Scenario: Merge request
 
 - **WHEN** a confirm request names every part of a proposal that has a part that marks a thought done
 - **THEN** the system refuses it, and nothing is stored or changed
+
+### Requirement: Confirming a proposal saves it
+
+When the user confirms a proposal card, the system SHALL store a thought with the card's title, summary, tags, and category as the user left them, and the raw text of the proposal. The card SHALL then show that the thought was saved, with a link that opens it. Confirming the same card again SHALL NOT store a second thought. A card the store refuses SHALL name the field and keep the user's text, and nothing SHALL be stored. A failed embedding call SHALL NOT fail the save. A card for a part that marks a thought done SHALL store no thought: confirming it SHALL change the thought's status as "A proposal can mark a thought done" says, and the card SHALL then show that the thought was marked done, with a link that opens it.
+
+#### Scenario: Confirm
+
+- **WHEN** a user confirms a proposal titled `Oat milk` with the tag `groceries`
+- **THEN** a thought titled `Oat milk` with the tag `groceries` is stored for that user
+- **AND** the card shows that it was saved, with a link to the thought
+
+#### Scenario: Edited before confirming
+
+- **WHEN** a user changes the title, removes a tag, and picks another category, then confirms
+- **THEN** the stored thought has the changed title, tags, and category
+
+#### Scenario: Confirmed twice
+
+- **WHEN** a user confirms a card, and the confirm request is sent a second time
+- **THEN** only one thought is stored
+- **AND** the second answer links to the same thought
+
+#### Scenario: Refused field
+
+- **WHEN** a user confirms a card with a title over 200 characters
+- **THEN** the card says the title is too long and keeps the text
+- **AND** nothing is stored
+
+#### Scenario: Embedding provider down
+
+- **WHEN** a user confirms a card while the embedding provider cannot be reached
+- **THEN** the thought is saved and the card shows it as saved
+
+#### Scenario: Another user's proposal
+
+- **WHEN** a user confirms a proposal from a conversation another user owns
+- **THEN** the system answers as if the conversation did not exist, and nothing is stored
+
+#### Scenario: Status card stores no thought
+
+- **WHEN** a user confirms a card that marks `Call the plumber` done
+- **THEN** no thought is stored, and `Call the plumber` is done
+- **AND** the card shows that it was marked done, with a link to the thought
+
+### Requirement: Similar filed thoughts are checked
+
+Before a new thought is proposed, the system SHALL look for similar thoughts among all the user's thoughts, in every conversation and of any age, by meaning and by words. The age of a thought SHALL NOT count against it. When it finds candidates, the model SHALL decide, in the same turn, whether each new part adds to one of them, stays new, or, when the user says they finished that candidate, is dropped and the candidate is marked done. When the model keeps a part new but a strong match exists, the card SHALL name the match and offer to add to it instead, except for a part with the category `task`. The check SHALL work with any embedding model, including one the system has no setting for, and SHALL work by words alone when search by meaning cannot run. The check SHALL NOT store or change anything.
+
+#### Scenario: Revisited after a year
+
+- **WHEN** a user filed `Podcast about maps` a year ago and now, in a new conversation, discusses making a podcast on cartography until the model proposes a thought
+- **THEN** the proposal adds to `Podcast about maps`, or its card offers to add to it
+
+#### Scenario: Same topic, different thing
+
+- **WHEN** a user has a thought about buying a bike lock and now decides which bike to buy
+- **THEN** the model keeps the new thought separate
+
+#### Scenario: Repeated task
+
+- **WHEN** a user has a task `Buy oat milk` from last month and sends `/push buy oat milk`
+- **THEN** the card is a new task, with no offer to add to the old one
+
+#### Scenario: No key for the embedding provider
+
+- **WHEN** a user with no key for the embedding provider proposes a thought whose title shares its words with a filed thought
+- **THEN** the check still finds the filed thought by its words
+
+#### Scenario: Finished candidate marked done
+
+- **WHEN** the model proposes a new note `Called the plumber`, the check lists the open task `Call the plumber`, and the user's message says they called the plumber
+- **THEN** the model drops the note and proposes marking `Call the plumber` done, as the `conversation-agent` scenario "Finished task listed as a similar thought" says

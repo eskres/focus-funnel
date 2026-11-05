@@ -17,7 +17,7 @@ Opening a thought SHALL show a side sheet over the chat with its title, summary,
 
 #### Scenario: No changes from the sheet
 
-- **WHEN** a user views a thought in the sheet and does not choose Edit, Delete, or Done
+- **WHEN** a user views a thought in the sheet and does not choose Edit, Delete, Done, or undo an addition
 - **THEN** the thought is unchanged when the sheet closes
 
 #### Scenario: Raw text stays as written
