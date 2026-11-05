@@ -17,7 +17,7 @@ import {
 } from "@/lib/thoughts";
 
 /**
- * "Categories": the five fixed kinds, and the ones the user adds for their
+ * "Categories": the six fixed kinds, and the ones the user adds for their
  * proposal cards. Removing one leaves the thoughts that have it as they are.
  */
 export function CategoriesSection() {
@@ -75,7 +75,7 @@ export function CategoriesSection() {
       <CardHeader>
         <CardTitle>Categories</CardTitle>
         <CardDescription>
-          Each filed thought can have a category. Add your own next to the five fixed kinds.
+          Each filed thought can have a category. Add your own next to the six fixed kinds.
           Removing one keeps it on the thoughts that already have it.
         </CardDescription>
       </CardHeader>
