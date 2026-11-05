@@ -148,6 +148,12 @@ async function openWithStoredToken() {
   sessionStorage.setItem(SETUP_TOKEN_KEY, TOKEN);
   render(<SetupWizard />);
   await screen.findByRole("heading", { name: "1. Login" });
+  // The steps can be on screen before React runs their effects, so an event
+  // dispatched at once could reach no listener. The embedded sections fetch
+  // in the same effects pass that adds the wizard's listeners.
+  await waitFor(() =>
+    expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).startsWith("/api/providers"))).toBe(true),
+  );
 }
 
 /** Waits for an alert holding the text (the model section may show its own alert too). */
