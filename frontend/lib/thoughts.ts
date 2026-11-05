@@ -61,10 +61,10 @@ export async function deleteThought(id: string): Promise<void> {
   announce({ id, deleted: true });
 }
 
-/** The five fixed kinds, and the ones the user added. */
+/** The six fixed kinds, and the ones the user added. */
 export type Categories = { fixed: string[]; added: string[] };
 
-export const FIXED_CATEGORIES = ["task", "idea", "decision", "note", "reference"];
+export const FIXED_CATEGORIES = ["task", "idea", "decision", "note", "reference", "event"];
 
 const CATEGORIES = "/api/settings/categories";
 

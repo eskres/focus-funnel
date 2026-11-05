@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.models import Thought
 from tests.chat_helpers import error_code, run_db, user_id_for
 
-FIXED = ["task", "idea", "decision", "note", "reference"]
+FIXED = ["task", "idea", "decision", "note", "reference", "event"]
 
 
 def add(client, headers, name):
@@ -37,6 +37,16 @@ def test_a_fixed_kind_or_a_repeated_name_is_refused(client, alice):
     assert client.get("/api/settings/categories", headers=alice).json()["added"] == ["recipe"]
 
 
+def test_event_is_the_last_fixed_kind_and_cannot_be_added_again(client, alice):
+    assert client.get("/api/settings/categories", headers=alice).json()["fixed"][-1] == "event"
+
+    response = add(client, alice, "Event")
+
+    assert response.status_code == 409
+    assert error_code(response) == "category_exists"
+    assert client.get("/api/settings/categories", headers=alice).json()["added"] == []
+
+
 def test_an_empty_or_too_long_name_is_refused_naming_the_field(client, alice):
     for name in ("  ", "x" * 31):
         response = add(client, alice, name)
@@ -59,6 +69,13 @@ def test_a_fixed_kind_cannot_be_removed(client, alice):
     response = client.delete("/api/settings/categories/idea", headers=alice)
     assert response.status_code == 422
     assert error_code(response) == "validation_error"
+
+
+def test_event_cannot_be_removed(client, alice):
+    response = client.delete("/api/settings/categories/event", headers=alice)
+    assert response.status_code == 422
+    assert error_code(response) == "validation_error"
+    assert response.json()["error"]["message"] == "name: 'event' is a fixed kind and stays."
 
 
 def test_removing_an_unknown_category_is_not_found(client, alice):

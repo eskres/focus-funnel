@@ -8,7 +8,7 @@ import { CategoriesSection } from "./categories-settings";
 
 vi.mock("@/lib/redirect-to-login", () => ({ redirectToLogin: vi.fn() }));
 
-const FIXED = ["task", "idea", "decision", "note", "reference"];
+const FIXED = ["task", "idea", "decision", "note", "reference", "event"];
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -34,6 +34,7 @@ describe("CategoriesSection", () => {
     expect(within(await list()).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual([
       "Remove recipe",
     ]);
+    expect(screen.getByText(/six fixed kinds/)).toBeInTheDocument();
   });
 
   it("adds a category and shows it as the server cleaned it", async () => {

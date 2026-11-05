@@ -45,11 +45,15 @@ thoughts = sa.table(
 )
 
 
-def test_single_head_is_this_revision():
+def test_this_revision_is_below_the_single_head():
+    # Later revisions exist, so these tests downgrade to PREVIOUS, not "-1".
     res = run_alembic("sqlite+aiosqlite:///:memory:", "heads")
     assert res.returncode == 0, res.stderr
-    heads = [line for line in res.stdout.splitlines() if line.strip()]
-    assert heads == [f"{REVISION} (head)"]
+    heads = [line.split()[0] for line in res.stdout.splitlines() if line.strip()]
+    assert len(heads) == 1, res.stdout
+    res = run_alembic("sqlite+aiosqlite:///:memory:", "history", "-r", f"{REVISION}:{heads[0]}")
+    assert res.returncode == 0, res.stderr
+    assert f"{PREVIOUS} -> {REVISION}" in res.stdout
 
 
 def test_upgrade_and_downgrade_on_sqlite(tmp_path):
@@ -58,7 +62,7 @@ def test_upgrade_and_downgrade_on_sqlite(tmp_path):
     assert run_alembic(db_url, "upgrade", "head").returncode == 0
     assert "proposal_id" in sqlite_columns(db_file, "thoughts")
 
-    res = run_alembic(db_url, "downgrade", "-1")
+    res = run_alembic(db_url, "downgrade", PREVIOUS)
     assert res.returncode == 0, res.stderr
     assert "proposal_id" not in sqlite_columns(db_file, "thoughts")
 
@@ -71,7 +75,7 @@ def test_upgrade_and_downgrade_on_sqlite(tmp_path):
 def test_upgrade_and_downgrade_on_postgres():
     db_url, drop = with_database("ff_thought_origin_migration")
     try:
-        for step in (("upgrade", "head"), ("check",), ("downgrade", "-1"), ("upgrade", "head")):
+        for step in (("upgrade", "head"), ("check",), ("downgrade", PREVIOUS), ("upgrade", "head")):
             res = run_alembic(db_url, *step)
             assert res.returncode == 0, res.stdout + res.stderr
     finally:
