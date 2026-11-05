@@ -249,6 +249,10 @@ async def chat(
                 await call.aclose()
             finally:
                 try:
+                    await turn.store_interrupted()
+                except Exception:
+                    logger.exception("Could not store an interrupted chat answer")
+                try:
                     await session.commit()
                 except Exception:
                     logger.exception("Could not commit a chat turn")

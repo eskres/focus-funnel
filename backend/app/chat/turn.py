@@ -4,6 +4,7 @@ The first model call is opened before the response starts, so its failures
 are ordinary error responses. Everything after that arrives as events.
 """
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -15,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.config import ChatConfig
 from app.chat.context import compact_suggestion
-from app.chat.conversations import next_position
+from app.chat.conversations import ends_answered, interrupted_answer, last_message, next_position
 from app.chat.model_call import ModelCall
 from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, drop_held_note, tool_arguments
 from app.chat.proposal import Filing, proposal_payload, write_proposal
@@ -133,6 +134,11 @@ class Turn:
         self._tokens_before = conversation.last_prompt_tokens
         # One proposal per turn: a second propose_thought call is refused.
         self._proposed = False
+        # The round being read, until it is stored: an interrupted turn keeps its text.
+        self._in_flight: RoundState | None = None
+        # Set when the turn was cancelled (server shutdown): its settle step
+        # stores the answer with `store_interrupted`.
+        self.interrupted = False
 
     def _options(self, round_number: int) -> dict[str, Any]:
         options: dict[str, Any] = {"tools": self.filing.tools}
@@ -155,6 +161,40 @@ class Turn:
         return message
 
     async def events(self) -> AsyncIterator[Event]:
+        try:
+            async for event in self._rounds():
+                yield event
+        except asyncio.CancelledError:
+            # Nothing is stored here: an await now could be cancelled again.
+            # The settle step, which runs shielded, calls store_interrupted.
+            self.interrupted = True
+            raise
+
+    async def store_interrupted(self) -> None:
+        """Store a cancelled turn's answer as failed with `answer_interrupted`.
+
+        The text of the round in flight is kept. A round already stored keeps
+        its text in its own message, so the failed answer is then empty. A
+        turn whose answer is already stored needs nothing more (the same rule
+        as the startup sweep). Call it from the shielded settle step only,
+        before the session is committed.
+        """
+        if not self.interrupted:
+            return
+        # Read before the rollback, which expires every loaded object.
+        conversation_id = self.conversation.id
+        # The cancel may have hit a write part way.
+        await self.session.rollback()
+        last = await last_message(self.session, conversation_id)
+        if last is None or ends_answered(last):
+            return
+        state = self._in_flight
+        self.session.add(
+            interrupted_answer(conversation_id, last.position + 1, state.answer if state else None)
+        )
+        await self.session.commit()
+
+    async def _rounds(self) -> AsyncIterator[Event]:
         last_answer: Message | None = None
         for round_number in range(self.config.tool_rounds):
             if round_number == 0:
@@ -164,6 +204,7 @@ class Turn:
                 chunks = await self.call.stream(self.context, **self._options(round_number))
 
             state = RoundState()
+            self._in_flight = state
             try:
                 async for event in read_round(
                     chunks, state, self.call.provider.capabilities.stream_usage
@@ -193,6 +234,7 @@ class Turn:
             last_answer = await self._store(
                 role="assistant", content=state.answer or None, tool_calls=calls, status="complete"
             )
+            self._in_flight = None
             self.context.append(
                 {"role": "assistant", "content": state.answer, "tool_calls": calls}
             )

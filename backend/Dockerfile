@@ -16,4 +16,8 @@ RUN chmod +x /srv/docker-entrypoint.sh
 EXPOSE 8000
 # The entrypoint runs `alembic upgrade head` before exec'ing this command.
 ENTRYPOINT ["/srv/docker-entrypoint.sh"]
+# Keep this one process: no --workers, and one replica. Running chat turns
+# live in this process's memory (app/chat/running.py), and at startup the
+# backend frees every claimed conversation, taking it as left by a stopped
+# process (release_stale_turns). A second process would break both.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

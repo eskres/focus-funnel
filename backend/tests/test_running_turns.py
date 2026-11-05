@@ -181,3 +181,61 @@ async def test_the_settle_runs_to_its_end_when_its_caller_is_cancelled():
     await asyncio.sleep(0.01)
 
     assert steps == ["started", "finished"]
+
+
+async def test_a_cancelled_turn_ends_its_log_with_answer_interrupted():
+    script = Script()
+    turn = script.start()
+    script.queue.put_nowait(DELTA_A)
+    follower = asyncio.create_task(collect(turn))
+    await asyncio.sleep(0.01)
+
+    turn.task.cancel()
+    events = await asyncio.wait_for(follower, 2)
+
+    assert events == [
+        DELTA_A,
+        (
+            "error",
+            {
+                "error": {
+                    "code": ErrorCode.ANSWER_INTERRUPTED,
+                    "message": "This answer did not finish. Send the message again to retry.",
+                }
+            },
+        ),
+    ]
+    assert script.settled
+    assert running.get(script.conversation_id) is None
+
+
+async def test_shutdown_cancels_every_turn_and_waits_for_their_settle():
+    scripts = [Script(), Script()]
+    turns = [script.start() for script in scripts]
+
+    await asyncio.wait_for(running.shutdown(2), 3)
+
+    assert all(script.settled for script in scripts)
+    assert all(turn.ended and turn.task.cancelled() for turn in turns)
+    assert running.running_turns() == []
+
+
+async def test_shutdown_waits_no_longer_than_its_bound():
+    script = Script()
+    stuck = asyncio.Event()
+
+    async def slow_settle():
+        await stuck.wait()
+
+    turn = running.start(script.conversation_id, uuid.uuid4(), 0, script.events(), slow_settle)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+
+    await asyncio.wait_for(running.shutdown(0.2), 2)
+
+    assert loop.time() - started < 1
+    assert not turn.ended
+    # The settle goes on after the wait: it is never cancelled a second time.
+    stuck.set()
+    await asyncio.wait_for(asyncio.gather(*running._settling), 2)
+    assert turn.ended

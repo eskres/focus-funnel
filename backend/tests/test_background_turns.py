@@ -1,4 +1,5 @@
-"""A turn runs to its end when its browser goes away (background-turns 1.2-1.4)."""
+"""A turn runs to its end when its browser goes away, and a stopped server
+leaves it failed and free (background-turns 1.2-4.2)."""
 
 import asyncio
 import json
@@ -557,3 +558,262 @@ async def test_a_demo_turn_uses_the_held_key_after_its_client_disconnects(demo_a
     assert caplog.records
     assert DEMO_KEY not in caplog.text
     assert all(DEMO_KEY not in record.getMessage() for record in caplog.records)
+
+
+# --- 4.1 shutdown stores the answer in flight as interrupted ---
+
+INTERRUPTED = (
+    "error",
+    {
+        "error": {
+            "code": ErrorCode.ANSWER_INTERRUPTED,
+            "message": "This answer did not finish. Send the message again to retry.",
+        }
+    },
+)
+
+
+async def watch_chat(api, message: str, conversation_id: str | None = None) -> asyncio.Task:
+    """Send a message from a client that stays until the stream ends."""
+    stay = asyncio.Event()
+    return asyncio.create_task(leave_chat(api, message, stay, conversation_id))
+
+
+async def test_a_cancelled_turn_stores_its_text_so_far_as_interrupted(async_api):
+    api = async_api
+    await api.ready()
+    hold = Hold()
+    reply = text_chunks("Half an ", "answer")
+    # The stream stops after both pieces of text, before the reply ends.
+    reply.insert(3, hold)
+    api.fake.queue(reply)
+    watcher = await watch_chat(api, "hello")
+    await asyncio.wait_for(hold.reached.wait(), 5)
+    [turn] = running.running_turns()
+    conversation_id = str(turn.conversation_id)
+    assert await claim_of(api, conversation_id) is not None
+
+    turn.task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(turn.task, 5)
+    left = await asyncio.wait_for(watcher, 5)
+
+    messages = await messages_of(api, conversation_id)
+    assert [m.role for m in messages] == ["user", "assistant"]
+    answer = messages[1]
+    assert (answer.status, answer.content, answer.error_code) == (
+        "failed",
+        "Half an answer",
+        ErrorCode.ANSWER_INTERRUPTED,
+    )
+    assert await claim_of(api, conversation_id) is None
+    assert running.get(turn.conversation_id) is None
+    # The client watching it learns the answer did not finish.
+    assert left.names == ["conversation", "delta", "delta", "error"]
+    assert left.events[-1] == INTERRUPTED == turn.events[-1]
+
+    api.fake.queue(text_chunks("Here it is.") + [usage_chunk()])
+    response = await api.chat("hello again", conversation_id)
+    assert [name for name, _ in parse_events(response.text)] == ["delta", "usage", "done"]
+
+
+async def test_a_turn_cancelled_after_a_tool_round_keeps_that_round(async_api):
+    api = async_api
+    await api.ready()
+    hold = Hold()
+    api.fake.queue(
+        tool_round("search_thoughts", '{"query": "milk"}', "call_s", text="Let me look. "),
+        # The second model call is open but has sent nothing yet.
+        [hold] + text_chunks("Found nothing."),
+    )
+    watcher = await watch_chat(api, "what milk?")
+    await asyncio.wait_for(hold.reached.wait(), 5)
+    [turn] = running.running_turns()
+    conversation_id = str(turn.conversation_id)
+
+    turn.task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(turn.task, 5)
+    await asyncio.wait_for(watcher, 5)
+
+    messages = await messages_of(api, conversation_id)
+    assert [m.role for m in messages] == ["user", "assistant", "tool", "assistant"]
+    # The stored round keeps its text; the interrupted one had none yet.
+    assert (messages[1].status, messages[1].content) == ("complete", "Let me look. ")
+    assert "sources" in messages[2].details
+    assert (messages[3].status, messages[3].content, messages[3].error_code) == (
+        "failed",
+        None,
+        ErrorCode.ANSWER_INTERRUPTED,
+    )
+    assert len(await usage_rows(api)) == 1
+    assert await claim_of(api, conversation_id) is None
+
+
+async def test_the_lifespan_exit_interrupts_running_turns_and_frees_them(async_api):
+    from app.main import app, lifespan
+
+    api = async_api
+    await api.ready()
+    holds = [Hold(), Hold()]
+    for hold in holds:
+        reply = text_chunks("Part one, ", "never part two")
+        reply.insert(2, hold)
+        api.fake.queue(reply)
+
+    async with lifespan(app):
+        watchers = [await watch_chat(api, "first"), await watch_chat(api, "second")]
+        for hold in holds:
+            await asyncio.wait_for(hold.reached.wait(), 5)
+        turns = running.running_turns()
+        assert len(turns) == 2
+    # The lifespan has returned: every turn has stored its answer and ended.
+
+    assert running.running_turns() == []
+    assert all(turn.ended and turn.events[-1] == INTERRUPTED for turn in turns)
+    for turn in turns:
+        conversation_id = str(turn.conversation_id)
+        messages = await messages_of(api, conversation_id)
+        assert [(m.role, m.status, m.content, m.error_code) for m in messages][1:] == [
+            ("assistant", "failed", "Part one, ", ErrorCode.ANSWER_INTERRUPTED)
+        ]
+        assert await claim_of(api, conversation_id) is None
+    for watcher in watchers:
+        assert (await asyncio.wait_for(watcher, 5)).events[-1] == INTERRUPTED
+
+
+# --- 4.2 the startup sweep frees what a stopped server left ---
+
+
+def _seed(url, client, headers, messages, claimed: bool, **extra_last) -> str:
+    """A conversation with these messages (alternating user and assistant),
+    claimed or not; `extra_last` sets fields on the last message."""
+    from sqlalchemy import update
+
+    from tests.chat_helpers import run_db, seed_conversation
+
+    conversation_id = seed_conversation(url, client, headers, messages=messages)
+
+    async def work(session):
+        if claimed:
+            await session.execute(
+                update(Conversation)
+                .where(Conversation.id == uuid.UUID(conversation_id))
+                .values(turn_started_at=datetime.now(UTC))
+            )
+        if extra_last:
+            await session.execute(
+                update(Message)
+                .where(
+                    Message.conversation_id == uuid.UUID(conversation_id),
+                    Message.position == len(messages) - 1,
+                )
+                .values(**extra_last)
+            )
+        await session.commit()
+
+    run_db(url, work)
+    return conversation_id
+
+
+def _state(url, conversation_id):
+    from tests.chat_helpers import run_db
+
+    async def work(session):
+        conversation = await session.get(Conversation, uuid.UUID(conversation_id))
+        rows = (
+            await session.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation.id)
+                .order_by(Message.position)
+            )
+        ).scalars()
+        return conversation.turn_started_at, [
+            (m.position, m.role, m.status, m.content, m.error_code) for m in rows
+        ]
+
+    return run_db(url, work)
+
+
+def _sweep(url) -> int:
+    from app.chat.conversations import release_stale_turns
+    from tests.chat_helpers import run_db
+
+    return run_db(url, release_stale_turns)
+
+
+@pytest.mark.postgres
+def test_the_sweep_stores_an_interrupted_answer_and_frees_the_claim(
+    client, alice, test_database_url
+):
+    url = test_database_url
+    unanswered = _seed(url, client, alice, ("hello", "Hi!", "and again"), claimed=True)
+    mid_tools = _seed(
+        url,
+        client,
+        alice,
+        ("look it up", "Let me look."),
+        claimed=True,
+        tool_calls=[
+            {"id": "call_s", "type": "function", "function": {"name": "search_thoughts", "arguments": "{}"}}
+        ],
+    )
+    answered = _seed(url, client, alice, ("hello", "Hi!"), claimed=True)
+    compacted = _seed(url, client, alice, ("hello", "Hi!", "Summary."), claimed=True, role="summary")
+    free = _seed(url, client, alice, ("hello", "Hi!", "unanswered"), claimed=False)
+    before = {cid: _state(url, cid) for cid in (answered, compacted, free)}
+
+    assert _sweep(url) == 4
+
+    claim, messages = _state(url, unanswered)
+    assert claim is None
+    assert messages[-1] == (3, "assistant", "failed", None, ErrorCode.ANSWER_INTERRUPTED)
+    assert len(messages) == 4
+    claim, messages = _state(url, mid_tools)
+    assert claim is None
+    assert messages[-1] == (2, "assistant", "failed", None, ErrorCode.ANSWER_INTERRUPTED)
+    # A finished answer (or an accepted summary) only gets its claim cleared.
+    for conversation_id in (answered, compacted):
+        claim, messages = _state(url, conversation_id)
+        assert claim is None
+        assert messages == before[conversation_id][1]
+    # A conversation with no claim is untouched.
+    assert _state(url, free) == before[free]
+    # Run again, it has nothing left to do.
+    assert _sweep(url) == 0
+
+    response = client.get(f"/api/conversations/{unanswered}", headers=alice)
+    assert response.json()["messages"][-1]["error_code"] == ErrorCode.ANSWER_INTERRUPTED
+
+
+@pytest.mark.postgres
+def test_the_app_runs_the_sweep_before_it_serves(
+    test_database_url, jwks_cache, settings_env, alice, fake_llm
+):
+    from fastapi.testclient import TestClient
+
+    from app.auth import get_jwks_cache
+    from app.main import app
+    from tests.chat_helpers import PROVIDERS_FIXTURE, chat, ready_user
+
+    url = test_database_url
+    settings_env.setenv("PROVIDERS_CONFIG_PATH", str(PROVIDERS_FIXTURE))
+    app.dependency_overrides[get_jwks_cache] = lambda: jwks_cache
+    try:
+        with TestClient(app) as client:
+            ready_user(client, alice)
+            # A server that stopped mid-turn left this claim.
+            conversation_id = _seed(url, client, alice, ("hello", "Hi!", "again"), claimed=True)
+            fake_llm.queue(text_chunks("Too soon."))
+            assert chat(client, alice, "now?", conversation_id).status_code == 409
+
+        with TestClient(app) as client:
+            claim, messages = _state(url, conversation_id)
+            assert claim is None
+            assert messages[-1][1:] == ("assistant", "failed", None, ErrorCode.ANSWER_INTERRUPTED)
+            # The conversation answers the next message at once.
+            response = chat(client, alice, "again", conversation_id)
+            assert response.status_code == 200
+            assert parse_events(response.text)[-1] == ("done", {})
+    finally:
+        app.dependency_overrides.clear()

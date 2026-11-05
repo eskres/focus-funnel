@@ -16,8 +16,8 @@
 
 ## 4. Restart and shutdown
 
-- [ ] 4.1 Store a cancelled turn's round in flight as `failed` with the text so far and the new stream-only code `answer_interrupted` (add it to `ErrorCode`), under `asyncio.shield`. In the lifespan exit, cancel running turns and await them with a short bound. Check with pytest that cancelling a running turn's task stores the partial text as `failed` / `answer_interrupted` and releases the claim
-- [ ] 4.2 Add the startup sweep from design decision 3 to `backend/app/chat/conversations.py` and run it in the lifespan before serving. Add a comment to the `uvicorn` command in `backend/Dockerfile` that the backend must run as one process. Check with pytest on Postgres that a conversation left with `turn_started_at` set and a user message last gets a `failed` / `answer_interrupted` assistant message and a null claim, that one whose last message is a finished answer only gets its claim cleared, and that conversations with no claim are untouched
+- [x] 4.1 Store a cancelled turn's round in flight as `failed` with the text so far and the new stream-only code `answer_interrupted` (add it to `ErrorCode`), under `asyncio.shield`. In the lifespan exit, cancel running turns and await them with a short bound. Check with pytest that cancelling a running turn's task stores the partial text as `failed` / `answer_interrupted` and releases the claim
+- [x] 4.2 Add the startup sweep from design decision 3 to `backend/app/chat/conversations.py` and run it in the lifespan before serving. Add a comment to the `uvicorn` command in `backend/Dockerfile` that the backend must run as one process. Check with pytest on Postgres that a conversation left with `turn_started_at` set and a user message last gets a `failed` / `answer_interrupted` assistant message and a null claim, that one whose last message is a finished answer only gets its claim cleared, and that conversations with no claim are untouched
 
 ## 5. Chat screen
 
