@@ -2,12 +2,15 @@
 
 import asyncio
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 
+import pytest
 from sqlalchemy import func, select
 
 from app.chat import running
+from app.demo_keys import held_keys
 from app.errors import ErrorCode
 from app.models import Conversation, Message, Proposal, UsageEvent
 from tests.chat_helpers import (
@@ -398,3 +401,159 @@ async def test_a_compact_claim_is_not_a_running_turn(async_api):
     gone.set()
     await drafting
     assert await claim_of(api, conversation_id) is None
+
+
+# --- 3.1 a demo visitor's key lasts the whole turn, and goes nowhere else ---
+
+DEMO_KEY = "nb-demo-held-key-7f3a9c"
+
+
+@pytest.fixture
+async def demo_api(test_database_url, settings_env):
+    """async_api in demo mode: a demo visitor whose key is only in X-Provider-Keys."""
+    import base64
+    from datetime import timedelta
+
+    import httpx
+
+    from app.db import get_engine
+    from app.main import app
+    from app.providers import get_provider_http_client
+    from tests.chat_helpers import PROVIDERS_FIXTURE, AsyncApi, FakeLLM, entry
+
+    settings_env.setenv("AUTH_MODE", "demo")
+    settings_env.delenv("OIDC_ISSUER")
+    settings_env.delenv("OIDC_CLIENT_ID")
+    settings_env.setenv("PROVIDERS_CONFIG_PATH", str(PROVIDERS_FIXTURE))
+    fake = FakeLLM()
+    app.dependency_overrides[get_provider_http_client] = fake.http_client
+    expires = (datetime.now(UTC) + timedelta(minutes=30)).isoformat()
+    held = json.dumps({"nebius": {"key": DEMO_KEY, "expires_at": expires}}).encode()
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as http:
+            session = await http.post("/api/demo/sessions")
+            assert session.status_code == 201, session.text
+            headers = {
+                "Authorization": f"Bearer {session.json()['session']}",
+                "X-Provider-Keys": base64.urlsafe_b64encode(held).rstrip(b"=").decode(),
+            }
+            api = AsyncApi(http, fake, headers)
+            # Each request with the key runs in its own task, as in a server,
+            # so the key never lands in the test's own context.
+            response = await asyncio.create_task(
+                http.put(
+                    "/api/settings/models",
+                    headers=headers,
+                    json={"models": [entry(NANO, default=True)], "temperature": None},
+                )
+            )
+            assert response.status_code == 200, response.text
+            yield api
+    finally:
+        try:
+            await turns_settled()
+        finally:
+            for turn in running.running_turns():
+                if turn.task is not None:
+                    turn.task.cancel()
+            app.dependency_overrides.clear()
+            await get_engine().dispose()
+
+
+async def seed_thought_without_a_key(api) -> str:
+    """A thought stored with no key at hand, so it has no embedding yet: the
+    search embeds it, with the query, using the turn's key."""
+    assert held_keys() == {}
+    from app.config import get_settings
+    from app.models import ThoughtEmbedding, User
+    from app.thoughts.store import store_thought
+
+    user_id = await asyncio.create_task(api.user_id())
+    assert held_keys() == {}
+
+    async def work(session):
+        user = await session.get(User, user_id)
+        outcome = await store_thought(
+            session, user, title="Oat milk", summary="Buy oat milk on the way home.",
+            tags=["groceries"], settings=get_settings(), http_client=api.fake.http_client(),
+        )
+        embedded = (
+            await session.execute(select(func.count()).select_from(ThoughtEmbedding))
+        ).scalar_one()
+        assert embedded == 0
+        return str(outcome.thought.id)
+
+    thought_id = await api.db(work)
+    assert not [r for r in api.fake.requests if r.url.path.endswith("/embeddings")]
+    return thought_id
+
+
+async def every_stored_value(api) -> str:
+    """Every row of every table, as text."""
+    from sqlalchemy import text
+
+    from app.models import Base
+
+    async def work(session):
+        rows = []
+        for table in Base.metadata.sorted_tables:
+            result = await session.execute(text(f'SELECT * FROM "{table.name}"'))
+            rows += [repr(tuple(row)) for row in result]
+        return "\n".join(rows)
+
+    return await api.db(work)
+
+
+@pytest.mark.postgres
+async def test_a_demo_turn_uses_the_held_key_after_its_client_disconnects(demo_api, caplog):
+    api = demo_api
+    thought_id = await seed_thought_without_a_key(api)
+    hold = Hold()
+    first = tool_round("search_thoughts", '{"query": "oat milk"}', "call_s", text="Let me look. ")
+    # The stream stops after the first piece of text, before the tool call.
+    first.insert(2, hold)
+    api.fake.queue(first, text_chunks("You wanted oat milk.") + [usage_chunk()])
+    calls_before = len(api.fake.requests)
+
+    with caplog.at_level(logging.DEBUG):
+        left = await asyncio.create_task(
+            leave_chat(api, "/pull what did I want to buy?", after_first("delta"))
+        )
+        # The request is over and the key was only in its context.
+        assert held_keys() == {}
+        assert left.names == ["conversation", "delta"]
+        conversation_id = conversation_id_from(left)
+        turn = running.get(uuid.UUID(conversation_id))
+        assert turn is not None
+        # Nothing has searched yet: the browser left before the tool ran.
+        assert not [r for r in api.fake.requests if r.url.path.endswith("/embeddings")]
+        hold.release.set()
+        await turns_settled()
+
+    calls = api.fake.requests[calls_before:]
+    chat_calls = [r for r in calls if r.url.path.endswith("/chat/completions")]
+    embed_calls = [r for r in calls if r.url.path.endswith("/embeddings")]
+    assert len(chat_calls) == 2 and len(embed_calls) == 1
+    assert {r.headers["Authorization"] for r in chat_calls + embed_calls} == {f"Bearer {DEMO_KEY}"}
+
+    messages = await messages_of(api, conversation_id)
+    assert [m.role for m in messages] == ["user", "assistant", "tool", "assistant"]
+    assert messages[0].content == "/pull what did I want to buy?"
+    assert [s["id"] for s in messages[2].details["sources"]] == [thought_id]
+    assert (messages[3].status, messages[3].content) == ("complete", "You wanted oat milk.")
+    rows = await usage_rows(api)
+    assert sorted(row.kind for row in rows) == ["chat", "chat", "embed"]
+    assert all(row.conversation_id == uuid.UUID(conversation_id) for row in rows)
+    assert await claim_of(api, conversation_id) is None
+
+    # The key is in no table, no event of the turn's log, and no log line.
+    assert DEMO_KEY not in await every_stored_value(api)
+    assert turn.ended and turn.events[-1] == ("done", {})
+    assert DEMO_KEY not in json.dumps(turn.events)
+    assert DEMO_KEY not in repr(vars(turn))
+    assert DEMO_KEY not in left.body
+    assert caplog.records
+    assert DEMO_KEY not in caplog.text
+    assert all(DEMO_KEY not in record.getMessage() for record in caplog.records)

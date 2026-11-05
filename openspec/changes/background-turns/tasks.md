@@ -12,7 +12,7 @@
 
 ## 3. Keys and usage without a request
 
-- [ ] 3.1 Check design decision 6 in demo mode with pytest: send a `/pull` message with the key in `X-Provider-Keys`, disconnect before the search tool runs, and check that the model call and the embedding call both used that key, that the answer and the usage rows are stored, and that no key appears in the database, the event log, or the log output
+- [x] 3.1 Check design decision 6 in demo mode with pytest: send a `/pull` message with the key in `X-Provider-Keys`, disconnect before the search tool runs, and check that the model call and the embedding call both used that key, that the answer and the usage rows are stored, and that no key appears in the database, the event log, or the log output
 
 ## 4. Restart and shutdown
 
