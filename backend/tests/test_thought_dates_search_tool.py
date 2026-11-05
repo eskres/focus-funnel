@@ -6,6 +6,7 @@ The parse and format tests need no database; the chat test runs on Postgres.
 import json
 import uuid
 from datetime import UTC, date, datetime, time
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -148,6 +149,35 @@ def test_dated_entries_show_their_date_and_undated_ones_do_not(env):
     assert " on " not in headings[-1]
 
 
+def test_the_filed_day_is_the_users_local_day(env):
+    config, settings = env
+    # 03:00 UTC on 1 October: 20:00 on 30 September in Los Angeles.
+    evening = thought("Evening milk")
+    evening.created_at = datetime(2026, 10, 1, 3, tzinfo=UTC)
+    # 23:30 UTC on 2 October: 08:30 on 3 October in Tokyo.
+    morning = thought("Morning milk")
+    morning.created_at = datetime(2026, 10, 2, 23, 30, tzinfo=UTC)
+    result = SearchResult(hits=hits(evening, morning), total=2)
+
+    def headings(zone):
+        text = format_search_result(result, config, settings, zone=zone).text
+        return [line for line in text.splitlines() if line[:1].isdigit() and ". " in line]
+
+    assert headings(ZoneInfo("America/Los_Angeles")) == [
+        "1. Evening milk · filed 2026-09-30",
+        "2. Morning milk · filed 2026-10-02",
+    ]
+    assert headings(ZoneInfo("Asia/Tokyo")) == [
+        "1. Evening milk · filed 2026-10-01",
+        "2. Morning milk · filed 2026-10-03",
+    ]
+    # Without a zone the days are UTC, as before.
+    assert headings(None) == [
+        "1. Evening milk · filed 2026-10-01",
+        "2. Morning milk · filed 2026-10-02",
+    ]
+
+
 def test_sources_never_get_the_date(env):
     config, settings = env
     dinner = thought("Dinner with Sam", starts_on=date(2026, 10, 2), starts_at=time(19))
@@ -195,7 +225,7 @@ def test_what_is_on_this_week_through_the_chat(client, alice, fake_llm, test_dat
     def dated(title, start, end=None):
         when = {"start": start, "end": end, "time_zone": "America/Los_Angeles"}
         store(url, user_id, fake_llm, title, f"About {title.lower()}.", when=when,
-              created=datetime(2026, 9, 20, tzinfo=UTC))
+              created=datetime(2026, 9, 20, 12, tzinfo=UTC))
 
     dated("Dentist", "2026-10-12T09:00")
     dated("Dinner with Sam", "2026-10-02T19:00")

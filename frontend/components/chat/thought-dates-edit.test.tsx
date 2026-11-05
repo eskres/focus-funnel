@@ -66,6 +66,7 @@ function type(form: HTMLElement, label: string, value: string) {
 const dateLine = (sheet: HTMLElement) => within(sheet).queryByText(/^When: /);
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   window.history.replaceState(null, "", "/");
@@ -93,6 +94,71 @@ describe("editing a thought's date in the sheet", () => {
     // Monday as written, not Sunday, though the browser is west of UTC.
     expect(dateLine(sheet)).toHaveTextContent(/^When: Mon 5 Oct 2026$/);
     expect(within(sheet).getByText(/^Filed .* · changed /)).toBeInTheDocument();
+  });
+
+  it("starts Add date at the browser's local today, not the UTC day", async () => {
+    // 02:00 UTC on 6 October is still 5 October in California. Only Date is
+    // faked, so promises and the testing library's waiting still run.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(Date.UTC(2026, 9, 6, 2, 0)));
+    const answer = { ...THOUGHT, when: { start: "2026-10-05", end: null, time_zone: ZONE } };
+    const { calls } = api(THOUGHT, { [PATCH]: json(200, answer) });
+    const sheet = await openSheet();
+    const form = startEdit(sheet);
+
+    fireEvent.click(within(form).getByRole("button", { name: "Add date" }));
+    expect(within(form).getByLabelText("Start date")).toHaveValue("2026-10-05");
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+
+    await within(sheet).findByRole("button", { name: "Edit" });
+    expect(changes(calls)).toEqual([
+      { method: "PATCH", path: "/api/thoughts/t1", body: { when: { start: "2026-10-05", end: null, time_zone: ZONE } } },
+    ]);
+  });
+
+  it("keeps the end while a part of the start time or the end date is retyped", async () => {
+    // A native date or time input reports "" as soon as one part is cleared.
+    const MEETING = { start: "2026-10-06T10:00", end: "2026-10-06T11:00", time_zone: ZONE };
+    const moved = { start: "2026-10-06T09:00", end: "2026-10-07T11:00", time_zone: ZONE };
+    const { calls } = api({ ...THOUGHT, when: MEETING }, { [PATCH]: json(200, { ...THOUGHT, when: moved }) });
+    const sheet = await openSheet();
+    const form = startEdit(sheet);
+
+    type(form, "Start time", "");
+    expect(within(form).queryByLabelText("End time")).not.toBeInTheDocument();
+    type(form, "Start time", "09:00");
+    expect(within(form).getByLabelText("End time")).toHaveValue("11:00");
+
+    type(form, "End date", "");
+    expect(within(form).getByLabelText("End date")).toHaveValue("");
+    expect(within(form).getByLabelText("End time")).toHaveValue("11:00");
+    expect(within(form).queryByRole("button", { name: "Add end" })).not.toBeInTheDocument();
+    type(form, "End date", "2026-10-07");
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+
+    await within(sheet).findByRole("button", { name: "Edit" });
+    expect(changes(calls)).toEqual([{ method: "PATCH", path: "/api/thoughts/t1", body: { when: moved } }]);
+  });
+
+  it("sends an emptied end date as written, so the server refuses it", async () => {
+    const MEETING = { start: "2026-10-06T10:00", end: "2026-10-06T11:00", time_zone: ZONE };
+    const { calls } = api({ ...THOUGHT, when: MEETING }, {
+      [PATCH]: errorResponse(422, "validation_error", "when: the end must be written YYYY-MM-DD or YYYY-MM-DDTHH:MM"),
+    });
+    const sheet = await openSheet();
+    const form = startEdit(sheet);
+
+    type(form, "End date", "");
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+
+    expect(await within(sheet).findByRole("alert")).toHaveTextContent("when:");
+    expect(changes(calls)).toEqual([
+      {
+        method: "PATCH",
+        path: "/api/thoughts/t1",
+        body: { when: { start: "2026-10-06T10:00", end: "", time_zone: ZONE } },
+      },
+    ]);
   });
 
   it("fills the fields with the current date, and starts the end time as the start time", async () => {

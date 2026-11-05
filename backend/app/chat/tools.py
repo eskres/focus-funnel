@@ -4,7 +4,7 @@ compact result the model reads and the sources the chat shows."""
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, time
+from datetime import UTC, date, datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -299,6 +299,13 @@ def thought_date_text(thought: Any) -> str | None:
     return f"{start} to {_day_and_time(thought.ends_on, thought.ends_at)}"
 
 
+def _local_day(moment: datetime, zone: ZoneInfo) -> date:
+    """The day `moment` falls on in `zone`; a naive moment (SQLite) is UTC."""
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone(zone).date()
+
+
 def format_search_result(
     result: SearchResult,
     config: SearchConfig,
@@ -306,6 +313,7 @@ def format_search_result(
     *,
     newest_first: bool = False,
     by_date: bool = False,
+    zone: ZoneInfo | None = None,
 ) -> SearchToolResult:
     """The search result in as few tokens as the model can answer from.
 
@@ -314,8 +322,10 @@ def format_search_result(
     next would pass budget_chars. Each entry gives the day it was filed and,
     for a dated thought, its date. `by_date` is a search by the thought's days
     with no query: its entries are in date order (thought-dates design
-    decision 4).
+    decision 4). The filed day is the user's local day in `zone` (UTC when not
+    given), the same days as the model's today and its `since`.
     """
+    filed_zone = zone or ZoneInfo(DEFAULT_ZONE)
     provider_id = result.embedding_provider or settings.embedding_provider
     note = [words_only_note(result.words_only, provider_id)] if result.words_only else []
     if not result.hits:
@@ -325,7 +335,7 @@ def format_search_result(
     used = 0
     for number, hit in enumerate(result.hits, start=1):
         thought = hit.thought
-        heading = f"{number}. {thought.title} · filed {thought.created_at.date().isoformat()}"
+        heading = f"{number}. {thought.title} · filed {_local_day(thought.created_at, filed_zone).isoformat()}"
         dated = thought_date_text(thought)
         if dated:
             heading += f" · on {dated}"
@@ -395,4 +405,6 @@ async def search_tool_result(
         http_client=http_client,
         config=config,
     )
-    return format_search_result(result, config, settings, by_date=arguments.by_date_only)
+    return format_search_result(
+        result, config, settings, by_date=arguments.by_date_only, zone=zone
+    )

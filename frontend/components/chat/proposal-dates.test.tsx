@@ -98,6 +98,7 @@ async function confirmedWhen(calls: { path: string; body: unknown }[], title: st
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
   window.history.replaceState(null, "", "/");
@@ -134,9 +135,14 @@ describe("a proposal card's date", () => {
   });
 
   it("sends a date added on the card with the browser's zone", async () => {
+    // 02:00 UTC on 6 October is still 5 October in California. Only Date is faked.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(Date.UTC(2026, 9, 6, 2, 0)));
     const { calls } = await proposed([OAT]);
 
     fireEvent.click(button("Oat milk", "Add date"));
+    // The start begins at the browser's local today, not empty and not the UTC day.
+    expect(field("Oat milk", "Start date")).toHaveValue("2026-10-05");
     type("Oat milk", "Start date", "2026-10-05");
 
     expect(await confirmedWhen(calls, "Oat milk")).toEqual({ start: "2026-10-05", end: null, time_zone: ZONE });

@@ -63,5 +63,9 @@ def test_filed_since_today_in_local_days(client, alice, fake_llm, test_database_
     content = second["messages"][-1]["content"]
     assert content.startswith("2 of your thoughts match")
     assert "Evening milk" in content and "Morning milk" in content
+    # The filed day is the local day too, never a day after the model's today.
+    assert "Evening milk · filed 2026-09-30" in content
+    assert "Morning milk · filed 2026-09-30" in content
+    assert "filed 2026-10-01" not in content
     # In UTC days the search from 30 September would also list this one.
     assert "Yesterday milk" not in content

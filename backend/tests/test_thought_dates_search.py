@@ -5,6 +5,7 @@ scenarios are also covered, unchanged, in test_thought_search.py.
 """
 
 from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -125,6 +126,41 @@ def test_filed_date_and_thought_date_are_separate(test_database_url, fake, alice
         dated_from=date(2026, 10, 1), dated_to=date(2026, 10, 7),
     )
     assert titles(both) == ["Dinner with Sam"]
+
+
+def test_filed_days_and_thought_days_together_without_a_query(test_database_url, fake, alice_id):
+    url = test_database_url
+    los_angeles = ZoneInfo("America/Los_Angeles")
+    # All dated in the first week of October; filed (UTC, then Los Angeles):
+    filed = {
+        "Monday call": datetime(2026, 9, 30, 3, tzinfo=UTC),  # 29 Sep 20:00 local
+        "Tuesday lunch": datetime(2026, 10, 1, 3, tzinfo=UTC),  # 30 Sep 20:00 local
+        "Wednesday gym": datetime(2026, 10, 2, 6, 30, tzinfo=UTC),  # 1 Oct 23:30 local
+        "Thursday film": datetime(2026, 10, 2, 8, tzinfo=UTC),  # 2 Oct 01:00 local
+    }
+    for day, (title, created) in enumerate(filed.items(), start=5):
+        thought_id = dated(url, alice_id, fake, title, f"About {title.lower()}.", f"2026-10-0{day}")
+        set_created(url, thought_id, created)
+    # A thought filed in those days but dated the week after stays out.
+    later = dated(url, alice_id, fake, "Dentist", "Check-up.", "2026-10-12T09:00")
+    set_created(url, later, datetime(2026, 10, 1, 3, tzinfo=UTC))
+    fake.embed_requests.clear()
+    week_of = {"dated_from": date(2026, 10, 5), "dated_to": date(2026, 10, 11)}
+
+    def no_query(**options):
+        return titles(search(url, alice_id, fake, None, **week_of, **options))
+
+    # Filed from 30 September to 1 October, in Los Angeles days.
+    assert no_query(since=date(2026, 9, 30), until=date(2026, 10, 1), zone=los_angeles) == [
+        "Tuesday lunch", "Wednesday gym",
+    ]
+    # The same days in UTC are different thoughts.
+    assert no_query(since=date(2026, 9, 30), until=date(2026, 10, 1)) == [
+        "Monday call", "Tuesday lunch",
+    ]
+    assert no_query(since=date(2026, 10, 2), zone=los_angeles) == ["Thursday film"]
+    assert no_query(until=date(2026, 9, 29), zone=los_angeles) == ["Monday call"]
+    assert fake.embed_requests == []
 
 
 def test_thought_date_with_a_query(test_database_url, fake, alice_id):

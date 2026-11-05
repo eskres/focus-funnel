@@ -10,25 +10,31 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { localToday, splitPoint, type When } from "@/lib/dates";
 
-/** The date as the user edits it: "" for an empty field, and no end when `end` is "". */
-export type DateText = { start: string; startTime: string; end: string; endTime: string };
+/**
+ * The date as the user edits it: "" for an empty field, and no end when `end`
+ * is null. An emptied End date field is "", not null, so the end row stays
+ * while the user retypes it: a native date or time input reports "" as soon
+ * as one of its parts is cleared.
+ */
+export type DateText = { start: string; startTime: string; end: string | null; endTime: string };
 
 /** The fields for a stored date, or null (the "Add date" button) for none. */
 export function dateTextOf(when: When | null | undefined): DateText | null {
   if (!when) return null;
   const start = splitPoint(when.start);
-  const end = when.end ? splitPoint(when.end) : { day: "", time: "" };
-  return { start: start.day, startTime: start.time, end: end.day, endTime: end.time };
+  const end = when.end ? splitPoint(when.end) : null;
+  return { start: start.day, startTime: start.time, end: end ? end.day : null, endTime: end ? end.time : "" };
 }
 
-const point = (day: string, time: string) => (time ? `${day}T${time}` : day);
+const point = (day: string, time: string) => (day && time ? `${day}T${time}` : day);
 
 /** The `when` to send for the fields, with the browser's zone; null for no date. */
 export function whenOfText(text: DateText | null, timeZone: string): When | null {
   if (!text) return null;
   return {
     start: point(text.start, text.startTime),
-    end: text.end ? point(text.end, text.startTime ? text.endTime : "") : null,
+    // An emptied End date is sent as it is, so the server's refusal names `when`.
+    end: text.end === null ? null : point(text.end, text.startTime ? text.endTime : ""),
     time_zone: timeZone,
   };
 }
@@ -62,7 +68,7 @@ export function DateFields({
           size="sm"
           variant="outline"
           disabled={disabled}
-          onClick={() => onChange({ start: localToday(), startTime: "", end: "", endTime: "" })}
+          onClick={() => onChange({ start: localToday(), startTime: "", end: null, endTime: "" })}
         >
           Add date
         </Button>
@@ -70,9 +76,11 @@ export function DateFields({
     );
   }
 
+  // An empty start time hides the end time and leaves it out of `when`, but
+  // keeps it: retyping one part of the start time must not replace the end time.
   function setStartTime(startTime: string) {
     if (!value) return;
-    const endTime = !value.end || !startTime ? "" : value.endTime || startTime;
+    const endTime = value.end === null ? "" : startTime ? value.endTime || startTime : value.endTime;
     onChange({ ...value, startTime, endTime });
   }
 
@@ -93,7 +101,7 @@ export function DateFields({
           <Input type="time" value={value.startTime} onChange={(event) => setStartTime(event.target.value)} />
         </Label>
       </div>
-      {value.end && (
+      {value.end !== null && (
         <div className="flex flex-wrap gap-2">
           <Label className="flex flex-col items-start gap-1 text-xs">
             End date
@@ -116,12 +124,12 @@ export function DateFields({
         </div>
       )}
       <div className="flex flex-wrap gap-2">
-        {value.end ? (
+        {value.end !== null ? (
           <Button
             type="button"
             size="sm"
             variant="outline"
-            onClick={() => onChange({ ...value, end: "", endTime: "" })}
+            onClick={() => onChange({ ...value, end: null, endTime: "" })}
           >
             Remove end
           </Button>
