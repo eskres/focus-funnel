@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { type MouseEvent, useEffect, useState } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 
 import { DeleteDialog } from "@/components/chat/delete-dialog";
 import {
@@ -54,6 +54,13 @@ function when(value: string): string {
 export function ThoughtSheet() {
   const id = useOpenThought();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  // The open thought for a save or delete that answers later: by then the
+  // user may have opened another thought, closed the sheet, or gone Back.
+  const openId = useRef(id);
+
+  useEffect(() => {
+    openId.current = id;
+  }, [id]);
 
   useEffect(() => {
     if (!id) return;
@@ -102,10 +109,15 @@ export function ThoughtSheet() {
           <ThoughtBody
             key={thought.id}
             thought={thought}
-            onSaved={(saved) => setLoaded({ id: saved.id, state: "ready", thought: saved })}
+            // Each answer replaces only its own thought's state, so a late
+            // answer never takes the place of another thought shown since.
+            onSaved={(saved) =>
+              setLoaded((now) => (now?.id === saved.id ? { id: saved.id, state: "ready", thought: saved } : now))
+            }
             onDeleted={() => {
-              setLoaded({ id: thought.id, state: "gone" });
-              closeThought();
+              // Marked gone, so its old address never shows the deleted copy.
+              setLoaded((now) => (now?.id === thought.id ? { id: thought.id, state: "gone" } : now));
+              if (openId.current === thought.id) closeThought();
             }}
           />
         )}

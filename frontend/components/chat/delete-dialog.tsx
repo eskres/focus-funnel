@@ -38,6 +38,13 @@ export function DeleteDialog({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [wasOpen, setWasOpen] = useState(open);
+
+  // Each opening starts clean: a failure from an earlier try is not shown again.
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setError(null);
+  }
 
   async function confirm() {
     setBusy(true);

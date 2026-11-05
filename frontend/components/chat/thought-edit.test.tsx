@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { closeThought, openThought } from "@/lib/thought-link";
@@ -78,6 +78,11 @@ function startEdit(sheet: HTMLElement) {
 
 function type(form: HTMLElement, label: string | RegExp, value: string) {
   fireEvent.change(within(form).getByLabelText(label), { target: { value } });
+}
+
+async function askToDelete(sheet: HTMLElement) {
+  fireEvent.click(within(sheet).getByRole("button", { name: "Delete" }));
+  return screen.findByRole("dialog", { name: "Delete this thought?" });
 }
 
 type Call = { method: string; path: string; body: unknown };
@@ -289,11 +294,6 @@ describe("editing a thought in the sheet", () => {
 });
 
 describe("deleting a thought in the sheet", () => {
-  async function askToDelete(sheet: HTMLElement) {
-    fireEvent.click(within(sheet).getByRole("button", { name: "Delete" }));
-    return screen.findByRole("dialog", { name: "Delete this thought?" });
-  }
-
   it("asks in a dialog that names the thought, and Cancel keeps it", async () => {
     const { calls } = api({});
     const sheet = await openSheet();
@@ -366,5 +366,78 @@ describe("deleting a thought in the sheet", () => {
     );
     expect(screen.getByRole("dialog", { name: "Oat milk" })).toHaveTextContent("Buy oat milk on the way home.");
     expect(window.location.search).toBe("?thought=t1");
+
+    // A new try starts clean: the earlier failure is not shown again.
+    const again = await askToDelete(sheet);
+    expect(within(again).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows the old address as gone at once after a delete, with no Edit or Delete", async () => {
+    let reloads = 0;
+    api({
+      "GET /api/thoughts/t1": () =>
+        // The first load answers; a reload after the delete never does.
+        reloads++ === 0 ? json(200, THOUGHT) : new Promise<Response>(() => {}),
+      [DELETE]: new Response(null, { status: 204 }),
+    });
+    const sheet = await openSheet();
+    const ask = await askToDelete(sheet);
+    fireEvent.click(within(ask).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    act(() => openThought("t1"));
+
+    const gone = await screen.findByRole("dialog", { name: "Thought" });
+    expect(gone).toHaveTextContent("This thought no longer exists.");
+    expect(within(gone).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(within(gone).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(gone).not.toHaveTextContent("Buy oat milk on the way home.");
+  });
+});
+
+describe("a late answer after another thought was opened", () => {
+  const SECOND = { ...THOUGHT, id: "t2", title: "Eggs", summary: "Buy eggs.", origin: null };
+
+  /** A response the test answers later. */
+  function later() {
+    let answer!: (response: Response) => void;
+    const response = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    return { route: () => response, answer: (r: Response) => act(async () => answer(r)) };
+  }
+
+  it("keeps the other thought shown when a save answers late", async () => {
+    const patch = later();
+    api({ "GET /api/thoughts/t2": json(200, SECOND), [PATCH]: patch.route });
+    const sheet = await openSheet();
+    const form = startEdit(sheet);
+    type(form, "Title", "Oat milk, barista");
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+
+    act(() => openThought("t2"));
+    const second = await screen.findByRole("dialog", { name: "Eggs" });
+    await patch.answer(json(200, { ...THOUGHT, title: "Oat milk, barista" }));
+
+    expect(screen.getByRole("dialog", { name: "Eggs" })).toBe(second);
+    expect(second).toHaveTextContent("Buy eggs.");
+    expect(within(second).getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(window.location.search).toBe("?thought=t2");
+  });
+
+  it("keeps the other thought shown, and its address, when a delete answers late", async () => {
+    const remove = later();
+    api({ "GET /api/thoughts/t2": json(200, SECOND), [DELETE]: remove.route });
+    const sheet = await openSheet();
+    const ask = await askToDelete(sheet);
+    fireEvent.click(within(ask).getByRole("button", { name: "Delete" }));
+
+    act(() => openThought("t2"));
+    const second = await screen.findByRole("dialog", { name: "Eggs" });
+    await remove.answer(new Response(null, { status: 204 }));
+
+    expect(screen.getByRole("dialog", { name: "Eggs" })).toBe(second);
+    expect(second).toHaveTextContent("Buy eggs.");
+    expect(window.location.search).toBe("?thought=t2");
   });
 });
