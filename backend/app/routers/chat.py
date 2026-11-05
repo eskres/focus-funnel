@@ -1,5 +1,6 @@
 """POST /api/chat: one message in, an event stream of the answer out."""
 
+import logging
 import uuid
 
 import httpx2
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth import get_current_user
+from app.chat import running
 from app.chat.commands import parse_message
 from app.chat.compaction import (
     compaction_request,
@@ -33,13 +35,15 @@ from app.chat.model_call import open_model_call
 from app.chat.model_info import model_info
 from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, build_context, estimate_tokens, forced_tool
 from app.chat.proposal import filing_for, held_parts, held_proposal
-from app.chat.sse import sse_response
+from app.chat.sse import log_response, sse_response
 from app.chat.turn import Turn
 from app.config import Settings, get_settings
 from app.db import get_sessionmaker
 from app.errors import ApiError, ErrorCode, context_full, model_not_set
 from app.models import Conversation, Message, User
 from app.providers import get_provider_http_client, provider_for_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat")
 
@@ -136,6 +140,10 @@ async def chat(
     Everything that can fail before the first byte happens here, so those
     failures are ordinary error responses. Once the conversation is stored,
     an error response carries its id in the X-Conversation-Id header.
+
+    The opened turn then runs in the background (`app.chat.running`), and the
+    response follows its events: a dropped connection stops the response,
+    not the turn.
     """
     parsed = parse_message(body.message)
     if parsed.command == "delete":
@@ -175,7 +183,10 @@ async def chat(
         await _ensure_model(session, user, conversation)
 
         held = held_parts(await held_proposal(session, conversation))
-        context = build_context(await list_messages(session, conversation), held)
+        messages = await list_messages(session, conversation)
+        # The user message this turn answers, stored or resent, is the last one.
+        after_position = messages[-1].position
+        context = build_context(messages, held)
         filing = await filing_for(session, user, config)
         info = await model_info(
             session, user, conversation.provider_id, conversation.model, settings, http_client
@@ -232,15 +243,22 @@ async def chat(
         async for event in turn.events():
             yield event
 
-    async def on_close() -> None:
+    async def settle() -> None:
         try:
-            await call.aclose()
-            await session.commit()
-            await release_turn(session, conversation_id)
+            try:
+                await call.aclose()
+            finally:
+                try:
+                    await session.commit()
+                except Exception:
+                    logger.exception("Could not commit a chat turn")
+                    await session.rollback()
+                await release_turn(session, conversation_id)
         finally:
             await session.close()
 
-    return sse_response(events(), on_close=on_close)
+    turn_entry = running.start(conversation_id, user.id, after_position, events(), settle)
+    return log_response(running.follow(turn_entry))
 
 
 async def larger_models(
@@ -363,7 +381,7 @@ async def compact(
 
 
 def _closer(session: AsyncSession, conversation_id: uuid.UUID, call):
-    async def on_close() -> None:
+    async def close() -> None:
         try:
             if call is not None:
                 await call.aclose()
@@ -371,5 +389,9 @@ def _closer(session: AsyncSession, conversation_id: uuid.UUID, call):
             await release_turn(session, conversation_id)
         finally:
             await session.close()
+
+    async def on_close() -> None:
+        # A disconnect cancels the response; the conversation must still be freed.
+        await running.shielded(close())
 
     return on_close

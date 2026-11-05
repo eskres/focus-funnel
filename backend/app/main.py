@@ -43,6 +43,9 @@ async def lifespan(app: FastAPI):
         cleanup.cancel()
         with suppress(asyncio.CancelledError):
             await cleanup
+    # Close the pooled connections on this event loop, rather than leaving
+    # them to the garbage collector after the loop is gone.
+    await get_engine().dispose()
 
 
 install_log_masking()

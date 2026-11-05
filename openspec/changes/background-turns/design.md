@@ -89,6 +89,22 @@ This change leaves it out. Leaving the chat no longer stops spending, but a turn
 
 A test asserts the demo case end to end: send in demo mode, drop the stream before the search tool runs, and check the search used the header's key and the answer was stored.
 
+### 7. The terminal event goes out after the claim is released
+
+`run` settles in one step after `Turn.events()` ends: close the model call, commit, release the claim, close the session, remove the registry entry (only if it is still this turn's, since a new turn may register once the claim is free), and only then append the terminal `done` or `error` event and wake subscribers. A client that sees the terminal event can send the next message at once, as before this change; the frontend unlocks the input on it and the existing back-to-back tests rely on it. The new-conversation `conversation` event is the first event of the log, so a reattaching chat gets it too; it carries the id the chat already has.
+
+Alternatives:
+- **Terminal event first, release after.** Leaves a short window where a client that saw `done` gets `conversation_busy`. Rejected.
+
+### 8. One shielded step, and a swapped event for waking subscribers
+
+The settle step runs as its own task, awaited through `asyncio.shield` inside an anyio `CancelScope(shield=True)` (`running.shielded`). The task keeps the steps in order on one `AsyncSession` even when its caller is cancelled twice, since nothing outside it touches the session afterwards. The anyio shield matters for `/compact`'s `_closer`, which runs inside a Starlette response whose cancel scope cancels every await again until the scope exits: with it, the response waits for the release instead of leaving it to finish on its own.
+
+Subscribers wait on an `asyncio.Event` that the turn sets and replaces on every append, instead of an `asyncio.Condition`. It meets the same need (wake every waiting subscriber, each reads from its own index) without awaiting a lock in the settle step.
+
+Alternatives:
+- **Shield each step separately.** A second cancellation would let the caller's `finally` close the session while a shielded release still uses it. Rejected.
+
 ## Risks / Trade-offs
 
 - [One process only] → Recorded as a non-goal and in the Dockerfile comment. The registry is the single place to replace with a shared queue and pub/sub later.
