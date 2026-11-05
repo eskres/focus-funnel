@@ -56,7 +56,12 @@ export type ContextMeter = {
   tokens: number;
   estimated: boolean;
   context_length: number | null;
+  /** The estimated share of the tokens that the offered tool definitions take. */
+  tool_tokens?: number;
 };
+
+/** A connector that is on in a conversation. */
+export type ConversationConnector = { id: string; name: string };
 
 export type ConversationDetail = ConversationSummary & {
   last_prompt_tokens: number | null;
@@ -72,6 +77,8 @@ export type ConversationDetail = ConversationSummary & {
   turn?: RunningTurn | null;
   /** Every connector action of the conversation, for its card (none while connectors are off). */
   actions?: unknown[];
+  /** The connectors that are on, by name (none while connectors are off). */
+  connectors?: ConversationConnector[];
 };
 
 export type RunningTurn = { after_position: number };
@@ -145,6 +152,17 @@ export function updateConversation(
   return apiFetch<ConversationDetail>(`${BASE}/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify(change),
+  });
+}
+
+/** Sets which connectors are on, from the next turn: the whole set, not a change. */
+export function setConversationConnectors(
+  id: string,
+  connectorIds: string[],
+): Promise<ConversationDetail> {
+  return apiFetch<ConversationDetail>(`${BASE}/${encodeURIComponent(id)}/connectors`, {
+    method: "PUT",
+    body: JSON.stringify({ connector_ids: connectorIds }),
   });
 }
 

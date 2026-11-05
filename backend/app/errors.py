@@ -109,12 +109,16 @@ def model_unavailable(model: str) -> ApiError:
     )
 
 
-def context_full() -> ApiError:
+def context_full(connectors: bool = False) -> ApiError:
+    """connectors: some are on in the conversation, so turning them off is advised too."""
+    advice = (
+        "Use /compact, choose a model with a larger context, start a new conversation, "
+        "or turn some connectors off."
+        if connectors
+        else "Use /compact, choose a model with a larger context, or start a new conversation."
+    )
     return ApiError(
-        409,
-        ErrorCode.CONTEXT_FULL,
-        "This conversation is too long for the model. Use /compact, choose a model "
-        "with a larger context, or start a new conversation.",
+        409, ErrorCode.CONTEXT_FULL, f"This conversation is too long for the model. {advice}"
     )
 
 

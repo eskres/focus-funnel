@@ -75,6 +75,7 @@ def test_chat_error_constructors_have_their_documented_status():
         (errors.model_unsupported("org/m", "tool calling"), 400, ErrorCode.MODEL_UNSUPPORTED),
         (errors.model_unavailable("org/m"), 409, ErrorCode.MODEL_UNAVAILABLE),
         (errors.context_full(), 409, ErrorCode.CONTEXT_FULL),
+        (errors.context_full(connectors=True), 409, ErrorCode.CONTEXT_FULL),
         (errors.conversation_busy(), 409, ErrorCode.CONVERSATION_BUSY),
     ]
     for error, status_code, code in cases:

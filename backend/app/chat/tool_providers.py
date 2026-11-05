@@ -321,6 +321,11 @@ async def conversation_connector_tools(
     return [provider for provider in providers if provider is not None]
 
 
+def connector_definitions(providers: list[ConnectorTools]) -> list[dict[str, Any]]:
+    """The tool definitions these connectors offer, in order."""
+    return [definition for provider in providers for definition in provider.definitions()]
+
+
 def connector_tool_count(providers: list[ConnectorTools]) -> int:
     """The switched-on tools these connectors offer, for connectors.max_tools."""
-    return sum(len(provider.definitions()) for provider in providers)
+    return len(connector_definitions(providers))

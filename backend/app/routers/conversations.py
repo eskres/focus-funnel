@@ -8,6 +8,7 @@ import httpx2
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -28,6 +29,7 @@ from app.chat.conversations import (
 from app.chat.model_info import model_info
 from app.chat.prompt import build_context
 from app.chat.proposal import (
+    filing_for,
     held_parts,
     held_proposal,
     list_proposals,
@@ -37,12 +39,23 @@ from app.chat.proposal import (
     proposal_payload,
 )
 from app.chat.refs import conversation_refs
+from app.chat.tool_providers import (
+    ConnectorTools,
+    connector_definitions,
+    connector_tool_count,
+    connector_tools,
+    conversation_connector_tools,
+)
 from app.config import Settings, get_settings
+from app.connector_config import get_connector_config
 from app.db import get_session
-from app.errors import ApiError, ErrorCode
-from app.models import Conversation, Proposal, User
+from app.errors import ApiError, ErrorCode, too_many_tools
+from app.mcp_client import get_mcp_connect
+from app.models import Conversation, ConversationConnector, Proposal, User
+from app.ownership import not_found
 from app.providers import get_provider_http_client
 from app.routers.actions import ActionOut
+from app.routers.connectors import get_visible
 from app.thoughts.additions import (
     add_to_thought,
     lock_thought,
@@ -132,6 +145,14 @@ class ContextMeter(BaseModel):
     # True until the next answer reports the model's own count.
     estimated: bool
     context_length: int | None
+    # The estimated tokens of the tool definitions offered, built-in and from
+    # connectors (openspec mcp-connectors design decision 10).
+    tool_tokens: int = 0
+
+
+class ConversationConnectorOut(BaseModel):
+    id: uuid.UUID
+    name: str
 
 
 class TurnOut(BaseModel):
@@ -151,6 +172,8 @@ class ConversationDetail(ConversationSummary):
     turn: TurnOut | None
     # Connector actions, for their cards (always empty while MCP_ENABLED is off).
     actions: list[ActionOut] = []
+    # The connectors that are on, by name (always empty while MCP_ENABLED is off).
+    connectors: list[ConversationConnectorOut] = []
 
 
 class CompactionIn(BaseModel):
@@ -200,6 +223,11 @@ class OfferIn(BaseModel):
     time_zone: str | None = None
 
 
+class ConnectorsIn(BaseModel):
+    # The connectors to have on: the whole set, not a change.
+    connector_ids: list[uuid.UUID]
+
+
 class ConversationPatch(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     archived: bool | None = None
@@ -225,6 +253,7 @@ async def detail(
     session: AsyncSession,
     user: User,
     conversation: Conversation,
+    config: ChatConfig,
     settings: Settings,
     http_client: httpx2.AsyncClient | None,
 ) -> ConversationDetail:
@@ -246,23 +275,34 @@ async def detail(
     refs = await conversation_refs(session, user.id, messages, proposals)
     lookup = await lookup_from_refs(session, user, refs, proposals)
     actions = await list_actions(session, conversation.id) if settings.mcp_enabled else []
+    # The connectors the next turn would offer. Nothing is read while
+    # MCP_ENABLED is off, and nothing here connects to a server.
+    connectors = await conversation_connector_tools(
+        session, user.id, conversation.id, settings, get_mcp_connect(), config.connectors
+    )
+    filing = await filing_for(session, user, config)
     gauge = meter(
         conversation,
         build_context(
             messages,
             held,
-            seen_note=refs.note(get_chat_config().filing),
+            seen_note=refs.note(config.filing),
             refs=refs.by_id(),
+            connectors=bool(connectors),
             actions=actions,
         ),
         info.context_length if info is not None else None,
+        tools=[*filing.tools, *connector_definitions(connectors)],
     )
     return ConversationDetail(
         **summary(conversation).model_dump(),
         last_prompt_tokens=conversation.last_prompt_tokens,
         held_proposal_id=conversation.held_proposal_id,
         context=ContextMeter(
-            tokens=gauge.tokens, estimated=gauge.estimated, context_length=gauge.context_length
+            tokens=gauge.tokens,
+            estimated=gauge.estimated,
+            context_length=gauge.context_length,
+            tool_tokens=gauge.tool_tokens,
         ),
         messages=[
             MessageOut(
@@ -286,6 +326,7 @@ async def detail(
             ActionOut(**action_payload(a, title))
             for a, title in zip(actions, await action_titles(session, actions), strict=True)
         ],
+        connectors=[ConversationConnectorOut(id=c.connector_id, name=c.name) for c in connectors],
     )
 
 
@@ -319,11 +360,12 @@ async def read_conversation(
     conversation_id: uuid.UUID,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    config: ChatConfig = Depends(get_chat_config),
     settings: Settings = Depends(get_settings),
     http_client: httpx2.AsyncClient | None = Depends(get_provider_http_client),
 ) -> ConversationDetail:
     conversation = await get_conversation(session, user, conversation_id)
-    return await detail(session, user, conversation, settings, http_client)
+    return await detail(session, user, conversation, config, settings, http_client)
 
 
 @router.patch("/{conversation_id}", response_model=ConversationDetail)
@@ -376,7 +418,96 @@ async def change_conversation(
             config,
         )
     await session.commit()
-    return await detail(session, user, conversation, settings, http_client)
+    return await detail(session, user, conversation, config, settings, http_client)
+
+
+@router.put("/{conversation_id}/connectors", response_model=ConversationDetail)
+async def set_connectors(
+    conversation_id: uuid.UUID,
+    body: ConnectorsIn,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    config: ChatConfig = Depends(get_chat_config),
+    settings: Settings = Depends(get_settings),
+    http_client: httpx2.AsyncClient | None = Depends(get_provider_http_client),
+) -> ConversationDetail:
+    """Set which connectors are on in the conversation, from the next turn.
+
+    The body names the whole set. Turning on a connector with no tools
+    switched on is refused, and so is any turn-on that takes the
+    conversation past connectors.max_tools; turning connectors off always
+    works. A change clears the reported prompt count, so the meter shows an
+    estimate until the next answer (openspec mcp-connectors decision 10).
+    Links to connectors that cannot be offered now (an operator entry that
+    is gone, or a user connector while users may not have their own) are
+    left alone.
+    """
+    if not settings.mcp_enabled:
+        raise not_found()
+    conversation = await get_conversation(session, user, conversation_id)
+    connector_config = get_connector_config()
+    connect = get_mcp_connect()
+    wanted: dict[uuid.UUID, ConnectorTools] = {}
+    for connector_id in dict.fromkeys(body.connector_ids):
+        connector = await get_visible(session, connector_id, user, connector_config, settings)
+        provider = connector_tools(connector, settings, connect, config.connectors)
+        if provider is None:
+            raise not_found()
+        wanted[connector.id] = provider
+
+    linked = set(
+        (
+            await session.execute(
+                select(ConversationConnector.connector_id).where(
+                    ConversationConnector.conversation_id == conversation.id
+                )
+            )
+        ).scalars()
+    )
+    offered = {
+        provider.connector_id
+        for provider in await conversation_connector_tools(
+            session, user.id, conversation.id, settings, connect, config.connectors
+        )
+    }
+    added = [connector_id for connector_id in wanted if connector_id not in linked]
+    removed = offered - set(wanted)
+    for connector_id in added:
+        if not wanted[connector_id].definitions():
+            raise ApiError(
+                422,
+                ErrorCode.VALIDATION_ERROR,
+                f"connector_ids: {wanted[connector_id].name} has no tools switched on. "
+                "Switch some on in settings first.",
+            )
+    if added and connector_tool_count(list(wanted.values())) > config.connectors.max_tools:
+        raise too_many_tools(config.connectors.max_tools)
+
+    if added or removed:
+        if removed:
+            await session.execute(
+                delete(ConversationConnector).where(
+                    ConversationConnector.conversation_id == conversation.id,
+                    ConversationConnector.connector_id.in_(removed),
+                )
+            )
+        session.add_all(
+            ConversationConnector(conversation_id=conversation.id, connector_id=connector_id)
+            for connector_id in added
+        )
+        # The offered tools changed, so the last reported count no longer holds.
+        conversation.last_prompt_tokens = None
+        try:
+            await session.commit()
+        except IntegrityError:
+            # Another request turned the same connector on at the same time.
+            await session.rollback()
+            raise ApiError(
+                409,
+                ErrorCode.CONVERSATION_BUSY,
+                "The connectors were changed in another tab at the same time. Try again.",
+            ) from None
+    return await detail(session, user, conversation, config, settings, http_client)
 
 
 @router.post("/{conversation_id}/compaction", response_model=ConversationDetail)
@@ -414,7 +545,7 @@ async def accept_compaction(
         await session.rollback()
         await release_turn(session, conversation_id)
     await session.refresh(conversation)
-    return await detail(session, user, conversation, settings, http_client)
+    return await detail(session, user, conversation, config, settings, http_client)
 
 
 @router.delete("/{conversation_id}", status_code=204)
