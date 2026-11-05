@@ -118,3 +118,20 @@ def connector_rows(url: str) -> list:
         return (await session.execute(select(Connector))).scalars().all()
 
     return run_db(url, work)
+
+
+def point_at(url: str, connector_id: str, server_url: str) -> None:
+    """Move a user connector's stored URL straight in the database, as if
+    its server went away or came back. A PATCH of the URL would clear the
+    tool list (the new address needs a Test)."""
+    from sqlalchemy import update
+
+    from app.models import Connector
+
+    async def work(session):
+        await session.execute(
+            update(Connector).where(Connector.id == uuid.UUID(connector_id)).values(url=server_url)
+        )
+        await session.commit()
+
+    run_db(url, work)

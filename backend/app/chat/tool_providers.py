@@ -32,15 +32,15 @@ from app.connectors import (
     USER,
     auth_headers,
     connector_url,
+    current_setting,
     full_name,
     offered_tools,
     operator_entry,
-    tool_available,
-    tool_setting,
 )
 from app.crypto import DecryptionError
 from app.errors import ErrorCode
 from app.mcp_client import (
+    DATA_OPEN,
     ConnectorError,
     McpConnect,
     McpSession,
@@ -57,9 +57,21 @@ class TurnToolState:
     """What the providers of one turn share."""
 
     # Set once a connector's own content (an isError result included) went
-    # back to the model in this turn; from then on every acts tool needs a
-    # card (decision 8). Our own failure text does not set it.
+    # back to the model in this turn, or when the turn's context already holds
+    # some from earlier turns (`holds_connector_data`); from then on every
+    # acts tool needs a card (decision 8). Our own failure text does not set it.
     read_connector_data: bool = False
+
+
+def holds_connector_data(context: list[dict[str, Any]]) -> bool:
+    """True when the context passes on a connector's own content: an earlier
+    turn's connector result, or an approved action's returned data. Both carry
+    the data marking; our own failure text and the user's words do not count."""
+    return any(
+        message.get("role") in ("tool", "system")
+        and DATA_OPEN in (message.get("content") or "")
+        for message in context
+    )
 
 
 @dataclass
@@ -88,6 +100,9 @@ class ConnectorRun:
     # The failure's error code and reason ("could not be reached").
     code: str | None = None
     reason: str | None = None
+    # The call was sent and then timed out or lost its connection: it may
+    # have run on the server.
+    maybe_ran: bool = False
 
 
 class ToolProvider(Protocol):
@@ -176,7 +191,7 @@ class ConnectorTools:
             session = await self._open()
             return ConnectorRun(result=await session.call_tool(tool, arguments))
         except ConnectorError as exc:
-            return ConnectorRun(code=exc.code, reason=exc.reason)
+            return ConnectorRun(code=exc.code, reason=exc.reason, maybe_ran=exc.maybe_ran)
         except Exception:
             logger.exception("Connector %s failed while calling %s", self.name, tool)
             return ConnectorRun(code=ErrorCode.INTERNAL_ERROR, reason="failed unexpectedly")
@@ -186,7 +201,7 @@ class ConnectorTools:
         label = tool_label(name)
         run = await self.run(name, arguments)
         if run.result is None:
-            return self._failed(label, run.reason or "failed unexpectedly")
+            return self._failed(label, run.reason or "failed unexpectedly", run.maybe_ran)
         result = run.result
         # The server's own content reached the model, even an error result.
         turn.read_connector_data = True
@@ -195,11 +210,15 @@ class ConnectorTools:
             summary=f"Used {label}" + (" (it reported an error)" if result.is_error else ""),
         )
 
-    def _failed(self, label: str, reason: str) -> ToolOutcome:
+    def _failed(self, label: str, reason: str, maybe_ran: bool = False) -> ToolOutcome:
         """A connector failure as a plain tool error (decision 9)."""
         summary = f"{label} failed: the connector {reason}"
+        result = f"Error: the {self.name} connector {reason}."
+        if maybe_ran:
+            # A retry could do the same thing twice.
+            result += " It is not known whether the call ran, so do not call it again."
         return ToolOutcome(
-            result=f"Error: the {self.name} connector {reason}. Tell the user.",
+            result=f"{result} Tell the user.",
             summary=summary,
             # Stored on the tool message, so a reloaded chat still shows the failure.
             details={"failed": True, "summary": summary},
@@ -265,19 +284,23 @@ def connector_tools(
     url = connector_url(connector, config)
     if url is None:
         return None
+    entry = operator_entry(connector, config)
+    # The rules are applied against the configuration now (decision 7).
+    current = {
+        tool["name"]: current_setting(connector, tool, entry)
+        for tool in offered_tools(connector, config)
+    }
     tools = [
         tool
         for tool in offered_tools(connector, config)
-        if tool.get("available")
-        and tool_available(connector.name, tool["name"])
-        and tool_setting(connector, tool["name"])["enabled"]
+        if tool.get("available") and current[tool["name"]]["enabled"]
     ]
     return ConnectorTools(
         connector.id,
         connector.name,
         url,
         tools,
-        {tool["name"]: tool_setting(connector, tool["name"]) for tool in tools},
+        {tool["name"]: current[tool["name"]] for tool in tools},
         lambda: auth_headers(connector, config, settings),
         connect,
         limits,

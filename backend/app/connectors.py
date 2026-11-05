@@ -67,6 +67,22 @@ def url_problem(url: str) -> str | None:
     return None
 
 
+def same_origin(first: str | None, second: str | None) -> bool:
+    """True when two URLs reach the same server: scheme, host, and port."""
+    if first is None or second is None:
+        return False
+
+    def origin(url: str) -> tuple[str, str, int | None]:
+        parsed = urlparse(url)
+        port = parsed.port or {"http": 80, "https": 443}.get(parsed.scheme)
+        return parsed.scheme, (parsed.hostname or "").lower(), port
+
+    try:
+        return origin(first) == origin(second)
+    except ValueError:
+        return False
+
+
 def operator_entry(
     connector: Connector, config: ConnectorConfig
 ) -> OperatorConnector | None:
@@ -102,6 +118,19 @@ def tool_setting(connector: Connector, name: str) -> dict[str, bool]:
         "acts": bool(stored.get("acts", True)),
         "always_allow": bool(stored.get("always_allow", False)),
     }
+
+
+def current_setting(
+    connector: Connector, tool: dict[str, Any], entry: OperatorConnector | None
+) -> dict[str, bool]:
+    """The stored setting with the rules applied against the configuration
+    now, so a tool the operator no longer lists in read_only is acts at once,
+    not only after the next Test (decision 7)."""
+    return _settled(
+        tool_setting(connector, tool["name"]),
+        starts_as_reads(tool, entry),
+        tool_available(connector.name, tool["name"]),
+    )
 
 
 def _starting_setting(reads: bool) -> dict[str, bool]:

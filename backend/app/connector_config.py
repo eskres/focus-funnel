@@ -26,6 +26,8 @@ RESERVED_NAMES = frozenset({SEARCH_TOOL, PROPOSE_TOOL})
 AUTH_KINDS = ("none", "bearer", "header")
 # An HTTP header name is an RFC 7230 token.
 HEADER_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+# The auth_header column's size.
+MAX_HEADER_LENGTH = 255
 # Headers the MCP transport sets itself; an auth header may not replace them.
 TRANSPORT_HEADERS = frozenset(
     {"host", "content-type", "content-length", "accept", "mcp-session-id", "mcp-protocol-version"}
@@ -87,6 +89,9 @@ def name_problem(name: object) -> str | None:
         )
     if "__" in name:
         return "must not contain two underscores in a row"
+    if name.endswith("_"):
+        # `a_` + `x` and `a` + `_x` would both be `a___x`.
+        return "must not end with an underscore"
     if name in RESERVED_NAMES:
         return f"'{name}' is reserved for a built-in tool"
     return None
@@ -96,6 +101,8 @@ def header_problem(header: object) -> str | None:
     """Why an auth header name is refused, or None when it is fine."""
     if not isinstance(header, str) or not HEADER_NAME.fullmatch(header):
         return "must be an HTTP header name"
+    if len(header) > MAX_HEADER_LENGTH:
+        return f"must be at most {MAX_HEADER_LENGTH} characters"
     if header.lower() in TRANSPORT_HEADERS:
         return f"'{header}' is set by the connection itself"
     return None

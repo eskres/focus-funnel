@@ -27,6 +27,8 @@ function statusLine(action: Action): string {
       return action.errorCode === "tool_error" ? "Ran, and the tool reported an error:" : "Done.";
     case "failed":
       return "Did not run.";
+    case "unknown":
+      return "Sent, but it is not known whether it ran. Check before trying again.";
     case "declined":
       return "Declined. Nothing was sent.";
     case "expired":
@@ -38,7 +40,8 @@ function statusLine(action: Action): string {
  * A connector tool call that needs the user's approval: the connector, the
  * tool, and its arguments, with Approve and Decline. Approving calls the
  * server once; declining calls nothing. A failed call can be approved again
- * until the next message expires it.
+ * until the next message expires it; one whose outcome is unknown (it may have
+ * run) cannot.
  */
 export function ActionCard({
   conversationId,
@@ -117,11 +120,15 @@ export function ActionCard({
         role="status"
         className={cn(
           "text-xs",
-          action.status === "failed" ? "text-destructive" : "text-muted-foreground",
+          action.status === "failed" || action.status === "unknown"
+            ? "text-destructive"
+            : "text-muted-foreground",
         )}
       >
         {statusLine(action)}
-        {action.status === "failed" && action.result && ` ${action.result}`}
+        {(action.status === "failed" || action.status === "unknown") &&
+          action.result &&
+          ` ${action.result}`}
       </p>
       {action.status === "done" && action.result && (
         <pre className="max-h-48 overflow-auto rounded bg-muted p-2 font-mono text-[11px] whitespace-pre-wrap">

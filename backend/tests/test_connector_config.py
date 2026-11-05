@@ -108,7 +108,7 @@ def test_an_empty_file_has_no_connectors(tmp_path, data):
 
 @pytest.mark.parametrize(
     "name",
-    ["Calendar", "1cal", "cal-endar", "cal endar", "a" * 25, "", 7, "cal__endar"],
+    ["Calendar", "1cal", "cal-endar", "cal endar", "a" * 25, "", 7, "cal__endar", "cal_"],
 )
 def test_a_bad_name_fails_naming_the_connector_and_field(tmp_path, name):
     with pytest.raises(ConnectorConfigError, match=r"Connector .* 'name'") as error:
@@ -193,6 +193,7 @@ def test_auth_without_an_environment_variable_fails(tmp_path):
         ("Mcp-Session-Id", "is set by the connection itself"),
         ("content-type", "is set by the connection itself"),
         ("Host", "is set by the connection itself"),
+        ("X" * 256, "must be at most 255 characters"),
     ],
 )
 def test_a_bad_auth_header_fails_naming_the_connector_and_field(tmp_path, header, problem):
@@ -274,7 +275,13 @@ def test_a_missing_file_fails(tmp_path):
 
 def test_the_name_and_header_checks_are_reusable():
     assert name_problem("calendar") is None
+    assert name_problem("my_calendar") is None
     assert name_problem("search_thoughts")
+    # A trailing underscore would make `cal_` + `x` and `cal` + `_x` the same
+    # tool name (decision 3).
+    assert name_problem("cal_") == "must not end with an underscore"
+    assert header_problem("X" * 255) is None
+    assert header_problem("X" * 256) == "must be at most 255 characters"
     assert header_problem("X-Api-Key") is None
     assert header_problem("Authorization") is None
     assert header_problem("Mcp-Protocol-Version")

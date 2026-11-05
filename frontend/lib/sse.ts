@@ -36,14 +36,30 @@ export type Proposal = {
 };
 
 /** Where an action is: waiting, running, or how it ended. */
-export type ActionStatus = "pending" | "running" | "done" | "failed" | "declined" | "expired";
+export type ActionStatus =
+  | "pending"
+  | "running"
+  | "done"
+  | "failed"
+  | "unknown"
+  | "declined"
+  | "expired";
 
-const ACTION_STATUSES: ActionStatus[] = ["pending", "running", "done", "failed", "declined", "expired"];
+const ACTION_STATUSES: ActionStatus[] = [
+  "pending",
+  "running",
+  "done",
+  "failed",
+  "unknown",
+  "declined",
+  "expired",
+];
 
 /**
  * A connector tool call that waits for, or had, the user's approval: its card.
  * `position` is its tool message's. `result` is what the server returned when
- * done, or why it did not run when failed. `errorCode` is the connector failure
+ * done, why it did not run when failed, or why there is no outcome when unknown
+ * (the call was sent, then timed out or was interrupted, so it may have run). `errorCode` is the connector failure
  * code, or `tool_error` when the server ran the tool and reported an error.
  */
 export type Action = {

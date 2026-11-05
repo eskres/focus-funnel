@@ -32,15 +32,16 @@ from app.connectors import (
     USER,
     auth_headers,
     connector_url,
+    current_setting,
     now,
     offered_tools,
     operator_entry,
     refresh_availability,
+    same_origin,
     starts_as_reads,
     store_tools,
     sync_operator_rows,
     tool_available,
-    tool_setting,
     url_problem,
     visible_connectors,
 )
@@ -173,7 +174,7 @@ def connector_out(connector: Connector, config: ConnectorConfig) -> ConnectorOut
     tools = []
     for tool in offered_tools(connector, config):
         available = tool_available(connector.name, tool["name"])
-        setting = tool_setting(connector, tool["name"])
+        setting = current_setting(connector, tool, entry)
         tools.append(
             ConnectorToolOut(
                 name=tool["name"],
@@ -405,12 +406,29 @@ async def change_connector(
     value_kept = kind == connector.auth_kind and connector.auth_ciphertext is not None
     if {"auth_kind", "auth_header", "auth_value"} & fields:
         _check_auth(kind, header, body.auth_value, value_kept=value_kept)
+    url_changed = "url" in fields and body.url != connector.url
+    if (
+        url_changed
+        and kind != "none"
+        and not body.auth_value
+        and not same_origin(body.url, connector.url)
+    ):
+        # The stored value is never sent to another server unless the user
+        # enters it again: it can't be read back, so it can't be redirected.
+        raise _invalid(
+            "auth_value", "enter it again: a stored value is not sent to a new server"
+        )
 
     if "name" in fields and body.name != connector.name:
         connector.name = body.name
         refresh_availability(connector, config)
-    if "url" in fields:
+    if url_changed:
         connector.url = body.url
+        # Another server's tools are not this one's: the list, the switches,
+        # and the badges wait for a Test of the new address.
+        connector.tools = []
+        connector.tool_settings = {}
+        connector.tools_listed_at = None
     connector.auth_kind = kind
     connector.auth_header = header if kind == "header" else None
     if kind == "none":
@@ -494,8 +512,9 @@ async def change_tool(
     )
     if stored is None:
         raise not_found()
-    setting = tool_setting(connector, tool)
-    reads_allowed = starts_as_reads(stored, operator_entry(connector, config))
+    entry = operator_entry(connector, config)
+    setting = current_setting(connector, stored, entry)
+    reads_allowed = starts_as_reads(stored, entry)
     if body.enabled and not tool_available(connector.name, tool):
         raise _invalid(
             "enabled",

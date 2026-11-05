@@ -26,7 +26,7 @@ from tests.chat_helpers import (
     text_chunks,
     tool_call_chunks,
 )
-from tests.connector_helpers import add, connectors_app, link, write_config
+from tests.connector_helpers import add, connectors_app, link, point_at, write_config
 from tests.mcp_helpers import free_port
 from tests.sse_helpers import parse_events
 
@@ -401,7 +401,9 @@ def real_connector(client, headers, server, url_db, *tools, **auth):
     return connector_id, conversation_id
 
 
-def assert_failed_but_finished(response, fake_llm, reason: str, tool: str = "list_events"):
+def assert_failed_but_finished(
+    response, fake_llm, reason: str, tool: str = "list_events", maybe_ran: bool = False
+):
     events = parse_events(response.text)
     assert [name for name, _ in events][-1] == "done"
     assert not events_of(response, "error")
@@ -410,7 +412,8 @@ def assert_failed_but_finished(response, fake_llm, reason: str, tool: str = "lis
     assert end["summary"] == f"calendar: {tool} failed: the connector {reason}"
     result = fake_llm.chat_requests[1]["messages"][-1]
     assert result["role"] == "tool"
-    assert result["content"] == f"Error: the calendar connector {reason}. Tell the user."
+    unknown = " It is not known whether the call ran, so do not call it again." if maybe_ran else ""
+    assert result["content"] == f"Error: the calendar connector {reason}.{unknown} Tell the user."
     assert "".join(e["text"] for e in events_of(response, "delta")) == "The calendar failed."
 
 
@@ -420,10 +423,7 @@ def test_an_unreachable_server_is_a_tool_error(
     connector_id, conversation_id = real_connector(
         quick, alice, real_server, test_database_url, "list_events"
     )
-    closed = f"http://127.0.0.1:{free_port()}/mcp"
-    assert quick.patch(
-        f"/api/connectors/{connector_id}", headers=alice, json={"url": closed}
-    ).status_code == 200
+    point_at(test_database_url, connector_id, f"http://127.0.0.1:{free_port()}/mcp")
     fake_llm.queue(
         tool_call_chunks("calendar__list_events", '{"text": "x"}'),
         text_chunks("The calendar failed."),
@@ -472,8 +472,9 @@ def test_a_timeout_is_a_tool_error(quick, alice, real_server, fake_llm, test_dat
 
     response = chat(quick, alice, "what is on?", conversation_id)
 
+    # The call was sent: it may have run, so the model is told not to retry.
     assert_failed_but_finished(
-        response, fake_llm, "did not answer within 0.5 seconds", tool="slow"
+        response, fake_llm, "did not answer within 0.5 seconds", tool="slow", maybe_ran=True
     )
 
 
