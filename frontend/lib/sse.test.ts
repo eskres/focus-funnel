@@ -124,6 +124,43 @@ describe("parseSse", () => {
     expect(events).toEqual([{ type: "error", code: "provider_key_rejected", message: "No." }]);
   });
 
+  it("parses an action event into its card, and skips one of the wrong shape", async () => {
+    const action = {
+      id: "a1",
+      position: 2,
+      connector_id: "k1",
+      connector: "calendar",
+      tool: "create_event",
+      title: null,
+      arguments: { summary: "Dentist" },
+      status: "pending",
+      result: null,
+      error_code: null,
+    };
+    const events = await collect(
+      streamOf(
+        `event: action\ndata: ${JSON.stringify(action)}\n\n`,
+        `event: action\ndata: ${JSON.stringify({ ...action, status: "unknown" })}\n\n`,
+      ),
+    );
+    expect(events).toEqual([
+      {
+        type: "action",
+        action: {
+          id: "a1",
+          position: 2,
+          connector: "calendar",
+          tool: "create_event",
+          title: null,
+          arguments: { summary: "Dentist" },
+          status: "pending",
+          result: null,
+          errorCode: null,
+        },
+      },
+    ]);
+  });
+
   it("leaves out a usage event's context length when the model has none", async () => {
     const events = await collect(
       streamOf('event: usage\ndata: {"prompt_tokens":1,"completion_tokens":2}\n\n'),

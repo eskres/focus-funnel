@@ -1,7 +1,14 @@
 // Typed client for the stored conversations (`/api/conversations`).
 import { apiFetch } from "@/lib/api";
 import type { When } from "@/lib/dates";
-import { toProposal, toSources, type Proposal, type Source } from "@/lib/sse";
+import {
+  toAction,
+  toProposal,
+  toSources,
+  type Action,
+  type Proposal,
+  type Source,
+} from "@/lib/sse";
 import { browserTimeZone } from "@/lib/time-zone";
 
 export type ConversationSummary = {
@@ -31,8 +38,11 @@ export type StoredMessage = {
   status: "complete" | "cut" | "failed";
   error_code: string | null;
   compacted: boolean;
-  /** `{proposal_id}` on a propose_thought result, `{sources}` on a search. */
-  details: { proposal_id?: string; sources?: unknown } | null;
+  /**
+   * `{proposal_id}` on a propose_thought result, `{sources}` on a search,
+   * `{action_id}` on a connector call that waits for approval.
+   */
+  details: { proposal_id?: string; sources?: unknown; action_id?: string } | null;
   created_at: string;
 };
 
@@ -60,6 +70,8 @@ export type ConversationDetail = ConversationSummary & {
    * message at `after_position`. Follow it with `followTurn`.
    */
   turn?: RunningTurn | null;
+  /** Every connector action of the conversation, for its card (none while connectors are off). */
+  actions?: unknown[];
 };
 
 export type RunningTurn = { after_position: number };
@@ -69,6 +81,13 @@ export function storedProposals(conversation: ConversationDetail): Proposal[] {
   return (conversation.proposals ?? [])
     .map(toProposal)
     .filter((proposal): proposal is Proposal => proposal !== null);
+}
+
+/** The stored actions, skipping any that does not fit. */
+export function storedActions(conversation: ConversationDetail): Action[] {
+  return (conversation.actions ?? [])
+    .map(toAction)
+    .filter((action): action is Action => action !== null);
 }
 
 export type ConversationList = {
@@ -143,6 +162,24 @@ export function confirmProposal(
     `${BASE}/${encodeURIComponent(id)}/proposals/${encodeURIComponent(proposalId)}/confirm`,
     { method: "POST", body: JSON.stringify(card) },
   );
+}
+
+/**
+ * Approves or declines an action. A repeated approval answers the same
+ * outcome; an expired action throws `action_expired`.
+ */
+export async function decideAction(
+  id: string,
+  actionId: string,
+  decision: "approve" | "decline",
+): Promise<Action> {
+  const answer = await apiFetch<unknown>(
+    `${BASE}/${encodeURIComponent(id)}/actions/${encodeURIComponent(actionId)}`,
+    { method: "POST", body: JSON.stringify({ decision }) },
+  );
+  const action = toAction(answer);
+  if (!action) throw new Error("The server's answer about the action could not be read.");
+  return action;
 }
 
 /**

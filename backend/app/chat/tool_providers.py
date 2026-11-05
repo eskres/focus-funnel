@@ -22,6 +22,7 @@ from typing import Any, Protocol
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat.actions import ActionTarget
 from app.chat.config import ConnectorLimits
 from app.chat.sse import Event
 from app.config import Settings
@@ -39,7 +40,13 @@ from app.connectors import (
 )
 from app.crypto import DecryptionError
 from app.errors import ErrorCode
-from app.mcp_client import ConnectorError, McpConnect, McpSession, result_for_model
+from app.mcp_client import (
+    ConnectorError,
+    McpConnect,
+    McpSession,
+    ToolResult,
+    result_for_model,
+)
 from app.models import Connector, ConversationConnector
 
 logger = logging.getLogger(__name__)
@@ -80,6 +87,16 @@ class ToolOutcome:
     failed: bool = False
 
 
+@dataclass
+class ConnectorRun:
+    """One call to a connector's server: its result, or why it failed."""
+
+    result: ToolResult | None = None
+    # The failure's error code and reason ("could not be reached").
+    code: str | None = None
+    reason: str | None = None
+
+
 class ToolProvider(Protocol):
     def definitions(self) -> list[dict[str, Any]]:
         """OpenAI-shaped tool definitions, as the model sees them."""
@@ -89,6 +106,10 @@ class ToolProvider(Protocol):
 
     def needs_approval(self, name: str, turn: TurnToolState) -> bool:
         """True when a call must wait for the user's approval (decision 7)."""
+        ...
+
+    def action_target(self, name: str) -> ActionTarget:
+        """What the card names, for a call that needs approval."""
         ...
 
     async def call(self, name: str, arguments: dict[str, Any], turn: TurnToolState) -> ToolOutcome:
@@ -114,6 +135,7 @@ class ConnectorTools:
 
     def __init__(
         self,
+        connector_id: uuid.UUID,
         name: str,
         url: str,
         tools: list[dict[str, Any]],
@@ -122,6 +144,7 @@ class ConnectorTools:
         connect: McpConnect,
         limits: ConnectorLimits,
     ):
+        self.connector_id = connector_id
         self.name = name
         self._url = url
         # Full name -> stored tool, for the tools offered in this turn.
@@ -148,17 +171,30 @@ class ConnectorTools:
             return False
         return not setting["always_allow"] or turn.read_connector_data
 
+    def action_target(self, name: str) -> ActionTarget:
+        """What the card for a call to this tool names (decision 7)."""
+        tool = self._tools[name]
+        return ActionTarget(self.connector_id, self.name, tool["name"], tool.get("title"))
+
+    async def run(self, name: str, arguments: dict[str, Any]) -> ConnectorRun:
+        """Call the server's tool. A failure is returned, never raised."""
+        tool = self._tools[name]["name"]
+        try:
+            session = await self._open()
+            return ConnectorRun(result=await session.call_tool(tool, arguments))
+        except ConnectorError as exc:
+            return ConnectorRun(code=exc.code, reason=exc.reason)
+        except Exception:
+            logger.exception("Connector %s failed while calling %s", self.name, tool)
+            return ConnectorRun(code=ErrorCode.INTERNAL_ERROR, reason="failed unexpectedly")
+
     async def call(self, name: str, arguments: dict[str, Any], turn: TurnToolState) -> ToolOutcome:
         tool = self._tools[name]["name"]
         label = tool_label(name)
-        try:
-            session = await self._open()
-            result = await session.call_tool(tool, arguments)
-        except ConnectorError as exc:
-            return self._failed(label, exc.reason)
-        except Exception:
-            logger.exception("Connector %s failed while calling %s", self.name, tool)
-            return self._failed(label, "failed unexpectedly")
+        run = await self.run(name, arguments)
+        if run.result is None:
+            return self._failed(label, run.reason or "failed unexpectedly")
+        result = run.result
         # The server's own content reached the model, even an error result.
         turn.read_connector_data = True
         return ToolOutcome(
@@ -241,6 +277,7 @@ def connector_tools(
         and tool_setting(connector, tool["name"])["enabled"]
     ]
     return ConnectorTools(
+        connector.id,
         connector.name,
         url,
         tools,

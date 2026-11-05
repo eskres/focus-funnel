@@ -77,7 +77,10 @@ class ConversationConnector(Base):
 class ToolAction(Base):
     """One call to an acts tool that waits for, or had, the user's approval.
 
-    position is the tool message's position, tool the unprefixed tool name.
+    position is the tool message's position, tool the unprefixed tool name,
+    and connector_name the connector's name when the model called it, so the
+    card and the next turn's note keep the name the model used after a
+    rename or delete.
     status is pending, running, done, failed, declined, or expired. result is
     the capped text the server returned, without the data marking.
     connector_id is cleared when the connector is deleted, so the card stays.
@@ -96,6 +99,7 @@ class ToolAction(Base):
         Uuid, ForeignKey("connectors.id", ondelete="SET NULL"), nullable=True, index=True
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False)
+    connector_name: Mapped[str] = mapped_column(String(64), nullable=False)
     tool: Mapped[str] = mapped_column(String(255), nullable=False)
     arguments: Mapped[dict[str, Any]] = mapped_column(JsonType, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")

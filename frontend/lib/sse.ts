@@ -4,6 +4,9 @@
 //   event: tool          data: {"name":"...","phase":"start"|"end","summary":"...","sources":[...],"failed":true}
 //                        (a connector tool is named "<connector>__<tool>"; failed marks a connector failure)
 //   event: proposal      data: {"id":"...","position":2,"parts":[{"title","summary","tags","category","when","when_choices","thought_id","saved_title","deleted","add_to","based_on","target","similar","added","undone"}],"replaced_by":null,"replaces":"..."|null}
+//   event: action        data: {"id":"...","position":2,"connector_id":"..."|null,"connector":"calendar","tool":"create_event",
+//                              "title":"..."|null,"arguments":{...},"status":"pending","result":null,"error_code":null}
+//                        (a connector tool call waiting for the user's approval: its card)
 //   event: delta         data: {"text":"..."}
 //   event: usage         data: {"prompt_tokens":1,"completion_tokens":1,"context_length":1}
 //   event: notice        data: {"kind":"compact_suggested"|"usage_warning", ...}
@@ -68,6 +71,29 @@ export type Proposal = {
   replacedBy: string | null;
 };
 
+/** Where an action is: waiting, running, or how it ended. */
+export type ActionStatus = "pending" | "running" | "done" | "failed" | "declined" | "expired";
+
+const ACTION_STATUSES: ActionStatus[] = ["pending", "running", "done", "failed", "declined", "expired"];
+
+/**
+ * A connector tool call that waits for, or had, the user's approval: its card.
+ * `position` is its tool message's. `result` is what the server returned when
+ * done, or why it did not run when failed. `errorCode` is the connector failure
+ * code, or `tool_error` when the server ran the tool and reported an error.
+ */
+export type Action = {
+  id: string;
+  position: number;
+  connector: string;
+  tool: string;
+  title: string | null;
+  arguments: Record<string, unknown>;
+  status: ActionStatus;
+  result: string | null;
+  errorCode: string | null;
+};
+
 /** A thought a search showed the model, listed under the answer. */
 export type Source = { id: string; title: string; createdAt: string; tags: string[] };
 
@@ -86,6 +112,7 @@ export type SseEvent =
     }
   /** `replaces`: the earlier proposal whose cards now show as replaced. */
   | ({ type: "proposal"; replaces: string | null } & Proposal)
+  | { type: "action"; action: Action }
   | { type: "delta"; text: string }
   | { type: "usage"; promptTokens: number; completionTokens: number; contextLength?: number }
   | { type: "notice"; kind: string; data: Record<string, unknown> }
@@ -206,6 +233,32 @@ export function toProposal(value: unknown): Proposal | null {
   };
 }
 
+/** An action as the server sends it: in the event, the stored conversation, and the approval's answer. */
+export function toAction(value: unknown): Action | null {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.position !== "number" ||
+    typeof value.connector !== "string" ||
+    typeof value.tool !== "string" ||
+    !isRecord(value.arguments) ||
+    !ACTION_STATUSES.includes(value.status as ActionStatus)
+  ) {
+    return null;
+  }
+  return {
+    id: value.id,
+    position: value.position,
+    connector: value.connector,
+    tool: value.tool,
+    title: typeof value.title === "string" ? value.title : null,
+    arguments: value.arguments,
+    status: value.status as ActionStatus,
+    result: typeof value.result === "string" ? value.result : null,
+    errorCode: typeof value.error_code === "string" ? value.error_code : null,
+  };
+}
+
 function toSource(value: unknown): Source | null {
   return isRecord(value) &&
     typeof value.id === "string" &&
@@ -269,6 +322,10 @@ function toEvent(name: string, data: string): SseEvent | null {
             replaces: typeof payload.replaces === "string" ? payload.replaces : null,
           }
         : null;
+    }
+    case "action": {
+      const action = toAction(payload);
+      return action ? { type: "action", action } : null;
     }
     case "delta":
       return typeof payload.text === "string" ? { type: "delta", text: payload.text } : null;

@@ -96,6 +96,24 @@ export const proposalEvent = (
 ) =>
   `event: proposal\ndata: ${JSON.stringify({ ...wireProposal(id, parts, position), replaces })}\n\n`;
 
+/** A connector action as the server sends it: in the event, on the conversation, and from the approval route. */
+export const wireAction = (id: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  position: 2,
+  connector_id: "k1",
+  connector: "calendar",
+  tool: "create_event",
+  title: "Create event",
+  arguments: { summary: "Dentist", start: "2026-11-06T09:00", attendees: ["sam@example.com"] },
+  status: "pending",
+  result: null,
+  error_code: null,
+  ...extra,
+});
+
+export const actionEvent = (id: string, extra: Record<string, unknown> = {}) =>
+  `event: action\ndata: ${JSON.stringify(wireAction(id, extra))}\n\n`;
+
 /** A source as the server sends it, in the tool event and on a stored tool message. */
 export type WireSource = { id: string; title: string; created_at: string; tags: string[] };
 

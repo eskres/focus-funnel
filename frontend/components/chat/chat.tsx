@@ -44,6 +44,7 @@ import {
   acceptCompaction,
   deleteConversation,
   getConversation,
+  storedActions,
   storedProposals,
   storedSources,
   type ContextMeter as StoredMeter,
@@ -59,7 +60,7 @@ import {
   type UsageWarning,
 } from "@/lib/models";
 import { redirectToLogin } from "@/lib/redirect-to-login";
-import type { CompactModel, Proposal, SseEvent } from "@/lib/sse";
+import type { Action, CompactModel, Proposal, SseEvent } from "@/lib/sse";
 
 // How many times one answer is followed again after its stream breaks,
 // before the chat says it was cut short.
@@ -82,15 +83,17 @@ function endsAnswered(stored: StoredMessage[]): boolean {
 
 /**
  * Rebuilds the chat items from stored messages: one answer per user message,
- * with the proposal cards and sources it showed.
+ * with the proposal cards, action cards, and sources it showed.
  */
 function fromStored(
   stored: StoredMessage[],
   proposals: Proposal[],
   nextId: () => number,
+  actions: Action[] = [],
 ): ChatMessage[] {
   const items: ChatMessage[] = [];
   const byId = new Map(proposals.map((proposal) => [proposal.id, proposal]));
+  const actionsById = new Map(actions.map((action) => [action.id, action]));
   // The answer each stored position belongs to, for proposals no tool message names.
   const answerAt: { position: number; answer: AnswerMessage }[] = [];
   let answer: AnswerMessage | null = null;
@@ -106,6 +109,8 @@ function fromStored(
         answer.proposals = [...(answer.proposals ?? []), proposal];
         byId.delete(proposal.id);
       }
+      const action = actionsById.get(message.details?.action_id ?? "");
+      if (action) answer.actions = [...(answer.actions ?? []), action];
       answerAt.push({ position: message.position, answer });
       continue;
     }
@@ -312,6 +317,33 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
     );
   }
 
+  /** Replace an action card's state, wherever its answer is. */
+  function changeAction(action: Action) {
+    setMessages((current) =>
+      current.map((m) =>
+        m.role === "assistant" && m.actions?.some((a) => a.id === action.id)
+          ? { ...m, actions: m.actions.map((a) => (a.id === action.id ? action : a)) }
+          : m,
+      ),
+    );
+  }
+
+  /** A turn started: the server expired every card still waiting. */
+  function expireOpenActions() {
+    setMessages((current) =>
+      current.map((m) =>
+        m.role === "assistant" && m.actions?.some((a) => a.status === "pending" || a.status === "failed")
+          ? {
+              ...m,
+              actions: m.actions.map((a) =>
+                a.status === "pending" || a.status === "failed" ? { ...a, status: "expired" } : a,
+              ),
+            }
+          : m,
+      ),
+    );
+  }
+
   function adopt(id: string) {
     currentId.current = id;
     setConversationId(id);
@@ -381,6 +413,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
       text: "",
       tools: [],
       proposals: undefined,
+      actions: undefined,
       sources: undefined,
       error: undefined,
       unreached: undefined,
@@ -446,7 +479,14 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
   async function acceptDraft(summary: string, throughPosition: number) {
     if (!conversationId) return;
     const detail = await acceptCompaction(conversationId, summary, throughPosition);
-    setMessages(fromStored(detail.messages, storedProposals(detail), () => nextId.current++));
+    setMessages(
+      fromStored(
+        detail.messages,
+        storedProposals(detail),
+        () => nextId.current++,
+        storedActions(detail),
+      ),
+    );
     setMeter(toMeter(detail.context));
     setCompactSuggested(false);
     setCompactState(null);
@@ -492,7 +532,11 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
     const proposals = storedProposals(conversation).filter(
       (p) => after === undefined || p.position <= after,
     );
-    const items = fromStored(stored, proposals, () => nextId.current++);
+    // Its action cards too: the replay sends them again.
+    const actions = storedActions(conversation).filter(
+      (a) => after === undefined || a.position <= after,
+    );
+    const items = fromStored(stored, proposals, () => nextId.current++, actions);
     setMeter(toMeter(conversation.context));
     if (after === undefined) {
       setMessages(items);
@@ -547,6 +591,9 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         );
         return false;
       }
+      case "action":
+        updateAnswer(answerId, (a) => ({ ...a, actions: [...(a.actions ?? []), event.action] }));
+        return false;
       case "delta":
         updateAnswer(answerId, (a) => ({ ...a, text: a.text + event.text }));
         return false;
@@ -596,6 +643,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
           text: "",
           tools: [],
           proposals: undefined,
+          actions: undefined,
           sources: undefined,
           error: undefined,
         }));
@@ -681,6 +729,22 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
     }
   }
 
+  /**
+   * The events of a turn this chat sends. Its first event means the turn
+   * started, so cards from earlier answers can no longer be approved: the
+   * server expired them.
+   */
+  async function* startingTurn(events: AsyncIterable<SseEvent>): AsyncIterable<SseEvent> {
+    let started = false;
+    for await (const event of events) {
+      if (!started) {
+        started = true;
+        expireOpenActions();
+      }
+      yield event;
+    }
+  }
+
   async function runAnswer(answerId: number, message: string) {
     setAnswering(true);
     const controller = new AbortController();
@@ -694,7 +758,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         adopt,
       );
       // Set when the stream ends with `done` or `error`.
-      const finished = await readAnswer(answerId, events);
+      const finished = await readAnswer(answerId, startingTurn(events));
       if (sentChoice) {
         setOwn(sentChoice);
         setChoiceChanged(false);
@@ -751,7 +815,11 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         ) : (
           <MessageList
             conversationId={conversationId}
-            messages={messages} canAct={!answering} onRetry={retry} />
+            messages={messages}
+            canAct={!answering}
+            onRetry={retry}
+            onActionChange={changeAction}
+          />
         )}
       </div>
       <div className="border-t p-4">

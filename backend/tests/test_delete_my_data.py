@@ -88,6 +88,7 @@ def add_proposal_category_and_addition(url, user_id):
                 user_id=conversation.user_id,
                 connector_id=connector.id,
                 position=2,
+                connector_name="calendar",
                 tool="create_event",
                 arguments={},
             )

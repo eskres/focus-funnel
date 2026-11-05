@@ -27,7 +27,9 @@ export type ApiErrorCode =
   | "demo_session_expired"
   | "demo_full"
   | "rate_limited"
-  | "thought_changed";
+  | "thought_changed"
+  | "action_expired"
+  | "action_running";
 
 export class ApiError extends Error {
   readonly code: string;
@@ -71,6 +73,8 @@ export class DemoFullError extends ApiError {}
 export class RateLimitedError extends ApiError {}
 /** The thought changed since the card or sheet read it; `details.thought` is how it is now. */
 export class ThoughtChangedError extends ApiError {}
+export class ActionExpiredError extends ApiError {}
+export class ActionRunningError extends ApiError {}
 
 /** Sent on window when a call finds that the demo session has ended. */
 export const DEMO_EXPIRED_EVENT = "ff:demo-session-expired";
@@ -101,6 +105,8 @@ const errorClasses: Record<ApiErrorCode, typeof ApiError> = {
   demo_full: DemoFullError,
   rate_limited: RateLimitedError,
   thought_changed: ThoughtChangedError,
+  action_expired: ActionExpiredError,
+  action_running: ActionRunningError,
 };
 
 function isKnownCode(code: string): code is ApiErrorCode {

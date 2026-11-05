@@ -153,6 +153,7 @@ async def test_connectors_and_actions_are_scoped_to_their_owner(sessions, alice_
             user_id=alice.id,
             connector_id=connector.id,
             position=1,
+            connector_name="calendar",
             tool="create_event",
             arguments={},
         )

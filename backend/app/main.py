@@ -15,6 +15,7 @@ from app.errors import register_error_handlers
 from app.log_masking import install_log_masking
 from app.provider_config import get_providers_config
 from app.routers import (
+    actions,
     chat,
     connectors,
     conversations,
@@ -83,6 +84,7 @@ app.include_router(settings_models.router)
 app.include_router(settings_categories.router)
 app.include_router(conversations.router)
 app.include_router(connectors.router)
+app.include_router(actions.router)
 app.include_router(chat.router)
 app.include_router(thoughts.router)
 app.include_router(usage.router)

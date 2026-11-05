@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.chat import running
+from app.chat.actions import action_payload, action_titles, list_actions
 from app.chat.compaction import store_compaction
 from app.chat.config import ChatConfig, get_chat_config
 from app.chat.context import meter
@@ -41,6 +42,7 @@ from app.db import get_session
 from app.errors import ApiError, ErrorCode
 from app.models import Conversation, Proposal, User
 from app.providers import get_provider_http_client
+from app.routers.actions import ActionOut
 from app.thoughts.additions import (
     add_to_thought,
     lock_thought,
@@ -147,6 +149,8 @@ class ConversationDetail(ConversationSummary):
     proposals: list[ProposalOut]
     # Set while a chat turn runs; a /compact draft is not a running turn.
     turn: TurnOut | None
+    # Connector actions, for their cards (always empty while MCP_ENABLED is off).
+    actions: list[ActionOut] = []
 
 
 class CompactionIn(BaseModel):
@@ -241,10 +245,15 @@ async def detail(
     # One lookup gives the refs, the seen-thoughts note, and the saved titles.
     refs = await conversation_refs(session, user.id, messages, proposals)
     lookup = await lookup_from_refs(session, user, refs, proposals)
+    actions = await list_actions(session, conversation.id) if settings.mcp_enabled else []
     gauge = meter(
         conversation,
         build_context(
-            messages, held, seen_note=refs.note(get_chat_config().filing), refs=refs.by_id()
+            messages,
+            held,
+            seen_note=refs.note(get_chat_config().filing),
+            refs=refs.by_id(),
+            actions=actions,
         ),
         info.context_length if info is not None else None,
     )
@@ -273,6 +282,10 @@ async def detail(
         ],
         proposals=[ProposalOut(**proposal_payload(p, lookup)) for p in proposals],
         turn=turn,
+        actions=[
+            ActionOut(**action_payload(a, title))
+            for a, title in zip(actions, await action_titles(session, actions), strict=True)
+        ],
     )
 
 

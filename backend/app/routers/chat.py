@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth import get_current_user
 from app.chat import running
+from app.chat.actions import expire_actions, list_actions
 from app.chat.commands import parse_message
 from app.chat.compaction import (
     compaction_request,
@@ -187,6 +188,10 @@ async def chat(
         conversation.archived_at = None
         conversation.last_activity_at = now()
         await _store_user_message(session, conversation, body.message)
+        if settings.mcp_enabled and not is_new:
+            # The turn starts: cards still waiting for approval expire with it
+            # (decision 7).
+            await expire_actions(session, conversation.id)
         await session.commit()
 
         await _ensure_model(session, user, conversation)
@@ -212,6 +217,7 @@ async def chat(
             seen_note=refs.note(config.filing, zone=zone),
             refs=refs.by_id(),
             connectors=bool(connectors),
+            actions=await list_actions(session, conversation.id) if settings.mcp_enabled else None,
         )
         filing = await filing_for(session, user, config)
         info = await model_info(

@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { ActionCard } from "@/components/chat/action-card";
 import { ChatError } from "@/components/chat/chat-error";
 import { ProposalGroup } from "@/components/chat/proposal-card";
 import { SourcesList } from "@/components/chat/sources-list";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { ApiError } from "@/lib/api";
-import type { Proposal, Source } from "@/lib/sse";
+import type { Action, Proposal, Source } from "@/lib/sse";
 import { useProposalAnchor } from "@/lib/thought-link";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +30,8 @@ export type AnswerMessage = {
   tools: ToolIndication[];
   /** The proposals the model made in this answer, with their saved state. */
   proposals?: Proposal[];
+  /** The connector actions this answer is waiting on, or had approved or declined. */
+  actions?: Action[];
   /** The thoughts this answer's searches returned, each once. */
   sources?: Source[];
   status: "streaming" | "done" | "failed" | "cut";
@@ -74,12 +77,15 @@ export function MessageList({
   messages,
   canAct,
   onRetry,
+  onActionChange = () => undefined,
 }: {
   conversationId: string | undefined;
   messages: ChatMessage[];
   /** False while an answer is arriving, so no second answer can start. */
   canAct: boolean;
   onRetry: (answer: AnswerMessage) => void;
+  /** An action card was approved, declined, or found expired. */
+  onActionChange?: (action: Action) => void;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLOListElement>(null);
@@ -157,6 +163,7 @@ export function MessageList({
               answer={message}
               canAct={canAct}
               onRetry={onRetry}
+              onActionChange={onActionChange}
               marked={marked}
             />
           ),
@@ -172,12 +179,14 @@ function Answer({
   answer,
   canAct,
   onRetry,
+  onActionChange,
   marked,
 }: {
   conversationId: string | undefined;
   answer: AnswerMessage;
   canAct: boolean;
   onRetry: (answer: AnswerMessage) => void;
+  onActionChange: (action: Action) => void;
   /** The proposal to ring, if it is one of this answer's. */
   marked: string | null;
 }) {
@@ -207,6 +216,15 @@ function Answer({
           proposal={proposal}
           anchor
           marked={proposal.id === marked}
+        />
+      ))}
+      {answer.actions?.map((action) => (
+        <ActionCard
+          key={action.id}
+          conversationId={conversationId}
+          action={action}
+          canAct={canAct}
+          onChange={onActionChange}
         />
       ))}
       {text && <p className="max-w-[85%] text-sm whitespace-pre-wrap">{text}</p>}
