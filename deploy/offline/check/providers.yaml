@@ -1,0 +1,12 @@
+# The offline check's providers file (scripts/offline-check.sh): one keyless
+# preset, the stand-in model server on the check's internal network.
+providers:
+  stub:
+    label: Offline check stand-in
+    base_url: http://stub-provider:8080/v1/
+    key_url: https://example.invalid/no-key-needed
+    notice: The offline check's stand-in model server. Nothing leaves the compose network.
+    key_required: false
+    capabilities:
+      model_list: { prices: false, context_length: false, features: false }
+      stream_usage: final_chunk

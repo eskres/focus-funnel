@@ -260,7 +260,7 @@ None of these needs a setting in the overlay.
 
 `deploy/offline/providers.yaml` holds one preset, `ollama`: `base_url: http://ollama:11434/v1/`, `key_required: false`, `key_url: https://ollama.com/library` (decision 12), a notice that prompts stay on the operator's server and that models are pulled as `docs/offline.md` says, all `model_list` capabilities false, and the `stream_usage` task 1.2 measures. It is a preset rather than the custom provider because `EMBEDDING_PROVIDER` cannot be `custom`, and because a preset needs no per-user setup. The overlay does not mark the network internal: the browser must reach port 3000, and an air-gapped host has nothing outside to reach anyway. The internal network is the offline check's job.
 
-Models are pulled on an online machine (`docker compose ... run --rm ollama ollama pull <model>` with the same `.data/ollama`) and the directory is copied with the image archive.
+Models are pulled on an online machine into the same `.data/ollama` (`docker compose ... up -d ollama`, then `docker compose ... exec ollama ollama pull <model>`; decision 21) and the directory is copied with the image archive.
 
 The browser must reach the app over `localhost` or HTTPS (Context: `Secure` cookies and passkeys). On an air-gapped host the guide uses a browser on that host, or HTTPS on the LAN with Caddy's `tls internal` as in `docs/login.md`'s "HTTPS on your network"; a browser on another machine reaching the host's IP over plain HTTP cannot log in.
 
@@ -320,6 +320,19 @@ Decision 11 fixes the steps and their rules; these fill in what it leaves open, 
 - **Connectors before `mcp-connectors` lands.** As decision 18: `MCP_ENABLED` is read with `getattr`, and the loader is `app.setup.checks.load_connector_config`. Its `ConnectorConfigError` (a `ValueError`) message is shown as is; any other error by class only.
 
 *Alternatives:* one connection per line (rejected: three connects for one question, each needing its own timeout); `warning` for an open setup (rejected: an open setup is the expected state of a new install, not a problem to look into).
+
+### 21. Offline files: details left open by decisions 14 to 16
+
+Decisions 14 to 16 fix the files and what they do; these fill in what they leave open, each the simplest that fits the spec.
+
+- **Only the local server is offered.** The offline overlay sets `ALLOW_CUSTOM_PROVIDER: ${ALLOW_CUSTOM_PROVIDER:-false}`, so the provider list offers only `ollama`, as the spec's "A keyless local provider" scenario says. Without it, the default (`true`) also lists `custom`. An operator who sets `ALLOW_CUSTOM_PROVIDER=true` in `.env` still gets it back, since the environment decides (decision 3).
+- **Pulling models.** The Ollama image's entrypoint is the `ollama` binary, and `ollama pull` talks to a running server, so `run --rm ollama ollama pull` does not work. The guide starts the service and pulls with `exec`.
+- **`bundle-images.sh -f`** replaces the two default overlays; `docker-compose.yml` is always first. It is a bash script (`pipefail`, so a failed `docker save` is not hidden by `gzip`) and writes the archive under a temporary name, moved into place only when complete.
+- **`offline-check.sh`** builds by default, as decision 16 says, so a changed `layout.tsx` is checked. `--no-build` (or `OFFLINE_CHECK_NO_BUILD=1`) uses the images already built; the services themselves always start with `up --no-build --pull never`. Extra `-f` files are added to every call, including the build.
+- **The check's overlay writes its settings out.** `postgres`, `backend`, and `frontend` get literal test-only values (demo mode, the database URL and password, a zero `KEY_ENCRYPTION_KEY`, a fixed `SESSION_SECRET`), not `${...}` references, so neither the project `.env` nor the operator's shell can change them. `check.env` holds the same values for the base file's own `${...}` references. `smoke` is behind a `smoke` profile, so `up` does not start it, and `down --volumes --remove-orphans` with that profile removes everything the check made.
+- **Smoke test details.** Before step 1 it waits up to 180 seconds for the backend's `/health`, the frontend's `/favicon.ico` (outside the demo proxy, so it starts no session), and the stand-in. Step 1 opens raw TCP connections, because a TLS error after a connection (for example from an intercepting proxy) still means the network is not internal. Step 3 checks the `src`, `href`, and `srcset` of every tag that loads something, and every `url()` and `@import` in inline styles and linked stylesheets, then fetches each linked script, stylesheet, and font from the app. The stand-in's embeddings count hashed words, so `/pull` finds the thought by meaning as well as by words.
+
+*Alternatives:* a separate image for the stand-in and the smoke test (rejected: decision 16 runs them from the backend image, which already has Python); an offline check that never builds (rejected: a font or script reference added in a page would not be checked until someone rebuilt the images).
 
 ## Risks / Trade-offs
 

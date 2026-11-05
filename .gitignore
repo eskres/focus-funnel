@@ -18,3 +18,7 @@ __pycache__/
 .data/
 *.sqlite3
 *.db
+
+# Image archives from scripts/bundle-images.sh
+focus-funnel-images-*.tar.gz
+focus-funnel-images-*.tar.gz.sha256

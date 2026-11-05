@@ -11,6 +11,11 @@ services:
       ENCRYPTION_KEY: ${POCKET_ID_ENCRYPTION_KEY:?Set POCKET_ID_ENCRYPTION_KEY in .env (openssl rand -base64 32)}
       # Set to true when Pocket ID runs behind an HTTPS reverse proxy.
       TRUST_PROXY: ${POCKET_ID_TRUST_PROXY:-false}
+      # Pocket ID's two outbound calls: the analytics heartbeat to
+      # analytics.pocket-id.org, and the release check to api.github.com when
+      # an admin opens a settings page. Off, so it also runs with no internet.
+      ANALYTICS_DISABLED: "true"
+      VERSION_CHECK_DISABLED: "true"
     ports:
       - "1411:1411"
     volumes:
