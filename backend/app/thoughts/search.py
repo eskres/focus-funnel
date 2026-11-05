@@ -8,9 +8,11 @@ similarity reaches the model's threshold, or it holds a large enough share
 of the query's words. See openspec thought-storage design decision 5.
 
 A search can also filter by the thought's own date (`dated_from`, `dated_to`):
-only dated thoughts whose days overlap them pass. With such a filter and no
-query, the search lists the dated thoughts in date order, with no provider
-call (thought-dates design decision 4).
+only dated thoughts whose days overlap them pass. It can filter by status and
+by category too. With any of these filters and no query, the search lists the
+thoughts that pass, with no provider call: in date order with a date filter
+(thought-dates design decision 4), newest filed first without one
+(thought-status design decision 12).
 """
 
 import logging
@@ -92,6 +94,8 @@ filtered AS (
       AND (CAST(:dated_from AS date) IS NULL
            OR coalesce(ends_on, starts_on) >= CAST(:dated_from AS date))
       AND (CAST(:dated_to AS date) IS NULL OR starts_on <= CAST(:dated_to AS date))
+      AND (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
+      AND (CAST(:category AS text) IS NULL OR category = CAST(:category AS text))
 )"""
 
 _MEANING = """
@@ -210,9 +214,20 @@ def raw_text_excerpt(thought: Thought, hit_chunk: int | None, query: str, size: 
     return None
 
 
-def _dated_filters(user: User, *, tags, since, until, dated_from, dated_to, zone) -> list:
-    """The filtered CTE's conditions, as SQLAlchemy, for the date-only listing."""
-    conditions = [Thought.user_id == user.id, Thought.starts_on.is_not(None)]
+def _list_filters(
+    user: User, *, tags, since, until, dated_from, dated_to, status, category, zone
+) -> list:
+    """The filtered CTE's conditions, as SQLAlchemy, for the list with no query.
+
+    Scoped by `user_id` like the CTE. Only dated thoughts pass a date filter.
+    """
+    conditions = [Thought.user_id == user.id]
+    if dated_from is not None or dated_to is not None:
+        conditions.append(Thought.starts_on.is_not(None))
+    if status is not None:
+        conditions.append(Thought.status == status)
+    if category is not None:
+        conditions.append(Thought.category == category)
     if tags:
         conditions.append(Thought.tags.overlap(tags))
     if since is not None:
@@ -226,7 +241,7 @@ def _dated_filters(user: User, *, tags, since, until, dated_from, dated_to, zone
     return conditions
 
 
-async def list_dated(
+async def list_filtered(
     session: AsyncSession,
     user: User,
     *,
@@ -236,32 +251,39 @@ async def list_dated(
     until: date | datetime | None = None,
     dated_from: date | None = None,
     dated_to: date | None = None,
+    status: str | None = None,
+    category: str | None = None,
     zone: tzinfo | None = None,
 ) -> SearchResult:
-    """The dated thoughts that pass the filters, in date order: by start day, a
-    day with no time before one with a time, then by start time and filing time.
+    """The user's thoughts that pass the filters, with no query.
 
-    No query, so no ranking and no provider call.
+    With a date filter, only dated thoughts, in date order: by start day, a
+    day with no time before one with a time, then by start time and filing
+    time. Without one, newest filed first. No ranking and no provider call;
+    `total` counts every thought that passed, past the limit too.
     """
-    conditions = _dated_filters(
+    dated = dated_from is not None or dated_to is not None
+    conditions = _list_filters(
         user,
         tags=clean_tags(tags) or None,
         since=since,
         until=until,
         dated_from=dated_from,
         dated_to=dated_to,
+        status=status,
+        category=category,
         zone=zone,
+    )
+    order = (
+        (Thought.starts_on, nulls_first(Thought.starts_at), Thought.created_at, Thought.id)
+        if dated
+        else (Thought.created_at.desc(), Thought.id)
     )
     rows = (
         await session.execute(
             select(Thought, func.count().over().label("total"))
             .where(*conditions)
-            .order_by(
-                Thought.starts_on,
-                nulls_first(Thought.starts_at),
-                Thought.created_at,
-                Thought.id,
-            )
+            .order_by(*order)
             .limit(config.limit)
         )
     ).all()
@@ -273,11 +295,12 @@ async def list_dated(
     return SearchResult(hits=hits, total=rows[0].total)
 
 
-def _no_query_and_no_days() -> ApiError:
+def _no_query_and_no_filter() -> ApiError:
     return ApiError(
         422,
         ErrorCode.VALIDATION_ERROR,
-        "query: give the words to look for, or the days the thought is dated",
+        "query: give the words to look for, or the days the thought is dated, "
+        "its status, or its category",
     )
 
 
@@ -297,15 +320,19 @@ async def search_thoughts(
     zone: tzinfo | None = None,
     dated_from: date | None = None,
     dated_to: date | None = None,
+    status: str | None = None,
+    category: str | None = None,
 ) -> SearchResult:
     """The user's thoughts that match the query, best first. See the module docstring.
 
     `since` and `until` given as dates are the user's local days in `zone`
     (UTC when not given). `dated_from` and `dated_to` are days of the
-    thought's own date, compared as written. With either of them the query
-    may be None or empty: the search then lists the dated thoughts in date
-    order, with no embedding call and no backfill. Without them, a missing
-    query raises validation_error naming `query`.
+    thought's own date, compared as written. `status` and `category` keep
+    only thoughts with that stored status or category. With any of these
+    four the query may be None or empty: the search then lists the thoughts
+    that pass, in date order with a date filter and newest filed first
+    without one, with no embedding call and no backfill. Without them, a
+    missing query raises validation_error naming `query`.
 
     Never raises for a provider problem: the search then runs by words only
     and `words_only` says why.
@@ -313,16 +340,18 @@ async def search_thoughts(
     config = config or get_chat_config().search
     tags = clean_tags(tags) or None
     query = query.strip() if isinstance(query, str) else ""
-    dated = dated_from is not None or dated_to is not None
-    if not query and not dated:
-        raise _no_query_and_no_days()
+    status = status or None
+    category = category or None
+    filtered = any(value is not None for value in (dated_from, dated_to, status, category))
+    if not query and not filtered:
+        raise _no_query_and_no_filter()
     has_thoughts = select(Thought.id).where(Thought.user_id == user.id)
     if tags:
         has_thoughts = has_thoughts.where(Thought.tags.overlap(tags))
     if not (await session.execute(select(exists(has_thoughts)))).scalar():
         return SearchResult()
     if not query:
-        return await list_dated(
+        return await list_filtered(
             session,
             user,
             config=config,
@@ -331,6 +360,8 @@ async def search_thoughts(
             until=until,
             dated_from=dated_from,
             dated_to=dated_to,
+            status=status,
+            category=category,
             zone=zone,
         )
 
@@ -365,6 +396,8 @@ async def search_thoughts(
         zone=zone,
         dated_from=dated_from,
         dated_to=dated_to,
+        status=status,
+        category=category,
     )
     result.words_only = outcome.error
     result.embedding_provider = (
@@ -389,6 +422,8 @@ async def rank(
     zone: tzinfo | None = None,
     dated_from: date | None = None,
     dated_to: date | None = None,
+    status: str | None = None,
+    category: str | None = None,
     min_similarity: float | None = None,
     limit: int | None = None,
 ) -> SearchResult:
@@ -406,6 +441,8 @@ async def rank(
         "until": _as_end(until, zone),
         "dated_from": dated_from,
         "dated_to": dated_to,
+        "status": status,
+        "category": category,
         "query": query if use_words else "",
         "candidates": config.candidates,
         "rrf_k": config.rrf_k,

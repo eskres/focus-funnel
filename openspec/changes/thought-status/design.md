@@ -327,6 +327,24 @@ Left as ADDED requirements, because the text they sit beside stays true:
 
 **Alternatives:** leave every requirement an open change modifies as ADDED, and let a later archive fold them together (rejected: an ADDED requirement beside one it contradicts leaves the specs saying two things, such as a sheet scenario that says nothing changes without Edit or Delete, and an Upcoming requirement that lists done thoughts; and this change already modifies "Filters and order", which `thought-dates` modifies, so the rule would not even be applied the same way twice); modify every requirement this change touches (rejected: where the text stays true, a copy only adds a requirement to re-copy when another change edits it). Task group 3 and the end-to-end task 5.1 need `thought-appending` built, and tasks 2.1, 2.2, 4.4, and 5.1 need `thought-dates` built.
 
+### 16. Build note: the no-query list is a generalized `list_dated()`, not a read of the `filtered` CTE
+
+Decision 12 says the list with no query and its total read the `filtered` CTE. `thought-dates` built its no-query path as a SQLAlchemy select (`list_dated()` with `_dated_filters()` in `app/thoughts/search.py`), not as a read of the raw-SQL CTE, so this change generalizes that path into `list_filtered()`: `starts_on IS NOT NULL` and date order only with a `dated_*` filter, `created_at DESC, id` without one, plus `status = :status` and `category = :category` when given. Its first condition is `Thought.user_id == user.id`, the same scope as the CTE, and the total is still `count().over()` on that one select, limited to `config.limit`; task 2.1 checks the scope with a second user who has more matching thoughts. The search with a query reads the CTE, which gains the two lines of decision 12. `search_thoughts()`' refusal of a search with no query and no filter now names every filter: "query: give the words to look for, or the days the thought is dated, its status, or its category".
+
+**Alternatives:** rewrite the no-query path as a read of the raw `filtered` CTE (rejected: it would replace a built, tested path for no gain; the two share their conditions and their user scope).
+
+### 17. Build note: the wording of the search tool's filters
+
+Decision 12 fixes the summaries for a status and a category, for a date-only search, and for a query, and leaves the rest of the wording open. The built wording:
+
+- Summary: `Listed your` + ` open` with a status + ` thoughts` + ` in <category>` with a category, so a status-only search says `Listed your open thoughts` and a category-only one `Listed your thoughts in task`. A date-only search says `Listed your thoughts`, as decision 12 says, which replaces `thought-dates`' `Looked up your thoughts dated <days>`; that change's chat test is updated to match. `SearchArguments.days_text` stays, unused by the summary.
+- The header of a list with no query and no date filter is `N of your thoughts match (newest first):`, the header of a newest-first search; a list with a date filter keeps `thought-dates`' date-order header.
+- The no-match text of a search with a status or category filter (with or without a query or a date filter) is "No filed thoughts match those filters. Say so plainly, and do not answer as if the user had filed something."; a search with only a date filter keeps `thought-dates`' text, and a query search with no filter keeps `NO_MATCH`.
+- `parse_search()` refuses any status but `open` with "status must be open, or left out to find done thoughts too", and a call with no query and no filter with "query must be a non-empty string, unless dated_from, dated_to, status, or category is given". An empty or blank category counts as no filter.
+- The ` · done <date>` marker comes from one helper, `status_mark()` in `app/thoughts/dates.py` beside `local_day()`, so the search result, the seen-thoughts note, and the candidate lists (task group 3) write it alike. The date is the user's local day of `status_changed_at`. A thought with no status read (a transient row in a test or the probe) gets no marker, like an open one.
+
+**Alternatives:** keep `Looked up your thoughts dated <days>` for a date-only search (rejected: decision 12 and task 2.2 name `Listed your thoughts`, and one form for every list with no query reads the same in the chat).
+
 ## Risks / Trade-offs
 
 - [The model marks the wrong thought done] → The card names the thought by its current title, and nothing changes until the user confirms. The sheet's toggle sets it back.

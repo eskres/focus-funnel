@@ -185,11 +185,7 @@ class BuiltinTools:
             )
             return ToolOutcome(
                 result=found.text,
-                summary=(
-                    f"Looked up your thoughts dated {search.days_text}"
-                    if search.by_date_only
-                    else f"Searched your thoughts for “{search.query}”"
-                ),
+                summary=search.summary,
                 extra={"sources": found.sources},
                 details={"sources": found.sources},
             )

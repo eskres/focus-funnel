@@ -153,3 +153,17 @@ def local_day(moment: datetime, zone: ZoneInfo) -> date:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
     return moment.astimezone(zone).date()
+
+
+def status_mark(status: str | None, changed_at: datetime | None, zone: ZoneInfo) -> str:
+    """` · <status> <day>` for a thought whose status is not `open`, else ``.
+
+    The day is the local day of the status change in `zone`. An open thought
+    (or one with no status read, as a transient row) gets no mark, so the
+    usual line costs no more tokens (thought-status design decision 12).
+    """
+    if not status or status == "open":
+        return ""
+    if changed_at is None:
+        return f" · {status}"
+    return f" · {status} {local_day(changed_at, zone).isoformat()}"

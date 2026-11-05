@@ -255,7 +255,8 @@ def test_what_is_on_this_week_through_the_chat(client, alice, fake_llm, test_dat
         data for event, data in parse_events(response.text)
         if event == "tool" and data["phase"] == "end"
     ]
-    assert end["summary"] == "Looked up your thoughts dated 2026-09-28 to 2026-10-04"
+    # thought-status decision 17: a search with no query names its filters.
+    assert end["summary"] == "Listed your thoughts"
     assert [source["title"] for source in end["sources"]] == ["Trip to Oslo", "Dinner with Sam"]
 
 
