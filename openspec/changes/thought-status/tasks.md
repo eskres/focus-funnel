@@ -39,4 +39,5 @@ Builds on `thought-editing` (built on this branch). Task group 3 and task 5.1 ne
 
 ## 6. Specs and checks
 
-- [ ] 6.1 Run `openspec validate thought-status --strict`, `uv run pytest` and `uv run pytest -m postgres` with `TEST_DATABASE_URL` set in `backend/`, and `npm test`, `npm run lint`, and `npx tsc --noEmit` in `frontend/`, and check that all pass
+- [x] 6.1 Run `openspec validate thought-status --strict`, `uv run pytest` and `uv run pytest -m postgres` with `TEST_DATABASE_URL` set in `backend/`, and `npm test`, `npm run lint`, and `npx tsc --noEmit` in `frontend/`, and check that all pass
+  - Passed on 2026-11-05 at `54fbb99`. `openspec validate thought-status --strict`: valid (with the 2 expected INFO notes, for upcoming-thoughts and "Similar filed thoughts are checked"). Backend: `uv run pytest -q` 1446 passed (297 `postgres` deselected); `TEST_DATABASE_URL=postgresql+asyncpg://…/focus_funnel_test3 uv run pytest -q -m postgres` 297 passed (pgvector Postgres 18). Frontend: `npm test` 659 passed in 51 files, `npm run lint` and `npx tsc --noEmit` (after `npx next typegen`) exit 0. One run of the full check script under load failed the timing test `lib/word-diff.test.ts` ("under 50 ms"), a file this change does not touch; it passed alone and in the following full `npm test` run.
