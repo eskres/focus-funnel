@@ -35,7 +35,7 @@ const EGGS: WirePart = {
   category: "note",
 };
 const DENTIST: WirePart = { title: "Dentist", summary: "Book the dentist.", tags: ["health"], category: "task" };
-const CATEGORIES = { fixed: ["task", "idea", "decision", "note", "reference"], added: ["recipe"] };
+const CATEGORIES = { fixed: ["task", "idea", "decision", "note", "reference", "event"], added: ["recipe"] };
 const CONFIRM = "POST /api/conversations/c1/proposals/p1/confirm";
 
 function send(text: string) {
@@ -104,6 +104,7 @@ describe("a proposal card", () => {
         "decision",
         "note",
         "reference",
+        "event",
         "recipe",
       ]),
     );

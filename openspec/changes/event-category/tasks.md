@@ -12,7 +12,7 @@
 
 ## 3. Frontend
 
-- [ ] 3.1 Append `event` to `FIXED_CATEGORIES` in `lib/thoughts.ts` and change "five fixed kinds" to "six" in its comment and in both places in `components/categories-settings.tsx`. Add `event` to the lists in `components/categories-settings.test.tsx` and `components/chat/proposal-card.test.tsx`. Check with vitest that the settings list shows `event` with no remove button, that the text says "six fixed kinds", and that the card's dropdown offers `event` after `reference` and before `recipe`
+- [x] 3.1 Append `event` to `FIXED_CATEGORIES` in `lib/thoughts.ts` and change "five fixed kinds" to "six" in its comment and in both places in `components/categories-settings.tsx`. Add `event` to the lists in `components/categories-settings.test.tsx` and `components/chat/proposal-card.test.tsx`. Check with vitest that the settings list shows `event` with no remove button, that the text says "six fixed kinds", and that the card's dropdown offers `event` after `reference` and before `recipe`
 
 ## 4. End to end
 

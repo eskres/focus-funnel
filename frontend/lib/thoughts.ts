@@ -28,10 +28,10 @@ export function getThought(id: string): Promise<Thought> {
   return apiFetch<Thought>(`/api/thoughts/${encodeURIComponent(id)}`);
 }
 
-/** The five fixed kinds, and the ones the user added. */
+/** The six fixed kinds, and the ones the user added. */
 export type Categories = { fixed: string[]; added: string[] };
 
-export const FIXED_CATEGORIES = ["task", "idea", "decision", "note", "reference"];
+export const FIXED_CATEGORIES = ["task", "idea", "decision", "note", "reference", "event"];
 
 const CATEGORIES = "/api/settings/categories";
 
