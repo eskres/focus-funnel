@@ -1,7 +1,26 @@
 ## 1. Probes
 
-- [ ] 1.1 Run `ghcr.io/pocket-id/pocket-id:v2.16.0` with the Pocket ID overlay on the ordinary compose network with `ANALYTICS_DISABLED=true`, and read its configuration docs for that version. Find the bridge with `docker network inspect <project>_default` (its `Id` prefix and `Subnet`) and record outbound traffic during admin setup, passkey add, and one OIDC login with `sudo tcpdump -ni br-<id> 'not dst net <subnet> and not dst host 127.0.0.1'`. Check that the capture holds no packet to an outside address, apart from any DNS or HTTP call that is then recorded in design decision 12 with the variable that turns it off and captured again with that variable set; record the exact analytics variable name there too
+- [x] 1.1 Run `ghcr.io/pocket-id/pocket-id:v2.16.0` with the Pocket ID overlay on the ordinary compose network with `ANALYTICS_DISABLED=true`, and read its configuration docs for that version. Find the bridge with `docker network inspect <project>_default` (its `Id` prefix and `Subnet`) and record outbound traffic during admin setup, passkey add, and one OIDC login with `sudo tcpdump -ni br-<id> 'not dst net <subnet> and not dst host 127.0.0.1'`. Check that the capture holds no packet to an outside address, apart from any DNS or HTTP call that is then recorded in design decision 12 with the variable that turns it off and captured again with that variable set; record the exact analytics variable name there too
+  - Passed on 2026-11-05 at `75beed0`. This proxy refuses ghcr.io's blob host, so the image was pulled as `docker.io/pocketid/pocket-id:v2.16.0`, which has the same index digest (`sha256:9366436f...`), and tagged as `ghcr.io/pocket-id/pocket-id:v2.16.0`. The variable names come from the v2.16.0 source (`env_config.go`) and the configuration docs.
+  - Setup: the repository's `docker-compose.yml` and `docker-compose.pocket-id.yml`, plus a scratch override. The override pinned the network's subnet (`172.31.250.0/24`), published 1511 instead of 1411, and pointed the container's DNS at a sinkhole on that network, because the sandbox resolves no outside names. The sinkhole answered every name with `198.51.100.7` and logged it, so a name-based call shows up as a packet.
+  - Each run captured `tcpdump -ni br-<id> 'not dst net 172.31.250.0/24 and not dst host 127.0.0.1'` during: admin setup at `/setup`; adding a passkey (Playwright Chromium with a virtual authenticator); opening the admin settings pages; and one OIDC login. The login was authorization code by passkey, then discovery, token, JWKS, and userinfo from a container through `http://pocket-id:1411`.
+  - Results:
+    - Both variables unset: 119 packets, for `analytics.pocket-id.org` and `api.github.com`.
+    - `ANALYTICS_DISABLED=true`: 36 packets, all for `api.github.com`. This is the release check behind `/api/version/latest`.
+    - `ANALYTICS_DISABLED=true` and `VERSION_CHECK_DISABLED=true`: 0 packets and no names looked up, with the login completing.
+  - Both variables are recorded in design decision 12. Task 7.2 adds both to the overlay.
 - [ ] 1.2 Pin an `ollama/ollama` image version, a small chat model that calls tools, and an embedding model. With a scratch script using the backend's `openai` client, call `/v1/models`, a streamed `/v1/chat/completions` with `tools` and `stream_options.include_usage`, and `/v1/embeddings` with and without `dimensions`. Check by recording in design decision 15 the image tag, both model names, the `stream_usage` value, and whether `dimensions` is honored
+  - Not run here (2026-11-05, `75beed0`): this proxy refuses `registry.ollama.ai`, `ollama.com`, and `huggingface.co`, so `ollama pull` fails with `Forbidden` and the pinned models could not be called. What did run: `ollama/ollama:0.40.14` with the backend's `openai` client and two local random-weight stand-in models (a llama GGUF for chat, a 768-dimension BERT GGUF for embeddings).
+    - `/v1/models` answers.
+    - A streamed chat with `tools` and `include_usage` carries usage only on a final chunk with empty `choices`, so `stream_usage` is `final_chunk`.
+    - Embeddings are 768 long without `dimensions` and 256 long with `dimensions: 256`, so `dimensions` is honored.
+    - All of this is recorded in design decision 15, with the proposed `qwen3:1.7b` and `nomic-embed-text:v1.5`.
+  - To check, on a machine that reaches the Ollama registry:
+    1. `docker run -d --name ollama -p 127.0.0.1:11434:11434 ollama/ollama:0.40.14`
+    2. `docker exec ollama ollama pull qwen3:1.7b`
+    3. `docker exec ollama ollama pull nomic-embed-text:v1.5`
+    4. In `backend/`, write a scratch script with the backend's `openai` client that calls `/v1/models`, a streamed `/v1/chat/completions` with `tools`, a forced `tool_choice`, and `stream_options.include_usage`, and `/v1/embeddings` with and without `dimensions: 256`. Use `openai.AsyncOpenAI(base_url="http://127.0.0.1:11434/v1/", api_key="ollama")`.
+    5. Confirm that the chat stream returns a `save_thought` tool call with usage on the last chunk, and that embeddings are 768 long, then 256. Then tick this task, or record other model names in decision 15.
 
 ## 2. Setup state and the token
 
