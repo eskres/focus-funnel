@@ -2,7 +2,16 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getAuthConfig, type AuthConfig, type DemoConfig } from "@/lib/auth-mode";
 import { RateLimiter, clientAddress } from "@/lib/rate-limit";
-import { DEMO_SESSION_COOKIE, readCookies, readSession, serializeCookie } from "@/lib/session";
+import {
+  DEMO_DEAD_COOKIE,
+  DEMO_KEYS_COOKIE,
+  DEMO_SESSION_COOKIE,
+  clearCookie,
+  demoSessionDigest,
+  readCookies,
+  readSession,
+  serializeCookie,
+} from "@/lib/session";
 
 // Where logged-in users (and demo visitors) go instead of the landing page.
 const LOGGED_IN_HOME = "/app";
@@ -105,7 +114,16 @@ async function demoRequest(request: NextRequest, demo: DemoConfig): Promise<Next
   return demoPage(request, () => sessions.take(address));
 }
 
-/** A page request without a session starts one. */
+/** True when the API proxy marked this request's ff_demo value as dead. */
+function isDeadSession(cookies: Map<string, string>): boolean {
+  const value = cookies.get(DEMO_SESSION_COOKIE);
+  return value !== undefined && cookies.get(DEMO_DEAD_COOKIE) === demoSessionDigest(value);
+}
+
+/** The demo cookies a new session replaces. */
+const REPLACED_COOKIES = [DEMO_SESSION_COOKIE, DEMO_KEYS_COOKIE, DEMO_DEAD_COOKIE];
+
+/** A page request without a live session starts one. */
 async function demoPage(
   request: NextRequest,
   takeSession: () => ReturnType<RateLimiter["take"]>,
@@ -113,7 +131,8 @@ async function demoPage(
   const { pathname, origin } = request.nextUrl;
   if (pathname.startsWith("/demo/")) return NextResponse.next();
 
-  if (readCookies(request).has(DEMO_SESSION_COOKIE)) {
+  const cookies = readCookies(request);
+  if (cookies.has(DEMO_SESSION_COOKIE) && !isDeadSession(cookies)) {
     return pathname === "/"
       ? NextResponse.redirect(new URL(LOGGED_IN_HOME, origin))
       : NextResponse.next();
@@ -135,21 +154,28 @@ async function demoPage(
     return NextResponse.rewrite(url, { status: started.unavailable === "full" ? 503 : 502 });
   }
 
-  const cookie = serializeCookie(DEMO_SESSION_COOKIE, started.session, {
-    maxAge: (Date.parse(started.expiresAt) - Date.now()) / 1000,
-  });
+  // The new session, and no keys or dead mark left from an old one.
+  const setCookies = [
+    serializeCookie(DEMO_SESSION_COOKIE, started.session, {
+      maxAge: (Date.parse(started.expiresAt) - Date.now()) / 1000,
+    }),
+    ...[DEMO_KEYS_COOKIE, DEMO_DEAD_COOKIE].filter((name) => cookies.has(name)).map((name) => clearCookie(name)),
+  ];
   if (pathname === "/") {
     const redirect = NextResponse.redirect(new URL(LOGGED_IN_HOME, origin));
-    redirect.headers.append("set-cookie", cookie);
+    for (const cookie of setCookies) redirect.headers.append("set-cookie", cookie);
     return redirect;
   }
-  // The page itself already sees the new session.
+  // The page itself already sees the new session, and none of the old cookies.
   const headers = new Headers(request.headers);
-  const existing = headers.get("cookie");
-  const pair = `${DEMO_SESSION_COOKIE}=${encodeURIComponent(started.session)}`;
-  headers.set("cookie", existing ? `${existing}; ${pair}` : pair);
+  const kept = (headers.get("cookie") ?? "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part && !REPLACED_COOKIES.includes(part.slice(0, part.indexOf("=")).trim()));
+  kept.push(`${DEMO_SESSION_COOKIE}=${encodeURIComponent(started.session)}`);
+  headers.set("cookie", kept.join("; "));
   const response = NextResponse.next({ request: { headers } });
-  response.headers.append("set-cookie", cookie);
+  for (const cookie of setCookies) response.headers.append("set-cookie", cookie);
   return response;
 }
 
