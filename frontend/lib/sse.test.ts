@@ -58,6 +58,12 @@ const expected: SseEvent[] = [
         thoughtId: null,
         savedTitle: null,
         deleted: false,
+        addTo: null,
+        basedOn: null,
+        target: null,
+        similar: null,
+        added: false,
+        undone: false,
       },
     ],
     replacedBy: null,
@@ -249,5 +255,61 @@ describe("toProposal", () => {
       { when: null, whenChoices: [dinner, later] },
       { when: { start: "2026-11-03", end: "2026-11-06", time_zone: "UTC" }, whenChoices: null },
     ]);
+  });
+
+  const current = {
+    title: "Buy new bike lock",
+    summary: "Buy a lock.",
+    tags: ["bike"],
+    category: "task",
+    created_at: "2026-09-01T10:00:00Z",
+    updated_at: "2026-09-01T10:00:00.123456+00:00",
+  };
+
+  it("reads an addition's target and version, keeping the version string as sent", () => {
+    const proposal = toProposal({
+      id: "p1",
+      position: 2,
+      parts: [
+        {
+          ...part,
+          add_to: "t1",
+          based_on: "2026-09-01T10:00:00.123456+00:00",
+          target: current,
+          similar: null,
+          added: true,
+          undone: true,
+        },
+        { ...part, add_to: "t2", based_on: "x", target: { deleted: true } },
+      ],
+    });
+    expect(proposal?.parts[0]).toMatchObject({
+      addTo: "t1",
+      basedOn: "2026-09-01T10:00:00.123456+00:00",
+      target: {
+        title: "Buy new bike lock",
+        summary: "Buy a lock.",
+        tags: ["bike"],
+        category: "task",
+        createdAt: "2026-09-01T10:00:00Z",
+        updatedAt: "2026-09-01T10:00:00.123456+00:00",
+      },
+      added: true,
+      undone: true,
+    });
+    expect(proposal?.parts[1].target).toEqual({ deleted: true });
+  });
+
+  it("reads the strong match a new part names", () => {
+    const proposal = toProposal({
+      id: "p1",
+      position: 2,
+      parts: [{ ...part, similar: { ...current, thought_id: "t1" } }],
+    });
+    expect(proposal?.parts[0]).toMatchObject({
+      addTo: null,
+      target: null,
+      similar: { thoughtId: "t1", title: "Buy new bike lock", updatedAt: current.updated_at },
+    });
   });
 });

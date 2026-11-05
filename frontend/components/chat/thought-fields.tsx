@@ -40,18 +40,21 @@ export function categoryChoices(categories: string[], ...kept: (string | null | 
 }
 
 /**
- * Title, summary, tags, and category as fields. `keep` is a category that
- * stays a choice even when the user picks another, such as the one a stored
- * thought has.
+ * Title, summary, tags, and category as fields, or only those `fields`
+ * names, as an addition card shows tags and category alone. `keep` is a
+ * category that stays a choice even when the user picks another, such as the
+ * one a stored thought has.
  */
 export function ThoughtFields({
   value,
   onChange,
   keep,
+  fields = ["title", "summary", "tags", "category"],
 }: {
   value: FieldText;
   onChange: (next: FieldText) => void;
   keep?: string | null;
+  fields?: (keyof FieldText)[];
 }) {
   const categories = useCategories();
   const choices = categoryChoices(categories, value.category, keep);
@@ -59,33 +62,41 @@ export function ThoughtFields({
 
   return (
     <>
-      <Label className="flex flex-col items-start gap-1 text-xs">
-        Title
-        <Input value={value.title} onChange={(event) => set("title")(event.target.value)} />
-      </Label>
-      <Label className="flex flex-col items-start gap-1 text-xs">
-        Summary
-        <Textarea value={value.summary} onChange={(event) => set("summary")(event.target.value)} />
-      </Label>
-      <Label className="flex flex-col items-start gap-1 text-xs">
-        Tags, separated by commas
-        <Input value={value.tags} onChange={(event) => set("tags")(event.target.value)} />
-      </Label>
-      <Label className="flex flex-col items-start gap-1 text-xs">
-        Category
-        <select
-          className="rounded-md border bg-background px-2 py-1 text-sm"
-          value={value.category}
-          onChange={(event) => set("category")(event.target.value)}
-        >
-          <option value="">None</option>
-          {choices.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-        </select>
-      </Label>
+      {fields.includes("title") && (
+        <Label className="flex flex-col items-start gap-1 text-xs">
+          Title
+          <Input value={value.title} onChange={(event) => set("title")(event.target.value)} />
+        </Label>
+      )}
+      {fields.includes("summary") && (
+        <Label className="flex flex-col items-start gap-1 text-xs">
+          Summary
+          <Textarea value={value.summary} onChange={(event) => set("summary")(event.target.value)} />
+        </Label>
+      )}
+      {fields.includes("tags") && (
+        <Label className="flex flex-col items-start gap-1 text-xs">
+          Tags, separated by commas
+          <Input value={value.tags} onChange={(event) => set("tags")(event.target.value)} />
+        </Label>
+      )}
+      {fields.includes("category") && (
+        <Label className="flex flex-col items-start gap-1 text-xs">
+          Category
+          <select
+            className="rounded-md border bg-background px-2 py-1 text-sm"
+            value={value.category}
+            onChange={(event) => set("category")(event.target.value)}
+          >
+            <option value="">None</option>
+            {choices.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </Label>
+      )}
     </>
   );
 }

@@ -2,7 +2,7 @@
 // The backend sends named events, each with a JSON payload:
 //   event: conversation  data: {"id":"...","title":"..."}    first, for a new conversation
 //   event: tool          data: {"name":"...","phase":"start"|"end","summary":"...","sources":[...]}
-//   event: proposal      data: {"id":"...","position":2,"parts":[{"title","summary","tags","category","when","when_choices","thought_id","saved_title","deleted"}],"replaced_by":null,"replaces":"..."|null}
+//   event: proposal      data: {"id":"...","position":2,"parts":[{"title","summary","tags","category","when","when_choices","thought_id","saved_title","deleted","add_to","based_on","target","similar","added","undone"}],"replaced_by":null,"replaces":"..."|null}
 //   event: delta         data: {"text":"..."}
 //   event: usage         data: {"prompt_tokens":1,"completion_tokens":1,"context_length":1}
 //   event: notice        data: {"kind":"compact_suggested"|"usage_warning", ...}
@@ -30,6 +30,30 @@ export type ProposalPart = {
   thoughtId: string | null;
   savedTitle: string | null;
   deleted: boolean;
+  /**
+   * For an addition, the filed thought it adds to, and that thought's
+   * `updated_at` when the proposal was written, kept as the server's string
+   * so a confirm sends it back unchanged. Null for a new thought.
+   */
+  addTo: string | null;
+  basedOn: string | null;
+  /** For an addition, the thought it adds to as it is now, or `{ deleted: true }`. */
+  target: Target | { deleted: true } | null;
+  /** For a new thought, the strong match the "Similar" hint names, or null. */
+  similar: (Target & { thoughtId: string }) | null;
+  /** Saved as an addition, and that addition undone since. */
+  added: boolean;
+  undone: boolean;
+};
+
+/** A filed thought as an addition card shows it. `updatedAt` is its version, as the server sent it. */
+export type Target = {
+  title: string;
+  summary: string;
+  tags: string[];
+  category: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 /**
@@ -91,11 +115,36 @@ function toWhen(value: unknown): When | null {
     : null;
 }
 
+function toTarget(value: unknown): Target | null {
+  return isRecord(value) &&
+    typeof value.title === "string" &&
+    typeof value.summary === "string" &&
+    isStringArray(value.tags) &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string"
+    ? {
+        title: value.title,
+        summary: value.summary,
+        tags: value.tags,
+        category: typeof value.category === "string" ? value.category : null,
+        createdAt: value.created_at,
+        updatedAt: value.updated_at,
+      }
+    : null;
+}
+
 /** Two or more dates to pick from; null for none, as an older server sends. */
 function toWhenChoices(value: unknown): When[] | null {
   if (!Array.isArray(value)) return null;
   const choices = value.map(toWhen).filter((when): when is When => when !== null);
   return choices.length > 0 ? choices : null;
+}
+
+function toSimilar(value: unknown): (Target & { thoughtId: string }) | null {
+  const target = toTarget(value);
+  return target && isRecord(value) && typeof value.thought_id === "string"
+    ? { ...target, thoughtId: value.thought_id }
+    : null;
 }
 
 function toPart(value: unknown): ProposalPart | null {
@@ -115,6 +164,16 @@ function toPart(value: unknown): ProposalPart | null {
         // An older server sends neither field.
         savedTitle: typeof value.saved_title === "string" ? value.saved_title : null,
         deleted: value.deleted === true,
+        // An older server sends none of these, and the part is a new thought.
+        addTo: typeof value.add_to === "string" ? value.add_to : null,
+        basedOn: typeof value.based_on === "string" ? value.based_on : null,
+        target:
+          isRecord(value.target) && value.target.deleted === true
+            ? { deleted: true }
+            : toTarget(value.target),
+        similar: toSimilar(value.similar),
+        added: value.added === true,
+        undone: value.undone === true,
       }
     : null;
 }

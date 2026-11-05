@@ -12,6 +12,19 @@ export type ThoughtOrigin = {
   proposed_at: string;
 };
 
+/**
+ * One addition to the thought, from a later proposal: the conversation it came
+ * from, as it is titled now, and the proposal whose card it was.
+ */
+export type ThoughtAddition = {
+  id: string;
+  added_at: string;
+  undone: boolean;
+  conversation_id: string;
+  conversation_title: string;
+  proposal_id: string;
+};
+
 export type Thought = {
   id: string;
   title: string;
@@ -25,6 +38,8 @@ export type Thought = {
   updated_at: string;
   /** Null, or missing from an older server, when there is no origin. */
   origin?: ThoughtOrigin | null;
+  /** Newest first; missing from an older server. */
+  additions?: ThoughtAddition[];
 };
 
 const thoughtPath = (id: string) => `/api/thoughts/${encodeURIComponent(id)}`;
@@ -47,7 +62,10 @@ export type ThoughtChange = Partial<Pick<Thought, "title" | "summary" | "tags" |
  */
 export const THOUGHT_CHANGED_EVENT = "ff:thought-changed";
 
-export type ThoughtChanged = { id: string; title: string } | { id: string; deleted: true };
+/** `undone` names the proposal whose addition was undone, so its card can say so. */
+export type ThoughtChanged =
+  | { id: string; title: string; undone?: string }
+  | { id: string; deleted: true };
 
 function announce(detail: ThoughtChanged) {
   window.dispatchEvent(new CustomEvent<ThoughtChanged>(THOUGHT_CHANGED_EVENT, { detail }));
@@ -81,6 +99,19 @@ export function getUpcoming(from: string): Promise<Upcoming> {
 export async function deleteThought(id: string): Promise<void> {
   await apiFetch<void>(thoughtPath(id), { method: "DELETE" });
   announce({ id, deleted: true });
+}
+
+/**
+ * Undoes the thought's last addition and answers the thought as it is now.
+ * Refused with `ThoughtChangedError` when the thought changed after it.
+ */
+export async function undoAddition(id: string, addition: ThoughtAddition): Promise<Thought> {
+  const thought = await apiFetch<Thought>(
+    `${thoughtPath(id)}/additions/${encodeURIComponent(addition.id)}/undo`,
+    { method: "POST" },
+  );
+  announce({ id: thought.id, title: thought.title, undone: addition.proposal_id });
+  return thought;
 }
 
 /** The six fixed kinds, and the ones the user added. */

@@ -26,17 +26,21 @@ export type ApiErrorCode =
   | "not_allowed"
   | "demo_session_expired"
   | "demo_full"
-  | "rate_limited";
+  | "rate_limited"
+  | "thought_changed";
 
 export class ApiError extends Error {
   readonly code: string;
   readonly status: number;
+  /** Any other keys of the error object, such as the thought a `thought_changed` names. */
+  readonly details: Record<string, unknown>;
 
-  constructor(code: string, message: string, status: number) {
+  constructor(code: string, message: string, status: number, details: Record<string, unknown> = {}) {
     super(message);
     this.name = "ApiError";
     this.code = code;
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -65,6 +69,8 @@ export class NotAllowedError extends ApiError {}
 export class DemoSessionExpiredError extends ApiError {}
 export class DemoFullError extends ApiError {}
 export class RateLimitedError extends ApiError {}
+/** The thought changed since the card or sheet read it; `details.thought` is how it is now. */
+export class ThoughtChangedError extends ApiError {}
 
 /** Sent on window when a call finds that the demo session has ended. */
 export const DEMO_EXPIRED_EVENT = "ff:demo-session-expired";
@@ -94,40 +100,54 @@ const errorClasses: Record<ApiErrorCode, typeof ApiError> = {
   demo_session_expired: DemoSessionExpiredError,
   demo_full: DemoFullError,
   rate_limited: RateLimitedError,
+  thought_changed: ThoughtChangedError,
 };
 
 function isKnownCode(code: string): code is ApiErrorCode {
   return Object.hasOwn(errorClasses, code);
 }
 
-function readErrorBody(body: unknown): { code?: string; message?: string } {
+function readErrorBody(body: unknown): {
+  code?: string;
+  message?: string;
+  details?: Record<string, unknown>;
+} {
   if (typeof body !== "object" || body === null || !("error" in body)) return {};
   const { error } = body;
   if (typeof error !== "object" || error === null) return {};
+  const { code, message, ...details } = error as Record<string, unknown>;
   return {
-    code: "code" in error && typeof error.code === "string" ? error.code : undefined,
-    message:
-      "message" in error && typeof error.message === "string" ? error.message : undefined,
+    code: typeof code === "string" ? code : undefined,
+    message: typeof message === "string" ? message : undefined,
+    details,
   };
 }
 
 /** Builds the error class for a code, for example from an `error` event in a stream. */
-export function createApiError(code: string, message: string, status: number): ApiError {
+export function createApiError(
+  code: string,
+  message: string,
+  status: number,
+  details: Record<string, unknown> = {},
+): ApiError {
   const ErrorClass = isKnownCode(code) ? errorClasses[code] : ApiError;
   if (code === "demo_session_expired" && typeof window !== "undefined") {
     // Whichever call finds it first, the page shows that the session ended.
     window.dispatchEvent(new Event(DEMO_EXPIRED_EVENT));
   }
-  return new ErrorClass(code, message, status);
+  return new ErrorClass(code, message, status, details);
 }
 
 /** Reads the shared error format from a failed response. */
 export async function toApiError(response: Response): Promise<ApiError> {
   // A body that is not JSON is not the shared error format: use a generic error.
   const body: unknown = await response.json().catch(() => null);
-  const { code = "unknown_error", message = `Request failed with status ${response.status}.` } =
-    readErrorBody(body);
-  return createApiError(code, message, response.status);
+  const {
+    code = "unknown_error",
+    message = `Request failed with status ${response.status}.`,
+    details,
+  } = readErrorBody(body);
+  return createApiError(code, message, response.status, details);
 }
 
 /**

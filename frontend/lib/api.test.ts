@@ -141,6 +141,7 @@ describe("createApiError", () => {
     ["output_limit_reached", "OutputLimitReachedError"],
     ["tool_loop_limit", "ToolLoopLimitError"],
     ["answer_interrupted", "AnswerInterruptedError"],
+    ["thought_changed", "ThoughtChangedError"],
   ])("turns %s into %s", async (code, className) => {
     const api = await import("./api");
     const ErrorClass = api[className as keyof typeof api] as typeof ApiError;
@@ -153,5 +154,23 @@ describe("createApiError", () => {
     const { createApiError } = await import("./api");
     const error = createApiError("something_new", "x", 400);
     expect(error.constructor).toBe(ApiError);
+  });
+});
+
+describe("an error with more than a code and message", () => {
+  it("keeps the other keys of the error object as details", async () => {
+    const thought = { id: "t1", title: "Lock", summary: "Now.", tags: [], category: null, updated_at: "x" };
+    mockFetch(
+      new Response(JSON.stringify({ error: { code: "thought_changed", message: "Changed.", thought } }), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const { ThoughtChangedError } = await import("./api");
+
+    const error = await apiFetch("/api/thoughts/t1").catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(ThoughtChangedError);
+    expect(error).toMatchObject({ code: "thought_changed", message: "Changed.", status: 409, details: { thought } });
   });
 });

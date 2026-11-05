@@ -255,6 +255,20 @@ The job is `app/evals/similar_thoughts.py`, and the test set is `backend/evals/s
 
 **Alternatives:** a scratch Postgres database as in `scripts/search_eval.py` (rejected: the operator would need a database, and only the words half would gain); counting a repeated task's strong match as a false offer (rejected: the app never shows it).
 
+### 21. The addition card and the sheet in detail (decided during tasks 6.1 to 6.3, 2026-11-05)
+
+The diff is `lib/word-diff.ts`; the card is in `proposal-card.tsx`; the list and undo are in `thought-sheet.tsx`. Details decisions 9 and 12 left open:
+
+- **The diff.** Words are compared without the spaces around them, and punctuation belongs to its word (`lock` and `lock.` differ). The shared start and end are trimmed before the longest-common-subsequence table, which is one typed array. A moved word is removed in one place and added in the other. Two different 4,000-character summaries take about 15 ms.
+- **Marks and editing.** A textarea cannot show marks, so "Now" shows the current summary with the removed words marked, and "After" is the editable textarea with the same text below it, the added words marked. Both follow each keystroke.
+- **Taking the hint.** The model wrote the new idea on its own, but an addition's summary is the thought's whole new summary (decision 3). So "Add to it instead" starts "After" as the match's summary, a blank line, then the card's summary. Tags are the match's, then the card's. The category is the card's, else the match's. The version sent is the payload's `similar.updated_at`. "File as new" then restores the card as proposed. For the model's own addition, "File as new" keeps the user's edits, with the thought's title in the title field, because decision 16 dropped the model's title.
+- **Refusals.** A 404 marks the target gone: the card says so and offers only "File as new". A 409 replaces the Now column, the title, and the version with `error.thought`, and keeps the user's text and the server's message. The client's `ApiError` gains `details` (the error object's other keys), and `thought_changed` maps to `ThoughtChangedError`.
+- **Merge** is hidden while any part has `add_to` or a card took the hint.
+- **Saved states.** A card says "Added to:" for `added`, or after an add in this page, and "Addition undone:" for `undone`. An undo in the sheet announces `thought-changed` with `undone` set to the addition's proposal id, so that card changes at once.
+- **The sheet.** It lists the additions under "Added to from", each linked like the origin. "Undo last addition" shows only when the newest addition is not undone (decision 19). It asks in the confirmation dialog the delete uses, with its button labelled "Undo". A 409 shows the server's reason in that dialog, and nothing changes.
+
+**Alternatives:** an overlay of marks over the textarea (rejected: fragile with wrapping and scrolling, for no gain over a preview); the hint's "After" as the card's summary alone (rejected: confirming it would replace the thought's summary with the new idea and drop what it held).
+
 ## Risks / Trade-offs
 
 - [Depends on `thought-editing`, not built, and on `explore`, merged and archived] → The tasks start after `thought-editing` merges. If `origin`, `check_category()`, the `saved_title` lookup, or the offer code (`asked_proposal()`, `offer_note()`, `Turn._proposed`) change shape, re-read decisions 2, 3, 4, 7, and 10.

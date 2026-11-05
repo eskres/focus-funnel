@@ -31,9 +31,9 @@ Start after `thought-editing` is merged into `main`. `explore` is merged into `m
 
 ## 6. Frontend
 
-- [ ] 6.1 Add `lib/word-diff.ts` from design decision 12. Check with vitest on added, removed, and moved words, and that a 4,000-character summary diffs in under 50 ms
-- [ ] 6.2 Add the addition card and the "Similar" hint to `proposal-card.tsx`, and hide merge when a part is an addition. Check with vitest: "Add to" with the current title and no title field; Now and After with the marks following edits; pre-filled tags and category; Add sends `mode: "add"`; File as new turns it into a normal card; a 404 offers File as new; a 409 updates the Now column; "Added to" and "Addition undone" after reload; the hint names the match and turns the card into an addition card
-- [ ] 6.3 Add the additions list and "Undo last addition" to `ThoughtSheet`, from the `thought-detail-view` spec. Check with vitest that the list shows newest first with links to `?proposal=`, that it is absent with no additions, that undo asks for confirmation and shows the restored fields, and that a 409 shows why
+- [x] 6.1 Add `lib/word-diff.ts` from design decision 12. Check with vitest on added, removed, and moved words, and that a 4,000-character summary diffs in under 50 ms
+- [x] 6.2 Add the addition card and the "Similar" hint to `proposal-card.tsx`, and hide merge when a part is an addition. Check with vitest: "Add to" with the current title and no title field; Now and After with the marks following edits; pre-filled tags and category; Add sends `mode: "add"`; File as new turns it into a normal card; a 404 offers File as new; a 409 updates the Now column; "Added to" and "Addition undone" after reload; the hint names the match and turns the card into an addition card
+- [x] 6.3 Add the additions list and "Undo last addition" to `ThoughtSheet`, from the `thought-detail-view` spec. Check with vitest that the list shows newest first with links to `?proposal=`, that it is absent with no additions, that undo asks for confirmation and shows the restored fields, and that a 409 shows why
 
 ## 7. End to end
 
