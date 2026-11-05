@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseSse, type SseEvent } from "./sse";
+import { parseSse, type SseEvent, toProposal } from "./sse";
 
 const encoder = new TextEncoder();
 
@@ -46,7 +46,17 @@ const expected: SseEvent[] = [
     type: "proposal",
     id: "p1",
     position: 2,
-    parts: [{ title: "Oat milk", summary: "Buy it.", tags: ["shopping"], category: "task", thoughtId: null }],
+    parts: [
+      {
+        title: "Oat milk",
+        summary: "Buy it.",
+        tags: ["shopping"],
+        category: "task",
+        thoughtId: null,
+        savedTitle: null,
+        deleted: false,
+      },
+    ],
     replacedBy: null,
     replaces: "p0",
   },
@@ -192,5 +202,30 @@ describe("parseSse", () => {
 
     controller.close();
     expect(await iterator.next()).toEqual({ done: true, value: undefined });
+  });
+});
+
+describe("toProposal", () => {
+  const part = { title: "Oat milk", summary: "Buy it.", tags: [], category: null };
+
+  it("reads a saved part's current title and a deleted part", () => {
+    const proposal = toProposal({
+      id: "p1",
+      position: 2,
+      parts: [
+        { ...part, thought_id: "t1", saved_title: "Oat and soy milk", deleted: false },
+        { ...part, thought_id: "t2", saved_title: null, deleted: true },
+      ],
+      replaced_by: null,
+    });
+    expect(proposal?.parts.map(({ thoughtId, savedTitle, deleted }) => ({ thoughtId, savedTitle, deleted }))).toEqual([
+      { thoughtId: "t1", savedTitle: "Oat and soy milk", deleted: false },
+      { thoughtId: "t2", savedTitle: null, deleted: true },
+    ]);
+  });
+
+  it("reads a part from an older server, with neither field, as not changed", () => {
+    const proposal = toProposal({ id: "p1", position: 2, parts: [{ ...part, thought_id: "t1" }] });
+    expect(proposal?.parts[0]).toMatchObject({ thoughtId: "t1", savedTitle: null, deleted: false });
   });
 });

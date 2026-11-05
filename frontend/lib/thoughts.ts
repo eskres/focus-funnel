@@ -24,8 +24,41 @@ export type Thought = {
   origin?: ThoughtOrigin | null;
 };
 
+const thoughtPath = (id: string) => `/api/thoughts/${encodeURIComponent(id)}`;
+
 export function getThought(id: string): Promise<Thought> {
-  return apiFetch<Thought>(`/api/thoughts/${encodeURIComponent(id)}`);
+  return apiFetch<Thought>(thoughtPath(id));
+}
+
+/** The fields of a thought the user can change. Raw text is not one of them. */
+export type ThoughtChange = Partial<Pick<Thought, "title" | "summary" | "tags" | "category">>;
+
+/**
+ * Sent on window after a thought is changed or deleted in this page, so a
+ * saved proposal card can follow it.
+ */
+export const THOUGHT_CHANGED_EVENT = "ff:thought-changed";
+
+export type ThoughtChanged = { id: string; title: string } | { id: string; deleted: true };
+
+function announce(detail: ThoughtChanged) {
+  window.dispatchEvent(new CustomEvent<ThoughtChanged>(THOUGHT_CHANGED_EVENT, { detail }));
+}
+
+/** Changes only the fields given, and answers the thought as it is now. */
+export async function updateThought(id: string, fields: ThoughtChange): Promise<Thought> {
+  const thought = await apiFetch<Thought>(thoughtPath(id), {
+    method: "PATCH",
+    body: JSON.stringify(fields),
+  });
+  announce({ id: thought.id, title: thought.title });
+  return thought;
+}
+
+/** Deletes the thought for good. */
+export async function deleteThought(id: string): Promise<void> {
+  await apiFetch<void>(thoughtPath(id), { method: "DELETE" });
+  announce({ id, deleted: true });
 }
 
 /** The five fixed kinds, and the ones the user added. */

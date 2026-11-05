@@ -3,13 +3,20 @@
 import uuid
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import select
 
 from app.errors import ApiError
-from app.models import SearchIndex, Thought, ThoughtEmbedding
+from app.models import SearchIndex
 from app.thoughts.store import delete_thought, get_thought, store_thought, update_thought
 from tests.chat_helpers import FakeLLM, MODEL_LIST, api_error, run_db, save_key, user_id_for
-from tests.thought_helpers import EMBED_MODEL, models_with_embedding, run_as
+from tests.thought_helpers import (
+    EMBED_MODEL,
+    entries,
+    found_by_words,
+    head_texts,
+    models_with_embedding,
+    run_as,
+)
 
 pytestmark = pytest.mark.postgres
 
@@ -56,47 +63,12 @@ def update(url, user_id, fake, thought_id, **fields):
     return run_as(url, user_id, fake, work)
 
 
-def entries(url, thought_id) -> dict[str, list[int]]:
-    """The chunks each index holds for a thought, by index status and model."""
-
-    async def work(session):
-        rows = await session.execute(
-            select(SearchIndex.status, SearchIndex.embedding_model, ThoughtEmbedding.chunk)
-            .join(SearchIndex, SearchIndex.id == ThoughtEmbedding.index_id)
-            .where(ThoughtEmbedding.thought_id == thought_id)
-            .order_by(ThoughtEmbedding.chunk)
-        )
-        found: dict[str, list[int]] = {}
-        for status, model, chunk in rows:
-            found.setdefault(f"{status}:{model}", []).append(chunk)
-        return found
-
-    return run_db(url, work)
-
-
 def indexes(url, user_id) -> list[SearchIndex]:
     async def work(session):
         query = select(SearchIndex).where(SearchIndex.user_id == uuid.UUID(user_id))
         return list((await session.execute(query.order_by(SearchIndex.version))).scalars())
 
     return run_db(url, work)
-
-
-def found_by_words(url, user_id, words: str) -> list[str]:
-    async def work(session):
-        rows = await session.execute(
-            select(Thought.title).where(
-                Thought.user_id == uuid.UUID(user_id),
-                Thought.search_tsv.op("@@")(func.plainto_tsquery(text("'english'::regconfig"), words)),
-            )
-        )
-        return list(rows.scalars())
-
-    return run_db(url, work)
-
-
-def head_texts(fake) -> list[str]:
-    return [text for body in fake.embed_requests for text in body["input"]]
 
 
 def test_fields_round_trip(test_database_url, fake, alice_id):

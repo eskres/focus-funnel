@@ -2,7 +2,7 @@
 // The backend sends named events, each with a JSON payload:
 //   event: conversation  data: {"id":"...","title":"..."}    first, for a new conversation
 //   event: tool          data: {"name":"...","phase":"start"|"end","summary":"...","sources":[...]}
-//   event: proposal      data: {"id":"...","position":2,"parts":[{"title","summary","tags","category","thought_id"}],"replaced_by":null,"replaces":"..."|null}
+//   event: proposal      data: {"id":"...","position":2,"parts":[{"title","summary","tags","category","thought_id","saved_title","deleted"}],"replaced_by":null,"replaces":"..."|null}
 //   event: delta         data: {"text":"..."}
 //   event: usage         data: {"prompt_tokens":1,"completion_tokens":1,"context_length":1}
 //   event: notice        data: {"kind":"compact_suggested"|"usage_warning", ...}
@@ -11,13 +11,19 @@
 //   event: error         data: {"error":{"code":"...","message":"..."}}
 //   event: done          data: {}
 
-/** One part of a proposal: one card. `thoughtId` is set once it is saved. */
+/**
+ * One part of a proposal: one card. `thoughtId` is set once it is saved.
+ * `savedTitle` is the saved thought's current title, and `deleted` is true
+ * when the saved thought is gone; both are empty for an unsaved part.
+ */
 export type ProposalPart = {
   title: string;
   summary: string;
   tags: string[];
   category: string | null;
   thoughtId: string | null;
+  savedTitle: string | null;
+  deleted: boolean;
 };
 
 /**
@@ -80,6 +86,9 @@ function toPart(value: unknown): ProposalPart | null {
         tags: value.tags,
         category: typeof value.category === "string" ? value.category : null,
         thoughtId: typeof value.thought_id === "string" ? value.thought_id : null,
+        // An older server sends neither field.
+        savedTitle: typeof value.saved_title === "string" ? value.saved_title : null,
+        deleted: value.deleted === true,
       }
     : null;
 }
