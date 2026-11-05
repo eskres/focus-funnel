@@ -5,9 +5,21 @@ from datetime import datetime
 
 import mcp_types as types
 import pytest
+from mcp.shared.exceptions import MCPError
 
+from app.chat.config import get_chat_config
+from app.chat.tool_providers import TurnToolState, connector_tools
+from app.config import get_settings
 from tests.chat_helpers import error_code
-from tests.connector_helpers import add, by_name, connectors_app, listing, write_config
+from tests.connector_helpers import (
+    add,
+    by_name,
+    connector_rows,
+    connectors_app,
+    listing,
+    point_at,
+    write_config,
+)
 from tests.mcp_helpers import free_port
 
 TOKEN = "gcal-bearer-0123456789abcdef"
@@ -243,19 +255,16 @@ def test_a_new_test_keeps_switches_of_tools_still_offered_and_drops_the_rest(
     ],
 )
 def test_a_failed_test_keeps_the_stored_list_and_gives_the_code(
-    client, alice, calendar, mcp_server, path, code, reason
+    client, alice, calendar, mcp_server, path, code, reason, test_database_url
 ):
     before = listed_by_test(client, alice, calendar)
     assert (
         switch(client, alice, calendar, "list_events", enabled=True).status_code == 200
     )
+    # The server breaks behind the stored URL (a PATCH of the URL would clear
+    # the list: a new address needs a Test).
     url = mcp_server.base + path if path else f"http://127.0.0.1:{free_port()}/mcp"
-    assert (
-        client.patch(
-            f"/api/connectors/{calendar}", headers=alice, json={"url": url}
-        ).status_code
-        == 200
-    )
+    point_at(test_database_url, calendar, url)
 
     response = run_test(client, alice, calendar)
 
@@ -266,6 +275,48 @@ def test_a_failed_test_keeps_the_stored_list_and_gives_the_code(
     assert [t["name"] for t in after["tools"]] == [t["name"] for t in before["tools"]]
     assert moment(after["tools_listed_at"]) == moment(before["tools_listed_at"])
     assert badges(after)["list_events"] == (True, False, False)
+
+
+def test_a_new_url_clears_the_tools_until_the_next_test(
+    client, alice, calendar, mcp_server, test_database_url
+):
+    listed_by_test(client, alice, calendar)
+    assert switch(client, alice, calendar, "list_events", enabled=True).status_code == 200
+    assert switch(client, alice, calendar, "create_event", enabled=True, always_allow=True).status_code == 200
+
+    response = client.patch(
+        f"/api/connectors/{calendar}", headers=alice, json={"url": mcp_server.url + "?v=2"}
+    )
+
+    # Another server's tools, badges, and always allow do not carry over.
+    assert response.status_code == 200, response.text
+    assert (response.json()["tools"], response.json()["tools_listed_at"]) == ([], None)
+    [row] = [r for r in connector_rows(test_database_url) if r.source == "user"]
+    assert (row.tools, row.tool_settings, row.tools_listed_at) == ([], {}, None)
+    # A Test lists them again, switched off.
+    relisted = listed_by_test(client, alice, calendar)
+    assert badges(relisted)["create_event"] == (False, True, False)
+
+    # Changing only the name keeps them.
+    assert switch(client, alice, calendar, "list_events", enabled=True).status_code == 200
+    renamed = client.patch(f"/api/connectors/{calendar}", headers=alice, json={"name": "cal"})
+    assert badges(renamed.json())["list_events"] == (True, False, False)
+
+
+def test_a_server_that_refuses_the_tool_list_is_a_protocol_error(
+    client, alice, calendar, mcp_server
+):
+    before = listed_by_test(client, alice, calendar)
+    # A server with no tools capability answers tools/list with a JSON-RPC error.
+    mcp_server.list_error = MCPError(code=types.METHOD_NOT_FOUND, message="Method not found")
+
+    response = run_test(client, alice, calendar)
+
+    assert response.status_code == 502
+    assert error_code(response) == "connector_protocol_error"
+    assert response.json()["error"]["message"] == "The server did not answer as an MCP server."
+    after = by_name(listing(client, alice), "calendar")
+    assert [t["name"] for t in after["tools"]] == [t["name"] for t in before["tools"]]
 
 
 def test_a_refused_token_gives_auth_failed_and_stores_nothing(
@@ -358,6 +409,40 @@ def test_operator_tools_have_switches_too(client, alice):
     assert switch(client, alice, team["id"], "mixed", acts=False).status_code == 200
     # A tool the operator does not offer is not there to switch.
     assert switch(client, alice, team["id"], "slow", enabled=True).status_code == 404
+
+
+def test_a_tool_the_operator_drops_from_read_only_acts_at_once(
+    client, alice, mcp_server, config_path, test_database_url
+):
+    team = by_name(listing(client, alice), "team")
+    listed_by_test(client, alice, team["id"])
+    # mixed has no hint: it is reads only by the operator's list.
+    assert badges(switch(client, alice, team["id"], "mixed", enabled=True).json())["mixed"] == (
+        True,
+        False,
+        False,
+    )
+
+    # The operator takes it out of read_only and restarts; nobody tests again.
+    write_config(
+        config_path,
+        [
+            {
+                "name": "team",
+                "url": mcp_server.url,
+                "auth": {"kind": "bearer", "env": "TEAM_TOKEN"},
+                "tools": ["list_events", "create_event", "mixed"],
+                "read_only": ["list_events"],
+            }
+        ],
+    )
+
+    listed = tools(by_name(listing(client, alice), "team"))["mixed"]
+    assert (listed["enabled"], listed["acts"], listed["reads_allowed"]) == (True, True, False)
+    [row] = [r for r in connector_rows(test_database_url) if r.source == "operator"]
+    provider = connector_tools(row, get_settings(), None, get_chat_config().connectors)
+    # A call now needs the user's approval.
+    assert provider.needs_approval("team__mixed", TurnToolState()) is True
 
 
 def test_an_unknown_tool_is_404(client, alice, calendar):

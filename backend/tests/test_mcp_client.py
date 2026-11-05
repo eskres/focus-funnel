@@ -6,7 +6,9 @@ import time
 import uuid
 from pathlib import Path
 
+import mcp_types as types
 import pytest
+from mcp.shared.exceptions import MCPError
 
 from app.errors import ErrorCode
 from app.mcp_client import (
@@ -124,6 +126,23 @@ async def test_closing_twice_is_harmless_and_a_closed_session_is_unreachable(mcp
     with pytest.raises(ConnectorError) as caught:
         await session.call_tool("list_events", {})
     assert caught.value.code == ErrorCode.CONNECTOR_UNREACHABLE
+    # Nothing was sent, so it surely did not run.
+    assert caught.value.maybe_ran is False
+
+
+@pytest.mark.parametrize("code", [types.METHOD_NOT_FOUND, types.INTERNAL_ERROR])
+async def test_a_jsonrpc_error_to_the_tool_list_is_a_protocol_error(mcp_server, code):
+    mcp_server.list_error = MCPError(code=code, message="Method not found")
+    session = await open_session(mcp_server.url)
+    try:
+        with pytest.raises(ConnectorError) as caught:
+            await session.list_tools()
+    finally:
+        mcp_server.list_error = None
+        await session.aclose()
+
+    assert caught.value.code == ErrorCode.CONNECTOR_PROTOCOL_ERROR
+    assert caught.value.reason == "did not answer as an MCP server"
 
 
 def test_importing_the_app_and_client_does_not_load_the_sdk():
@@ -192,6 +211,8 @@ async def test_a_call_that_sleeps_past_call_seconds_times_out(mcp_server):
 
     assert caught.value.code == ErrorCode.CONNECTOR_UNREACHABLE
     assert caught.value.reason == "did not answer within 0.5 seconds"
+    # The call was sent: the server may have run it.
+    assert caught.value.maybe_ran is True
     assert CALL_SECONDS <= took < CALL_SECONDS + SLACK
     assert after.content == [{"type": "text", "text": "list_events: ok"}]
 
@@ -208,6 +229,7 @@ async def test_auth_refused_during_a_call_is_an_auth_failure(mcp_server):
     finally:
         await session.aclose()
     assert caught.value.code == ErrorCode.CONNECTOR_AUTH_FAILED
+    assert caught.value.maybe_ran is False
     assert took < CALL_SECONDS + SLACK
 
 

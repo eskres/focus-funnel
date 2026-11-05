@@ -825,7 +825,12 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
       const events = streamChat(
         { message, conversationId, choice: sentChoice },
         controller.signal,
-        adopt,
+        (id) => {
+          // The message was stored and refused (too_many_tools, context_full…):
+          // its turn started on the server, which expired the waiting cards.
+          adopt(id);
+          expireOpenActions();
+        },
       );
       // Set when the stream ends with `done` or `error`.
       const finished = await readAnswer(answerId, startingTurn(events));

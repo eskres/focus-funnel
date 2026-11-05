@@ -3,7 +3,9 @@
 Openspec mcp-connectors design decisions 7 and 19. An action moves from
 pending (or failed) to running, declined, or expired with one conditional
 update, so two approvals from two tabs run the tool once: the one that loses
-waits for the outcome and answers the same. Answers 404 not_found while
+waits for the outcome and answers the same. A call that was sent but gave no
+outcome (a timeout, a lost connection, an interrupted approval) ends unknown,
+not failed, because it may have run. Answers 404 not_found while
 MCP_ENABLED is off, like the connector routes.
 """
 
@@ -25,11 +27,16 @@ from app.chat.actions import (
     DONE,
     EXPIRED,
     FAILED,
+    INTERRUPTED,
+    POLL_SECONDS,
     RUNNING,
     TOOL_ERROR,
+    UNKNOWN,
     action_payload,
     move,
     moved_on,
+    running_limit,
+    settle_stale,
     tool_title,
 )
 from app.chat.config import ChatConfig, ConnectorLimits, get_chat_config
@@ -48,9 +55,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/conversations", dependencies=[Depends(require_mcp_enabled)])
 
-# How often a request that found the action running looks again.
-POLL_SECONDS = 0.1
-
 
 class DecisionIn(BaseModel):
     decision: Literal["approve", "decline"]
@@ -67,13 +71,14 @@ class ActionOut(BaseModel):
     tool: str
     title: str | None
     arguments: dict[str, Any]
-    # pending, running, done, failed, declined, or expired.
+    # pending, running, done, failed, unknown, declined, or expired.
     status: str
     # done: what the server returned (capped, without the data marking);
-    # failed: why it did not run ("The server could not be reached.").
+    # failed: why it did not run ("The server could not be reached.");
+    # unknown: why there is no outcome ("The approval was interrupted.").
     result: str | None
-    # failed: the connector failure code; done: tool_error when the server
-    # reported an error.
+    # failed or unknown: the connector failure code (internal_error for an
+    # interrupted approval); done: tool_error when the server reported an error.
     error_code: str | None
 
 
@@ -138,29 +143,36 @@ async def _provider(
 async def _run(
     session: AsyncSession, action: ToolAction, provider: ConnectorTools, limits: ConnectorLimits
 ) -> None:
-    """Call the server for a running action and store done or failed."""
+    """Call the server for a running action and store done, failed (it
+    certainly did not run), or unknown (it was sent and may have run)."""
     try:
         try:
             run = await provider.run(full_name(provider.name, action.tool), action.arguments)
         finally:
             await provider.aclose()
+        if run.result is not None:
+            action.status = DONE
+            action.result = result_text(run.result, limits.result_max_chars)
+            action.error_code = TOOL_ERROR if run.result.is_error else None
+        else:
+            action.status = UNKNOWN if run.maybe_ran else FAILED
+            action.result = f"The server {run.reason}."
+            action.error_code = run.code
+        await session.commit()
     except BaseException:
-        # Cancelled (the request went away): the action did not finish, so
-        # it may be approved again rather than staying running.
+        # Cancelled (the request went away) or the outcome could not be
+        # stored: the call may have reached the server, so it is not offered
+        # again, and it does not stay running.
         with anyio.CancelScope(shield=True):
-            action.status, action.result = FAILED, "The approval was interrupted."
+            await session.rollback()
+            action.status, action.result = UNKNOWN, INTERRUPTED
             action.error_code = ErrorCode.INTERNAL_ERROR
-            await session.commit()
+            try:
+                await session.commit()
+            except Exception:
+                # A later turn or approval settles it once it is stale.
+                logger.exception("Could not store an interrupted action")
         raise
-    if run.result is not None:
-        action.status = DONE
-        action.result = result_text(run.result, limits.result_max_chars)
-        action.error_code = TOOL_ERROR if run.result.is_error else None
-    else:
-        action.status = FAILED
-        action.result = f"The server {run.reason}."
-        action.error_code = run.code
-    await session.commit()
 
 
 @router.post("/{conversation_id}/actions/{action_id}", response_model=ActionOut)
@@ -176,10 +188,11 @@ async def decide_action(
 ) -> ActionOut:
     """Approve or decline an action (decision 7).
 
-    done or declined answers the stored outcome, so a repeated approval is a
-    no-op; expired answers 409 action_expired. A request that finds the
-    action running waits for its outcome, up to the connector's time limits,
-    and then answers 409 action_running. A pending or failed action is
+    done, unknown, or declined answers the stored outcome, so a repeated
+    approval is a no-op; expired answers 409 action_expired. A request that
+    finds the action running waits for its outcome, up to the connector's
+    time limits (`running_limit`); a row still running after that lost its
+    request and is settled as unknown. A pending or failed action is
     refused with conversation_busy while a turn runs, and expires when the
     conversation moved on or its tool may no longer run.
     """
@@ -190,18 +203,23 @@ async def decide_action(
     )
     connector = await _connector(session, action, user)
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + limits.connect_seconds + limits.call_seconds + 1
+    deadline = loop.time() + running_limit(limits)
     while True:
-        if action.status in (DONE, DECLINED):
+        if action.status in (DONE, UNKNOWN, DECLINED):
             break
         if action.status == EXPIRED:
             raise action_expired()
         if action.status == RUNNING:
+            # A row running past the limit lost its request: settle it.
+            # Committing also ends the read transaction (without expiring
+            # the loaded rows), so the next read sees the winner's commit.
+            await settle_stale(session, conversation.id, limits)
+            await session.commit()
+            await session.refresh(action)
+            if action.status != RUNNING:
+                continue
             if loop.time() > deadline:
                 raise action_running()
-            # End the read transaction (without expiring the loaded rows),
-            # so the next read sees the winner's commit.
-            await session.commit()
             await asyncio.sleep(POLL_SECONDS)
             await session.refresh(action)
             continue

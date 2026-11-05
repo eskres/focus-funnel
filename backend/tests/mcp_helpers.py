@@ -61,6 +61,8 @@ def _lister(state: McpTestServer):
     async def list_tools(
         ctx, params: types.PaginatedRequestParams | None
     ) -> types.ListToolsResult:
+        if state.list_error is not None:
+            raise state.list_error
         tools = [tool for tool in server_tools() if tool.name not in state.hidden]
         tools += state.extra_tools
         return _page(tools, params)
@@ -120,8 +122,11 @@ class McpTestServer:
     # A test that sets them puts them back (see `reset`).
     hidden: set[str] = field(default_factory=set)
     extra_tools: list[types.Tool] = field(default_factory=list)
+    # A JSON-RPC error that tools/list answers with, while set.
+    list_error: MCPError | None = None
 
     def reset(self) -> None:
+        self.list_error = None
         self.seen_headers.clear()
         self.revoked.clear()
         self.hidden.clear()

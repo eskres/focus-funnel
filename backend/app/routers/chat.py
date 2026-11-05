@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth import get_current_user
 from app.chat import running
-from app.chat.actions import expire_actions, list_actions
+from app.chat.actions import expire_actions, list_actions, wait_for_running
 from app.chat.commands import parse_message
 from app.chat.compaction import (
     compaction_request,
@@ -197,6 +197,10 @@ async def chat(
             # (decision 7).
             await expire_actions(session, conversation.id)
         await session.commit()
+        if settings.mcp_enabled and not is_new:
+            # An approval already running finishes first, so this turn gets
+            # its outcome. Any approval from now on finds its action expired.
+            await wait_for_running(session, conversation.id, config.connectors)
 
         await _ensure_model(session, user, conversation)
 

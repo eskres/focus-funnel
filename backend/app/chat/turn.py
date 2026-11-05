@@ -31,7 +31,13 @@ from app.chat.prompt import (
 from app.chat.proposal import Filing, part_lookup, proposal_payload, refs_for, write_proposal
 from app.chat.similar import candidates_note, check_parts, with_similar
 from app.chat.sse import Event
-from app.chat.tool_providers import ToolOutcome, ToolProvider, TurnToolState, tool_label
+from app.chat.tool_providers import (
+    ToolOutcome,
+    ToolProvider,
+    TurnToolState,
+    holds_connector_data,
+    tool_label,
+)
 from app.chat.usage import record_usage, usage_warning
 from app.chat.tools import (
     ALREADY_PROPOSED,
@@ -285,7 +291,8 @@ class Turn:
         # The built-in tools first, then one provider per connector that is on.
         self.providers = providers
         self.tools = [definition for provider in providers for definition in provider.definitions()]
-        self.tool_state = TurnToolState()
+        # Connector data from earlier turns is in this turn's context too.
+        self.tool_state = TurnToolState(read_connector_data=holds_connector_data(context))
         self.forced_tool = forced_tool
         # Every round counts, whatever its tools: a search, a similar-thought
         # check, or a connector call.

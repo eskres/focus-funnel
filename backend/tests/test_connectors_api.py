@@ -309,14 +309,26 @@ def test_change_name_url_and_auth(client, alice, test_database_url):
     response = client.patch(
         f"/api/connectors/{connector_id}",
         headers=alice,
-        json={"name": "work_calendar", "url": "https://cal.example.com/mcp"},
+        json={"name": "work_calendar", "url": "http://127.0.0.1:9/v2/mcp"},
     )
     assert response.status_code == 200, response.text
     body = response.json()
     assert (body["name"], body["url"], body["auth_last4"]) == (
         "work_calendar",
+        "http://127.0.0.1:9/v2/mcp",
+        "cdef",  # the stored token is kept on the same server
+    )
+
+    # Another server gets the token only when it is entered again.
+    moved = client.patch(
+        f"/api/connectors/{connector_id}",
+        headers=alice,
+        json={"url": "https://cal.example.com/mcp", "auth_value": "new-token-9876"},
+    )
+    assert moved.status_code == 200, moved.text
+    assert (moved.json()["url"], moved.json()["auth_last4"]) == (
         "https://cal.example.com/mcp",
-        "cdef",  # the stored token is kept
+        "9876",
     )
 
     cleared = client.patch(
@@ -340,6 +352,11 @@ def test_change_name_url_and_auth(client, alice, test_database_url):
         ({"url": "file:///etc/passwd"}, "url:"),
         ({"url": "https://me:pw@example.com"}, "url:"),
         ({"auth_kind": "header", "auth_header": "X-Key"}, "auth_value:"),
+        ({"name": "cal_"}, "name:"),
+        ({"auth_kind": "header", "auth_header": "X" * 300, "auth_value": "v"}, "auth_header:"),
+        # The stored token is not sent to another server unless entered again.
+        ({"url": "https://other.example.com/mcp"}, "auth_value:"),
+        ({"url": "http://127.0.0.1:10/mcp"}, "auth_value:"),
     ],
 )
 def test_bad_changes_give_validation_error(client, alice, fields, named):

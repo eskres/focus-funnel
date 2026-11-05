@@ -81,8 +81,9 @@ class ToolAction(Base):
     and connector_name the connector's name when the model called it, so the
     card and the next turn's note keep the name the model used after a
     rename or delete.
-    status is pending, running, done, failed, declined, or expired. result is
-    the capped text the server returned, without the data marking.
+    status is pending, running, done, failed, unknown (sent, but no outcome
+    came back, so it may have run), declined, or expired. result is the
+    capped text the server returned, without the data marking.
     connector_id is cleared when the connector is deleted, so the card stays.
     """
 

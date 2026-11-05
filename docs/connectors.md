@@ -28,11 +28,11 @@ connectors:
     read_only: [list-events]                    # optional
 ```
 
-- **`name`:** a lowercase letter, then lowercase letters, digits, or underscores, at most 24 characters. The model sees each tool as `<name>__<tool>`, for example `calendar__list-events`. `search_thoughts` and `propose_thought` are taken.
+- **`name`:** a lowercase letter, then lowercase letters, digits, or underscores, at most 24 characters, with no two underscores in a row and no underscore at the end. The model sees each tool as `<name>__<tool>`, for example `calendar__list-events`. `search_thoughts` and `propose_thought` are taken.
 - **`url`:** an `http` or `https` address. It can be a compose service or a private address: the operator chose it.
 - **`auth`:** optional. `{kind: bearer, env: VAR}` sends `Authorization: Bearer <value of VAR>`. `{kind: header, header: X-Api-Key, env: VAR}` sends that header. The variable must be set when the backend starts. Its value is read from the environment for each call and is never stored in the database or shown to users.
 - **`tools`:** the server tools to offer. Tools the server lists that are not named here are not shown.
-- **`read_only`:** tools that only read, so they run without asking the user. The app trusts this list over the server's own hints. Each one must be in `tools` when `tools` is given.
+- **`read_only`:** tools that only read, so they run without asking the user. The app trusts this list over the server's own hints. Each one must be in `tools` when `tools` is given. Taking a tool out of the list makes it act from the next turn, without waiting for users to press **Test**.
 
 Every user sees the operator's connectors in Settings and can test them and switch their tools on and off. No user can change or remove them. If you remove a connector from the file and restart, it disappears from every conversation.
 
@@ -47,6 +47,7 @@ With `MCP_USER_CONNECTORS=true`, a user adds a connector in **Settings → Conne
 - The URL must be `http` or `https`, with no user name or password in it.
 - The name follows the rules above. It must be unique for the user and must not be the name of an operator connector.
 - The auth value is stored encrypted with `KEY_ENCRYPTION_KEY`, bound to the user and the connector. It is never sent back to the browser or written to the logs. Settings shows only its last 4 characters.
+- Changing the URL to another server (scheme, host, or port) needs the auth value entered again, so a stored value never goes to a new server. Any URL change clears the tool list: press **Test** again to list the new server's tools and switch them on.
 - Only the owner can see, change, or remove a connector. Removing one turns it off in every conversation, and deleting an account deletes its connectors.
 
 ## The warning
@@ -87,10 +88,11 @@ A tool **reads** when the operator lists it in `read_only` or the server marks i
 - An act never runs straight away. The answer shows a card with the connector, the tool, and the arguments the model chose, and the model is told the action is waiting. **Approve** runs it once; **Decline** drops it. Either way the model learns the outcome in the next turn.
 - A card left waiting expires when the user sends the next message, and the action does not run.
 - If an approved action fails, for example because the server is down, the card says why and offers **Approve again**.
+- If the call was sent but no outcome came back (it timed out, the connection dropped, or the approval was interrupted), the server may have done it. The card says it is not known whether it ran and offers no second approval; check the service before asking again.
 
 ### Always allow
 
-In Settings, an act tool can be set to **Always allow**, after a confirmation. The model then runs it without a card. One exception stays: once a turn has read anything from a connector, every act in the rest of that turn shows a card, even an always-allowed one. Text read from a service could be what is asking for the action.
+In Settings, an act tool can be set to **Always allow**, after a confirmation. The model then runs it without a card. One exception stays: once a turn has read anything from a connector, every act in the rest of that turn shows a card, even an always-allowed one. The same holds in a turn whose conversation still carries an earlier connector result or an approved action's result. Text read from a service could be what is asking for the action.
 
 ## Limits and timeouts
 

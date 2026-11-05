@@ -206,6 +206,31 @@ describe("ActionCard", () => {
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(2);
   });
 
+  it("says an approval with no outcome may have run, and does not offer it again", async () => {
+    api({
+      [DECIDE]: json(
+        200,
+        wireAction("a1", {
+          status: "unknown",
+          result: "The server did not answer within 30 seconds.",
+          error_code: "connector_unreachable",
+        }),
+      ),
+    });
+    const card = await openChat();
+
+    fireEvent.click(within(card).getByRole("button", { name: "Approve" }));
+
+    await waitFor(() =>
+      expect(within(card).getByRole("status")).toHaveTextContent(
+        "Sent, but it is not known whether it ran. Check before trying again. " +
+          "The server did not answer within 30 seconds.",
+      ),
+    );
+    expect(card).toHaveAttribute("data-status", "unknown");
+    expect(within(card).queryByRole("button")).not.toBeInTheDocument();
+  });
+
   it("shows that the action expired when the server answers action_expired", async () => {
     api({
       [DECIDE]: errorResponse(409, "action_expired", "This action expired."),
@@ -278,6 +303,7 @@ describe("ActionCard", () => {
       ["declined", "Declined. Nothing was sent."],
       ["expired", "Expired: the conversation moved on, so this did not run."],
       ["running", "Running…"],
+      ["unknown", "Sent, but it is not known whether it ran."],
     ]) {
       api({}, { status, result: status === "done" ? "Created" : null });
       const { unmount } = render(<Chat conversationId="c1" />);
@@ -299,6 +325,36 @@ describe("ActionCard", () => {
     await screen.findByText("Sure.");
     expect(within(card).getByRole("status")).toHaveTextContent("Expired");
     expect(within(card).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("marks a waiting card expired when the next message is stored but refused", async () => {
+    api({
+      "POST /api/chat": () =>
+        errorResponse(422, "too_many_tools", "Turn some connector tools off: the limit is 20.", {
+          "X-Conversation-Id": "c1",
+        }),
+    });
+    const card = await openChat();
+
+    send("and now?");
+
+    await screen.findByText("Turn some connector tools off: the limit is 20.");
+    // The server stored the message and expired the card with it.
+    expect(within(card).getByRole("status")).toHaveTextContent("Expired");
+    expect(within(card).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("keeps a waiting card open when the next message is refused before it is stored", async () => {
+    api({
+      "POST /api/chat": () =>
+        errorResponse(409, "conversation_busy", "This conversation is still answering."),
+    });
+    const card = await openChat();
+
+    send("and now?");
+
+    await screen.findByText("This conversation is still answering.");
+    expect(within(card).getByRole("status")).toHaveTextContent("Waiting for your approval.");
   });
 
   it("disables Approve and Decline while an answer arrives", async () => {

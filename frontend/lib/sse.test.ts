@@ -140,7 +140,7 @@ describe("parseSse", () => {
     const events = await collect(
       streamOf(
         `event: action\ndata: ${JSON.stringify(action)}\n\n`,
-        `event: action\ndata: ${JSON.stringify({ ...action, status: "unknown" })}\n\n`,
+        `event: action\ndata: ${JSON.stringify({ ...action, status: "approved" })}\n\n`,
       ),
     );
     expect(events).toEqual([

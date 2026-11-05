@@ -17,7 +17,10 @@ in plain words that reads after "the server" or "the calendar connector":
 "could not be reached", "did not answer within 10 seconds", "refused the
 auth", "did not answer as an MCP server". A JSON-RPC error the server sends
 in answer to `tools/call` is not a connection failure: it comes back as an
-error result, like a result with `isError`.
+error result, like a result with `isError`; one in answer to `tools/list`
+means the server did not answer as an MCP server. A `tools/call` that timed
+out or lost its connection after it was sent may still have run on the
+server, so its error says so (`maybe_ran`).
 """
 
 from __future__ import annotations
@@ -48,11 +51,14 @@ _READ_MARGIN_SECONDS = 5.0
 class ConnectorError(Exception):
     """A connector could not be used: unreachable, auth refused, or not MCP."""
 
-    def __init__(self, code: str, reason: str):
+    def __init__(self, code: str, reason: str, *, maybe_ran: bool = False):
         super().__init__(reason)
         self.code = code
         # Plain words that follow "the server" or "the <name> connector".
         self.reason = reason
+        # A tools/call was sent and then timed out or lost its connection:
+        # the server may have run it, so nobody can say it did not.
+        self.maybe_ran = maybe_ran
 
 
 def unreachable(reason: str = "could not be reached") -> ConnectorError:
@@ -232,7 +238,12 @@ class _StreamableSession:
         tools: list[McpTool] = []
         cursor: str | None = None
         while True:
-            page = await self._request(lambda at=cursor: self._live().list_tools(cursor=at))
+            try:
+                page = await self._request(lambda at=cursor: self._live().list_tools(cursor=at))
+            except _ServerError:
+                # A JSON-RPC error to tools/list (no tools capability, a
+                # refused method): no tool list, so not usable as MCP.
+                raise protocol_error() from None
             tools.extend(_tool(item) for item in page.tools)
             cursor = page.next_cursor
             if cursor is None:
@@ -241,8 +252,15 @@ class _StreamableSession:
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         from mcp.shared.exceptions import MCPError
 
+        client = self._live()
         try:
-            result = await self._request(lambda: self._live().call_tool(name, arguments))
+            result = await self._request(lambda: client.call_tool(name, arguments))
+        except ConnectorError as exc:
+            if exc.code == ErrorCode.CONNECTOR_UNREACHABLE:
+                # Sent, then no answer: it may have run (a timeout, a dropped
+                # connection).
+                exc.maybe_ran = True
+            raise
         except _ServerError as exc:
             # The server answered with a JSON-RPC error (an unknown tool, bad
             # arguments): a tool error for the model, like an isError result.
