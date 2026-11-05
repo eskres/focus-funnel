@@ -55,7 +55,10 @@ SEARCH_TOOL_SCHEMA: dict[str, Any] = {
         "name": SEARCH_TOOL,
         "description": (
             "Search the thoughts the user filed before, by meaning and by words. "
-            "Returns the best matches, or says that none matched."
+            "Returns the best matches, or says that none matched. When the user asks "
+            "what is on, coming up, or planned for a time, pass dated_from and "
+            "dated_to, with no query unless they name a subject; the result then "
+            "lists the thoughts dated in those days, in date order."
         ),
         "parameters": {
             "type": "object",
@@ -64,7 +67,8 @@ SEARCH_TOOL_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "description": (
                         "The key words and names to look for, not a question. "
-                        "For example: 'dentist appointment' or 'ACME-4471 invoice'."
+                        "For example: 'dentist appointment' or 'ACME-4471 invoice'. "
+                        "Needed unless dated_from or dated_to is given."
                     ),
                 },
                 "tags": {
@@ -76,8 +80,21 @@ SEARCH_TOOL_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "description": "Only thoughts filed on or after this date, YYYY-MM-DD.",
                 },
+                "dated_from": {
+                    "type": "string",
+                    "description": (
+                        "The first of the days the thought happens on, not the day it "
+                        "was filed, YYYY-MM-DD. Only thoughts dated on or after it."
+                    ),
+                },
+                "dated_to": {
+                    "type": "string",
+                    "description": (
+                        "The last of the days the thought happens on, not the day it "
+                        "was filed, YYYY-MM-DD. Only thoughts dated on or before it."
+                    ),
+                },
             },
-            "required": ["query"],
         },
     },
 }
