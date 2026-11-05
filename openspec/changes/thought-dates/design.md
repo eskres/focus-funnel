@@ -162,6 +162,14 @@ If `thought-dates` is built before `thought-editing`, tasks 4.x wait; the rest o
 
 The `chat-interface` requirement "A proposal can be reviewed in the chat" lists the card's fields, so it must name the date. A new requirement cannot fix a list in another one, so this change modifies it. `thought-editing` modifies the same requirement. This change's delta is `thought-editing`'s version with "and date" added to the field list and one dated-card scenario. So **`thought-editing` must be archived before `thought-dates`**; archiving in the other order would drop `thought-editing`'s saved-title and deleted-card rules. Task group 4 already depends on `thought-editing`, so the order costs nothing. If `thought-editing`'s delta changes before it is archived, copy the new version into this delta again.
 
+### 10. The date index is Postgres only; "today" comes from one clock
+
+The partial index `ix_thoughts_user_id_starts_on` is declared like the GIN indexes: `info=POSTGRES_ONLY` with `ddl_if(dialect="postgresql")`, and the revision creates it only on Postgres. SQLite runs only the rest of the app's tests, where the date queries are small. `alembic check` still passes on both, because `alembic/env.py` leaves Postgres-only indexes out of the SQLite comparison.
+
+`app/thoughts/dates.py` reads the time from one function, `utc_now()`, and `today_in(zone)` turns it into the local date. Tests replace `utc_now()` to fix "today"; no time-freezing dependency is added. A `when` that is not an object or null is refused naming `when`, like a bad start.
+
+**Alternatives:** a partial index on both databases with `sqlite_where`, as `uq_search_indexes_one_active` does (rejected: the design asks for one Postgres index, and nothing on SQLite needs it); `freezegun` (rejected: a new dev dependency for one clock).
+
 ## Risks / Trade-offs
 
 - [The model gives two choices for a clear day, or one date for an unclear day] → Task 2.5 measures both on the preferred model. A wrong single date still shows on the card, where the user checks it before confirming.

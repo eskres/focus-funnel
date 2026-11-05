@@ -2,8 +2,8 @@ Group 4 depends on `thought-editing` (planned, not built). Groups 1 to 3 and 5 d
 
 ## 1. Store the date
 
-- [ ] 1.1 Add the five date columns and the partial index to `Thought` and one Alembic revision on `8a4d6f2b9c13` (design decision 1, Migration Plan). If `event-category` merged first, set `down_revision` to its revision. Check with pytest that upgrade and downgrade run on Postgres, that existing thoughts read back with no date, and that the single-head test passes
-- [ ] 1.2 Add `app/thoughts/dates.py` with the `when` parser and its reverse from design decision 2, and call it from `store_thought()` and `update_thought()`; a date-only update makes no embedding call. Add `tzdata` to the backend dependencies. Check with pytest every scenario of the `thought-store` delta: a date and a no-date thought read back unchanged, end before start, time on one side only, `next Friday`, and `2026-02-30` each refused naming `when` with nothing stored, `Mars/Base` stored as `UTC`; and with a counting fake provider that a date-only update makes no call
+- [x] 1.1 Add the five date columns and the partial index to `Thought` and one Alembic revision on `8a4d6f2b9c13` (design decision 1, Migration Plan). If `event-category` merged first, set `down_revision` to its revision. Check with pytest that upgrade and downgrade run on Postgres, that existing thoughts read back with no date, and that the single-head test passes
+- [x] 1.2 Add `app/thoughts/dates.py` with the `when` parser and its reverse from design decision 2, and call it from `store_thought()` and `update_thought()`; a date-only update makes no embedding call. Add `tzdata` to the backend dependencies. Check with pytest every scenario of the `thought-store` delta: a date and a no-date thought read back unchanged, end before start, time on one side only, `next Friday`, and `2026-02-30` each refused naming `when` with nothing stored, `Mars/Base` stored as `UTC`; and with a counting fake provider that a date-only update makes no call
 
 ## 2. The model and the date
 
