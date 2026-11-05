@@ -4,7 +4,6 @@ import asyncio
 import base64
 import os
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.pool import NullPool
@@ -219,21 +218,47 @@ def test_connectors_report_off(env):
     assert item.settings == ["MCP_ENABLED", "MCP_USER_CONNECTORS", "MCP_CONNECTORS_PATH"]
 
 
+def write_connectors(tmp_path, names: list[str]):
+    """A real connectors.yaml with an operator connector per name."""
+    lines = ["connectors:"]
+    for name in names:
+        lines += [f"  - name: {name}", f"    url: http://{name}-mcp:8000/mcp"]
+    if not names:
+        lines[0] += " []"
+    path = tmp_path / "connectors.yaml"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
 @pytest.mark.parametrize(
-    ("user_connectors", "count", "wording"),
+    ("user_connectors", "names", "wording"),
     [
-        (False, 2, "2 operator connectors. Users may not add their own."),
-        (True, 1, "1 operator connector. Users may add their own."),
+        ("false", ["wiki", "tracker"], "2 operator connectors. Users may not add their own."),
+        ("true", ["wiki"], "1 operator connector. Users may add their own."),
+        ("", [], "0 operator connectors. Users may not add their own."),
     ],
 )
-def test_connectors_report_on_with_count_and_user_connectors(user_connectors, count, wording):
-    # MCP settings and the connectors.yaml loader come with mcp-connectors; a
-    # stand-in for each until this branch is restacked onto it.
-    settings = SimpleNamespace(mcp_enabled=True, mcp_user_connectors=user_connectors)
-    config = SimpleNamespace(connectors=tuple(object() for _ in range(count)))
-    item = connectors_item(settings, load_config=lambda: config)
+def test_connectors_report_on_with_count_and_user_connectors(
+    env, tmp_path, user_connectors, names, wording
+):
+    # The real MCP settings and connectors.yaml loader (mcp-connectors), read
+    # through Settings() and MCP_CONNECTORS_PATH.
+    env.setenv("MCP_ENABLED", "true")
+    env.setenv("MCP_USER_CONNECTORS", user_connectors)
+    env.setenv("MCP_CONNECTORS_PATH", str(write_connectors(tmp_path, names)))
+    item = connectors_item(Settings())
     assert item.state == "info"
     assert item.message == f"Connectors are on: {wording}"
+    assert item.settings == ["MCP_ENABLED", "MCP_USER_CONNECTORS", "MCP_CONNECTORS_PATH"]
+
+
+def test_connectors_off_do_not_read_the_connectors_file(env, tmp_path):
+    # With MCP_ENABLED unset, a broken connectors.yaml is not read (mcp-connectors
+    # design decision 14), so the item still reports off.
+    broken = tmp_path / "connectors.yaml"
+    broken.write_text("connectors: [{name: Bad Name}]\n", encoding="utf-8")
+    env.setenv("MCP_CONNECTORS_PATH", str(broken))
+    assert connectors_item(Settings()).message == "Connectors are off."
 
 
 # no secrets

@@ -125,7 +125,7 @@ It prints 0 when nothing failed. Its provider line for Ollama shows how many mod
 
 ## Connectors
 
-Connectors (`MCP_ENABLED=true`) work offline only when the connector server runs inside the install: an operator connector run as a sidecar on the compose network, with its own compose overlay and its image bundled with `scripts/bundle-images.sh -f`. Its token goes in `.env`, under the name its `auth.env` gives in `connectors.yaml`; the setup script does not generate it. A connector at an outside URL, including any connector a user adds, cannot be reached. The doctor shows each operator connector as reachable or not.
+Connectors (`MCP_ENABLED=true`) work offline only when the connector server runs inside the install: an operator connector run as a sidecar on the compose network, with its own compose overlay (the pattern of `docker-compose.mcp.yml`, though its Google Calendar server itself needs Google's API and so does not work offline) and its image bundled with `scripts/bundle-images.sh -f`. Its token goes in `.env`, under the name its `auth.env` gives in `connectors.yaml`; the setup script does not generate it. A connector at an outside URL, including any connector a user adds, cannot be reached. The doctor shows each operator connector as reachable or not. [docs/connectors.md](connectors.md) has the settings, `connectors.yaml`, and the overlay.
 
 ## The offline check
 

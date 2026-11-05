@@ -12,7 +12,6 @@ import socket
 import threading
 import time
 from datetime import UTC, datetime
-from types import SimpleNamespace
 
 import httpx
 import httpx2
@@ -22,6 +21,7 @@ from sqlalchemy.pool import NullPool
 
 from app import doctor
 from app.config import Settings
+from app.connector_config import NO_AUTH, OperatorConnector
 from app.db import create_engine
 from app.setup.state import hash_token
 from tests.chat_helpers import PROVIDERS_FIXTURE
@@ -388,35 +388,48 @@ def test_setup_open_finished_off_not_used_and_record_missing(database, env, caps
     assert "setup record is missing, so setup is closed" in setup
 
 
-class McpSettings(Settings):
-    # A stand-in for the MCP settings that mcp-connectors adds to Settings,
-    # until this branch is restacked onto it.
-    mcp_enabled: bool = False
-    mcp_user_connectors: bool = False
+def write_connectors(env, tmp_path, entries: list[str]):
+    """Point MCP_CONNECTORS_PATH at a real connectors.yaml holding entries
+    (YAML flow mappings) and turn connectors on."""
+    path = tmp_path / "connectors.yaml"
+    body = "".join(f"  - {entry}\n" for entry in entries)
+    path.write_text(f"connectors:\n{body}", encoding="utf-8")
+    env.setenv("MCP_ENABLED", "true")
+    env.setenv("MCP_CONNECTORS_PATH", str(path))
+    return path
 
 
 def test_a_connector_with_an_unset_auth_env_fails_the_config_files(
-    database, env, capsys
+    database, env, capsys, tmp_path
 ):
-    env.setenv("MCP_ENABLED", "true")
-    env.delenv("GITHUB_MCP_TOKEN", raising=False)
-
-    def load_connectors():
-        # mcp-connectors' loader refuses an unset auth.env with a
-        # ConnectorConfigError (a ValueError) naming the connector and variable.
-        raise ValueError(
-            "Connector 'github' 'auth.env': the environment variable GITHUB_MCP_TOKEN is not set"
-        )
-
-    code, out = run_doctor(
-        capsys, load_settings=McpSettings, load_connectors=load_connectors
+    # The real settings and loader (mcp-connectors): an operator connector
+    # whose auth.env variable is unset stops the loader, naming both.
+    write_connectors(
+        env,
+        tmp_path,
+        [
+            (
+                "{name: github, url: 'http://github-mcp:8080/mcp', "
+                "auth: {kind: bearer, env: GITHUB_MCP_TOKEN}}"
+            )
+        ],
     )
+    env.delenv("GITHUB_MCP_TOKEN", raising=False)
+    code, out = run_doctor(capsys)
     assert code == 1
     line = lines(out)["connectors_file"][0]
     assert line.startswith("failed ")
     assert "github" in line
     assert "GITHUB_MCP_TOKEN" in line
     assert state_of(out, "connectors") == "skipped"
+
+    # With the variable set, the same file loads and the connector is checked.
+    env.setenv("GITHUB_MCP_TOKEN", "github-token-never-printed")
+    code, out = run_doctor(capsys)
+    assert code == 0, out
+    assert state_of(out, "connectors_file") == "ok"
+    assert state_of(out, "connector:github") == "ok"
+    assert "github-token-never-printed" not in out
 
 
 def test_no_output_holds_a_secret(database, env, capsys):
@@ -590,24 +603,20 @@ def test_a_keyless_embedding_preset_without_the_model_warns(database, env, capsy
     assert "is not among them" in line
 
 
-def connector(name: str, url: str):
-    return SimpleNamespace(name=name, url=url)
+def connector(name: str, url: str) -> OperatorConnector:
+    return OperatorConnector(name=name, url=url, auth=NO_AUTH, tools=None, read_only=())
 
 
-def test_an_unreachable_operator_connector_warns(database, env, capsys):
-    env.setenv("MCP_ENABLED", "true")
-    config = SimpleNamespace(
-        connectors=(
-            connector("wiki", "http://wiki-mcp:8080/mcp"),
-            connector("tracker", "http://tracker-mcp:8080/mcp"),
-        )
+def test_an_unreachable_operator_connector_warns(database, env, capsys, tmp_path):
+    write_connectors(
+        env,
+        tmp_path,
+        [
+            "{name: wiki, url: 'http://wiki-mcp:8080/mcp'}",
+            "{name: tracker, url: 'http://tracker-mcp:8080/mcp'}",
+        ],
     )
-    code, out = run_doctor(
-        capsys,
-        http=providers_answer(unreachable=("wiki-mcp",)),
-        load_settings=McpSettings,
-        load_connectors=lambda: config,
-    )
+    code, out = run_doctor(capsys, http=providers_answer(unreachable=("wiki-mcp",)))
     assert code == 0, out
     found = lines(out)
     assert found["connector:wiki"][0].startswith(
@@ -621,25 +630,21 @@ def test_an_unreachable_operator_connector_warns(database, env, capsys):
     )
 
 
-def test_a_connector_url_shows_only_scheme_host_and_port(database, env, capsys):
-    env.setenv("MCP_ENABLED", "true")
+def test_a_connector_url_shows_only_scheme_host_and_port(database, env, capsys, tmp_path):
     url = "https://conn-user:conn-pass@mcp.example.org:8443/mcp/v1?token=conn-secret"
-    config = SimpleNamespace(connectors=(connector("docs", url),))
+    path = write_connectors(env, tmp_path, [f"{{name: docs, url: '{url}'}}"])
     for http in (
         providers_answer(),
         providers_answer(unreachable=("mcp.example.org",)),
     ):
         for args in ((), ("--json",)):
-            _code, out = run_doctor(
-                capsys,
-                *args,
-                http=http,
-                load_settings=McpSettings,
-                load_connectors=lambda: config,
-            )
+            _code, out = run_doctor(capsys, *args, http=http)
             assert "https://mcp.example.org:8443" in out
             for part in ("conn-user", "conn-pass", "conn-secret", "token=", "/mcp/v1"):
                 assert part not in out, (part, out)
+            # The file's own path may be shown; the URL in it is not.
+            assert url not in out
+    assert url in path.read_text(encoding="utf-8")
 
 
 def test_a_provider_that_never_answers_is_cut_off_at_5_seconds(database, capsys):

@@ -45,6 +45,12 @@ from app.auth import FIREBASE_JWKS_URL, OidcDiscovery
 from app.chat.config import ChatConfigError, load_chat_config
 from app.chat.config import get_config_path as chat_config_path
 from app.config import Settings
+from app.connector_config import (
+    ConnectorConfig,
+    ConnectorConfigError,
+    OperatorConnector,
+    load_connector_config,
+)
 from app.db import create_engine
 from app.provider_config import (
     ProviderConfigError,
@@ -65,7 +71,6 @@ from app.setup.checks import (
     database_not_migrated_item,
     database_timeout_item,
     encryption_key_item,
-    load_connector_config,
     login_item,
     origin_of,
     redact_url,
@@ -172,8 +177,8 @@ def check_settings(
 
 def check_config_files(
     settings: Settings | None,
-    load_connectors: Callable[[], Any] = load_connector_config,
-) -> tuple[ProvidersConfig | None, Any, list[DoctorItem]]:
+    load_connectors: Callable[[], ConnectorConfig] = load_connector_config,
+) -> tuple[ProvidersConfig | None, ConnectorConfig | None, list[DoctorItem]]:
     """The providers file (and the embedding preset), the chat file, and, when
     connectors are on, the connectors file. Each failure is its loader's own
     message, which names what is wrong and never a secret value."""
@@ -214,11 +219,11 @@ def check_config_files(
             )
         )
 
-    connectors = None
-    if settings is not None and getattr(settings, "mcp_enabled", False):
+    connectors: ConnectorConfig | None = None
+    if settings is not None and settings.mcp_enabled:
         try:
             connectors = load_connectors()
-        except ValueError as exc:
+        except ConnectorConfigError as exc:
             # The loader's message names the connector and the unset auth.env
             # variable, never a value.
             items.append(
@@ -639,18 +644,18 @@ async def check_provider(
 
 
 async def check_connector(
-    connector: Any,
+    connector: OperatorConnector,
     transport: httpx2.AsyncBaseTransport | None = None,
     timeout: float = CHECK_TIMEOUT_SECONDS,
 ) -> DoctorItem:
     """Any HTTP answer from an operator connector's URL is reachable. Only the
     URL's scheme, host, and port are shown: a connectors.yaml URL may carry
     user:pass@ or ?token= despite auth.env being the place for them."""
-    name = str(connector.name)
-    shown = origin_of(str(connector.url))
+    name = connector.name
+    shown = origin_of(connector.url)
     try:
         response = await asyncio.wait_for(
-            _get(str(connector.url), transport, timeout), timeout
+            _get(connector.url, transport, timeout), timeout
         )
     except Exception as exc:  # noqa: BLE001 - reported by class only
         reason = (
@@ -690,7 +695,7 @@ async def run_checks(
     login_transport: httpx.AsyncBaseTransport | None = None,
     http_transport: httpx2.AsyncBaseTransport | None = None,
     load_settings: Callable[[], Settings] = Settings,
-    load_connectors: Callable[[], Any] = load_connector_config,
+    load_connectors: Callable[[], ConnectorConfig] = load_connector_config,
     timeout: float = CHECK_TIMEOUT_SECONDS,
 ) -> list[DoctorItem]:
     items: list[DoctorItem] = []
@@ -742,7 +747,7 @@ async def run_checks(
         items.append(
             skipped("connectors", NEEDS_SETTINGS, CONNECTOR_SETTINGS, required=False)
         )
-    elif getattr(settings, "mcp_enabled", False) and connectors is None:
+    elif settings.mcp_enabled and connectors is None:
         items.append(
             skipped(
                 "connectors",
@@ -803,7 +808,7 @@ async def main(
     login_transport: httpx.AsyncBaseTransport | None = None,
     http_transport: httpx2.AsyncBaseTransport | None = None,
     load_settings: Callable[[], Settings] = Settings,
-    load_connectors: Callable[[], Any] = load_connector_config,
+    load_connectors: Callable[[], ConnectorConfig] = load_connector_config,
 ) -> int:
     args = parse_args(argv)
     items = await run_checks(

@@ -12,15 +12,16 @@ its password).
 
 import asyncio
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.config import Settings
+from app.connector_config import ConnectorConfig, get_connector_config
 from app.provider_config import ProvidersConfig
 from app.thoughts import MIN_PGVECTOR, _version
 
@@ -294,33 +295,23 @@ def custom_provider_item(settings: Settings, providers: ProvidersConfig) -> Setu
     )
 
 
-def load_connector_config() -> Any:
-    # The connectors loader comes with the mcp-connectors change; it is read
-    # only when connectors are on.
-    from app.connector_config import (
-        get_connector_config,  # type: ignore[import-not-found]
-    )
-
-    return get_connector_config()
-
-
 def connectors_item(
-    settings: Any, load_config: Callable[[], Any] = load_connector_config
+    settings: Settings,
+    load_config: Callable[[], ConnectorConfig] = get_connector_config,
 ) -> SetupItem:
     """Off, or on with the operator connector count and whether users may add their own.
 
-    The MCP settings are read with getattr, so this works on a server built
-    without them (connectors then read as off).
+    connectors.yaml is read only when connectors are on, as at startup
+    (openspec mcp-connectors design decision 14).
     """
-    if not getattr(settings, "mcp_enabled", False):
+    if not settings.mcp_enabled:
         message = "Connectors are off."
     else:
-        connectors: Sequence[Any] = load_config().connectors
-        count = len(connectors)
+        count = len(load_config().connectors)
         noun = "connector" if count == 1 else "connectors"
         users = (
             "Users may add their own."
-            if getattr(settings, "mcp_user_connectors", False)
+            if settings.mcp_user_connectors
             else "Users may not add their own."
         )
         message = f"Connectors are on: {count} operator {noun}. {users}"
