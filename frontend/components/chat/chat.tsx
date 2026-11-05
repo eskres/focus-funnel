@@ -645,11 +645,16 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
 
 function withTool(
   tools: ToolIndication[],
-  event: { name: string; phase: "start" | "end"; summary?: string },
+  event: { name: string; phase: "start" | "end"; summary?: string; failed?: boolean },
 ): ToolIndication[] {
   if (event.phase === "start") return [...tools, { name: event.name, state: "running" }];
   const index = tools.findLastIndex((t) => t.name === event.name && t.state === "running");
-  const done: ToolIndication = { name: event.name, state: "done", summary: event.summary };
+  const done: ToolIndication = {
+    name: event.name,
+    state: "done",
+    summary: event.summary,
+    ...(event.failed ? { failed: true } : {}),
+  };
   if (index === -1) return [...tools, done];
   return tools.map((tool, i) => (i === index ? done : tool));
 }

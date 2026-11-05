@@ -16,6 +16,8 @@ export type ToolIndication = {
   name: string;
   state: "running" | "done";
   summary?: string;
+  /** A connector call that failed: the answer goes on without it. */
+  failed?: boolean;
 };
 
 export type AnswerMessage = {
@@ -53,9 +55,16 @@ const doneLabels: Record<string, string> = {
   propose_thought: "Proposed a thought to file",
 };
 
+/** A tool name as the chat shows it: a connector tool `calendar__list_events` reads `calendar: list_events`. */
+export function toolName(name: string): string {
+  const split = name.indexOf("__");
+  return split === -1 ? name : `${name.slice(0, split)}: ${name.slice(split + 2)}`;
+}
+
 function toolLabel(tool: ToolIndication): string {
-  if (tool.state === "running") return runningLabels[tool.name] ?? `Using ${tool.name}…`;
-  return tool.summary || doneLabels[tool.name] || `Used ${tool.name}`;
+  const name = toolName(tool.name);
+  if (tool.state === "running") return runningLabels[tool.name] ?? `Using ${name}…`;
+  return tool.summary || doneLabels[tool.name] || `Used ${name}`;
 }
 
 export function MessageList({
@@ -180,7 +189,11 @@ function Answer({
         <p
           key={index}
           data-testid="tool-indication"
-          className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
+          data-failed={tool.failed ? "true" : undefined}
+          className={cn(
+            "rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground",
+            tool.failed && "text-destructive",
+          )}
         >
           {toolLabel(tool)}
         </p>

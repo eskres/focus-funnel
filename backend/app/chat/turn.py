@@ -20,6 +20,7 @@ from app.chat.model_call import ModelCall
 from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, drop_held_note, tool_arguments
 from app.chat.proposal import Filing, proposal_payload, write_proposal
 from app.chat.sse import Event
+from app.chat.tool_providers import ToolOutcome, ToolProvider, TurnToolState, tool_label
 from app.chat.usage import record_usage, usage_warning
 from app.chat.tools import (
     ALREADY_PROPOSED,
@@ -97,6 +98,107 @@ async def read_round(
                 state.finish_reason = choice.finish_reason
 
 
+class BuiltinTools:
+    """The two built-in tools, search_thoughts and propose_thought, for one
+    turn (openspec mcp-connectors design decision 2). Their names have no
+    prefix, so the model sees them as before connectors existed."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        user: User,
+        conversation: Conversation,
+        config: ChatConfig,
+        context: list[dict[str, Any]],
+        filing: Filing,
+        command: str | None = None,
+        held_parts: list[dict[str, Any]] | None = None,
+        settings: Settings | None = None,
+        http_client: httpx2.AsyncClient | None = None,
+    ):
+        self.session = session
+        self.user = user
+        self.conversation = conversation
+        self.config = config
+        # The turn's context, shared with Turn: a proposal drops the held note.
+        self.context = context
+        self.filing = filing
+        self.command = command
+        # The held proposal's parts the context's note lists, if any.
+        self.held_parts = held_parts
+        self.settings = settings or get_settings()
+        self.http_client = http_client
+        # One proposal per turn: a second propose_thought call is refused.
+        self._proposed = False
+
+    def definitions(self) -> list[dict[str, Any]]:
+        return self.filing.tools
+
+    def owns(self, name: str) -> bool:
+        return name in (SEARCH_TOOL, PROPOSE_TOOL)
+
+    def needs_approval(self, name: str, turn: TurnToolState) -> bool:
+        return False
+
+    async def call(self, name: str, arguments: dict[str, Any], turn: TurnToolState) -> ToolOutcome:
+        if name == SEARCH_TOOL:
+            search = parse_search(arguments)
+            found = await search_tool_result(
+                self.session,
+                self.user,
+                search,
+                settings=self.settings,
+                config=self.config.search,
+                conversation_id=self.conversation.id,
+                http_client=self.http_client,
+            )
+            return ToolOutcome(
+                result=found.text,
+                summary=f"Searched your thoughts for “{search.query}”",
+                extra={"sources": found.sources},
+                details={"sources": found.sources},
+            )
+        if self._proposed:
+            return ToolOutcome(result=ALREADY_PROPOSED, summary="Already proposed in this answer")
+        parts = parse_proposal(arguments, self.filing.categories)
+        drop_held_note(self.context, self.held_parts)
+        self.held_parts = None
+        proposal, replaced = await write_proposal(
+            self.session,
+            self.conversation,
+            [part.as_dict() for part in parts],
+            await next_position(self.session, self.conversation),
+            push=self.command == "push",
+        )
+        self._proposed = True
+        return ToolOutcome(
+            result=PROPOSAL_SHOWN,
+            summary="Proposed a thought to file",
+            details={"proposal_id": str(proposal.id)},
+            events=[
+                (
+                    "proposal",
+                    {
+                        **proposal_payload(proposal),
+                        # The earlier proposal whose card now shows as replaced.
+                        "replaces": str(replaced) if replaced else None,
+                    },
+                )
+            ],
+        )
+
+    async def aclose(self) -> None:
+        pass
+
+
+# Until task 7.1 stores actions for approval, an acts call that needs it does
+# not reach the server.
+NEEDS_APPROVAL = (
+    "Error: this tool changes something and needs the user's approval, which this app "
+    "cannot ask for yet. It did not run. Tell the user."
+)
+
+
 class Turn:
     """Runs the tool loop for one message and stores what it produces."""
 
@@ -108,34 +210,37 @@ class Turn:
         call: ModelCall,
         config: ChatConfig,
         context: list[dict[str, Any]],
-        filing: Filing,
+        providers: list[ToolProvider],
         forced_tool: dict[str, Any] | None = None,
-        command: str | None = None,
-        held_parts: list[dict[str, Any]] | None = None,
-        settings: Settings | None = None,
-        http_client: httpx2.AsyncClient | None = None,
+        tool_rounds: int | None = None,
     ):
         self.session = session
-        self.settings = settings or get_settings()
-        self.http_client = http_client
         self.user = user
         self.conversation = conversation
         self.call = call
         self.config = config
         self.context = context
-        self.filing = filing
+        # The built-in tools first, then one provider per connector that is on.
+        self.providers = providers
+        self.tools = [definition for provider in providers for definition in provider.definitions()]
+        self.tool_state = TurnToolState()
         self.forced_tool = forced_tool
-        self.command = command
-        # The held proposal's parts the context's note lists, if any.
-        self.held_parts = held_parts
+        self.tool_rounds = tool_rounds or config.tool_rounds
         self._first_chunks: AsyncIterator[Any] | None = None
         # The count before this turn, so the soft limit is noted once per crossing.
         self._tokens_before = conversation.last_prompt_tokens
-        # One proposal per turn: a second propose_thought call is refused.
-        self._proposed = False
+
+    async def aclose(self) -> None:
+        """Close what the providers opened (connector sessions). Every
+        provider is closed even when one fails."""
+        for provider in self.providers:
+            try:
+                await provider.aclose()
+            except Exception:
+                logger.exception("Could not close a tool provider")
 
     def _options(self, round_number: int) -> dict[str, Any]:
-        options: dict[str, Any] = {"tools": self.filing.tools}
+        options: dict[str, Any] = {"tools": self.tools}
         if round_number == 0 and self.forced_tool is not None:
             options["tool_choice"] = self.forced_tool
         return options
@@ -156,7 +261,7 @@ class Turn:
 
     async def events(self) -> AsyncIterator[Event]:
         last_answer: Message | None = None
-        for round_number in range(self.config.tool_rounds):
+        for round_number in range(self.tool_rounds):
             if round_number == 0:
                 assert self._first_chunks is not None, "open() first"
                 chunks = self._first_chunks
@@ -254,68 +359,46 @@ class Turn:
         except Exception:
             logger.exception("Could not store a failed answer")
 
+    def _provider_for(self, name: str) -> ToolProvider:
+        for provider in self.providers:
+            if provider.owns(name):
+                return provider
+        raise ToolArgumentError(f"there is no tool named '{name}'")
+
     async def _run_tool(self, tool_call: dict[str, Any], position: int) -> AsyncIterator[Event]:
         name = tool_call["function"]["name"]
-        summary = ""
-        extra: dict[str, Any] = {}
-        details: dict[str, Any] | None = None
         try:
             arguments = tool_arguments(tool_call["function"]["arguments"])
-            if name == SEARCH_TOOL:
-                search = parse_search(arguments)
-                found = await search_tool_result(
-                    self.session,
-                    self.user,
-                    search,
-                    settings=self.settings,
-                    config=self.config.search,
-                    conversation_id=self.conversation.id,
-                    http_client=self.http_client,
+            provider = self._provider_for(name)
+            if provider.needs_approval(name, self.tool_state):
+                outcome = ToolOutcome(
+                    result=NEEDS_APPROVAL, summary=f"{tool_label(name)} needs approval"
                 )
-                result = found.text
-                extra = {"sources": found.sources}
-                details = {"sources": found.sources}
-                summary = f"Searched your thoughts for “{search.query}”"
-            elif name == PROPOSE_TOOL and self._proposed:
-                result = ALREADY_PROPOSED
-                summary = "Already proposed in this answer"
-            elif name == PROPOSE_TOOL:
-                parts = parse_proposal(arguments, self.filing.categories)
-                drop_held_note(self.context, self.held_parts)
-                self.held_parts = None
-                proposal, replaced = await write_proposal(
-                    self.session,
-                    self.conversation,
-                    [part.as_dict() for part in parts],
-                    await next_position(self.session, self.conversation),
-                    push=self.command == "push",
-                )
-                details = {"proposal_id": str(proposal.id)}
-                yield (
-                    "proposal",
-                    {
-                        **proposal_payload(proposal),
-                        # The earlier proposal whose card now shows as replaced.
-                        "replaces": str(replaced) if replaced else None,
-                    },
-                )
-                self._proposed = True
-                result = PROPOSAL_SHOWN
-                summary = "Proposed a thought to file"
             else:
-                raise ToolArgumentError(f"there is no tool named '{name}'")
+                outcome = await provider.call(name, arguments, self.tool_state)
         except (ValueError, ToolArgumentError) as exc:
             # Sent back to the model, which gets another round to call it right.
-            result = f"Error: {exc}. Call the tool again with valid arguments."
-            summary = "The tool call was not valid"
+            outcome = ToolOutcome(
+                result=f"Error: {exc}. Call the tool again with valid arguments.",
+                summary="The tool call was not valid",
+            )
         except ApiError as exc:
             if exc.code != ErrorCode.VALIDATION_ERROR:
                 raise
-            result = f"Error: {exc.message}. Call the tool again with valid arguments."
-            summary = "The tool call was not valid"
+            outcome = ToolOutcome(
+                result=f"Error: {exc.message}. Call the tool again with valid arguments.",
+                summary="The tool call was not valid",
+            )
 
+        for event in outcome.events:
+            yield event
         await self._store(
-            role="tool", tool_call_id=tool_call["id"], content=result, details=details
+            role="tool", tool_call_id=tool_call["id"], content=outcome.result, details=outcome.details
         )
-        self.context.append({"role": "tool", "tool_call_id": tool_call["id"], "content": result})
-        yield ("tool", {"name": name, "phase": "end", "summary": summary, **extra})
+        self.context.append(
+            {"role": "tool", "tool_call_id": tool_call["id"], "content": outcome.result}
+        )
+        end: dict[str, Any] = {"name": name, "phase": "end", "summary": outcome.summary}
+        if outcome.failed:
+            end["failed"] = True
+        yield ("tool", {**end, **outcome.extra})

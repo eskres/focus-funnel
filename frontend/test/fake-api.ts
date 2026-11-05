@@ -28,12 +28,14 @@ export const toolEvent = (
   phase: "start" | "end",
   summary?: string,
   sources?: WireSource[],
+  failed?: boolean,
 ) =>
   `event: tool\ndata: ${JSON.stringify({
     name,
     phase,
     ...(summary ? { summary } : {}),
     ...(sources ? { sources } : {}),
+    ...(failed ? { failed } : {}),
   })}\n\n`;
 
 /** A proposal part as the server sends it. */

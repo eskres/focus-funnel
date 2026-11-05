@@ -34,10 +34,12 @@ from app.chat.model_info import model_info
 from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, build_context, estimate_tokens, forced_tool
 from app.chat.proposal import filing_for, held_parts, held_proposal
 from app.chat.sse import sse_response
-from app.chat.turn import Turn
+from app.chat.tool_providers import connector_tool_count, conversation_connector_tools
+from app.chat.turn import BuiltinTools, Turn
 from app.config import Settings, get_settings
 from app.db import get_sessionmaker
-from app.errors import ApiError, ErrorCode, context_full, model_not_set
+from app.errors import ApiError, ErrorCode, context_full, model_not_set, too_many_tools
+from app.mcp_client import McpConnect, get_mcp_connect
 from app.models import Conversation, Message, User
 from app.providers import get_provider_http_client, provider_for_user
 
@@ -130,6 +132,7 @@ async def chat(
     config: ChatConfig = Depends(get_chat_config),
     settings: Settings = Depends(get_settings),
     http_client: httpx2.AsyncClient | None = Depends(get_provider_http_client),
+    connect: McpConnect = Depends(get_mcp_connect),
 ) -> StreamingResponse:
     """Answer a message as an event stream.
 
@@ -148,6 +151,7 @@ async def chat(
     session = session_factory()
     conversation_id: uuid.UUID | None = None
     claimed = False
+    turn: Turn | None = None
     try:
         if body.conversation_id is not None:
             conversation = await get_conversation(session, user, body.conversation_id)
@@ -174,8 +178,19 @@ async def chat(
 
         await _ensure_model(session, user, conversation)
 
+        # The connectors that are on (none while MCP_ENABLED is off). A
+        # conversation past the tool limit is refused before any model call,
+        # with the user's message kept.
+        connectors = await conversation_connector_tools(
+            session, user.id, conversation.id, settings, connect, config.connectors
+        )
+        if connector_tool_count(connectors) > config.connectors.max_tools:
+            raise too_many_tools(config.connectors.max_tools)
+
         held = held_parts(await held_proposal(session, conversation))
-        context = build_context(await list_messages(session, conversation), held)
+        context = build_context(
+            await list_messages(session, conversation), held, connectors=bool(connectors)
+        )
         filing = await filing_for(session, user, config)
         info = await model_info(
             session, user, conversation.provider_id, conversation.model, settings, http_client
@@ -196,6 +211,18 @@ async def chat(
             settings=settings,
             http_client=http_client,
         )
+        builtin = BuiltinTools(
+            session,
+            user,
+            conversation,
+            config,
+            context,
+            filing,
+            command=parsed.command,
+            held_parts=held,
+            settings=settings,
+            http_client=http_client,
+        )
         turn = Turn(
             session,
             user,
@@ -203,14 +230,12 @@ async def chat(
             call,
             config,
             context=context,
-            filing=filing,
+            providers=[builtin, *connectors],
             forced_tool=forced_tool(FORCED_TOOLS[parsed.command])
             if parsed.command in FORCED_TOOLS
             else None,
-            command=parsed.command,
-            held_parts=held,
-            settings=settings,
-            http_client=http_client,
+            # A read followed by an act needs more rounds (decision 9).
+            tool_rounds=config.connectors.tool_rounds if connectors else None,
         )
         try:
             await turn.open()
@@ -218,6 +243,8 @@ async def chat(
             await call.aclose()
             raise
     except BaseException as exc:
+        if turn is not None:
+            await turn.aclose()
         await session.rollback()
         if claimed:
             await release_turn(session, conversation_id)
@@ -234,6 +261,8 @@ async def chat(
 
     async def on_close() -> None:
         try:
+            # Connector sessions first: they end with the turn (decision 9).
+            await turn.aclose()
             await call.aclose()
             await session.commit()
             await release_turn(session, conversation_id)
