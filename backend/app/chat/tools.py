@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.config import SearchConfig
 from app.chat.prompt import MAX_PARTS
+from app.chat.refs import Refs, normal_ref
 from app.config import Settings
 from app.errors import ApiError, ErrorCode
 from app.models import User
@@ -58,10 +59,15 @@ class ProposalPart:
     # The date, {start, end, time_zone}, or two choices of it, never both.
     when: dict[str, Any] | None = None
     when_choices: list[dict[str, Any]] | None = None
+    # The ref of a seen thought to add to (thought-appending design decision 3),
+    # and whether the model keeps the part new after a candidate round.
+    add_to: str | None = None
+    new: bool = False
 
     def as_dict(self) -> dict[str, Any]:
-        """The part as stored on a proposal row, not yet saved."""
-        return {
+        """The part as stored on a proposal row, not yet saved. An addition's
+        ref is kept as `add_to_ref`, which write_proposal() resolves."""
+        stored: dict[str, Any] = {
             "title": self.title,
             "summary": self.summary,
             "tags": self.tags,
@@ -70,6 +76,9 @@ class ProposalPart:
             "when_choices": self.when_choices,
             "thought_id": None,
         }
+        if self.add_to is not None:
+            stored["add_to_ref"] = self.add_to
+        return stored
 
 
 def _checked_date(value: Any, zone: ZoneInfo) -> dict[str, Any] | None:
@@ -140,7 +149,20 @@ def _parse_part(
         category=named if named in categories else None,
         when=when,
         when_choices=when_choices,
+        add_to=_add_to(item.get("add_to"), where),
+        new=item.get("new") is True or str(item.get("new")).lower() == "true",
     )
+
+
+def _add_to(value: Any, where: str) -> str | None:
+    """The ref a part adds to, written as the server writes refs. Text that
+    is not a ref is kept as it is: it names no seen thought, so the part is
+    filed as new."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if not isinstance(value, str):
+        raise ToolArgumentError(f"{where}add_to must be a ref such as T1")
+    return normal_ref(value) or value.strip()
 
 
 def parse_proposal(
@@ -157,10 +179,22 @@ def parse_proposal(
     items = arguments.get("thoughts")
     if not isinstance(items, list) or not 1 <= len(items) <= MAX_PARTS:
         raise ToolArgumentError(f"thoughts must be a list of 1 to {MAX_PARTS} thoughts")
-    return [
+    parts = [
         _parse_part(item, f"thoughts[{index}].", categories, zone)
         for index, item in enumerate(items)
     ]
+    # Two parts of one proposal never add to the same thought.
+    named: set[str] = set()
+    for part in parts:
+        if part.add_to is None:
+            continue
+        if part.add_to in named:
+            raise ToolArgumentError(
+                f"two thoughts add to {part.add_to}; give each a different add_to, or put "
+                "what they add into one thought"
+            )
+        named.add(part.add_to)
+    return parts
 
 
 @dataclass(frozen=True)
@@ -314,6 +348,7 @@ def format_search_result(
     newest_first: bool = False,
     by_date: bool = False,
     zone: ZoneInfo | None = None,
+    refs: Refs | None = None,
 ) -> SearchToolResult:
     """The search result in as few tokens as the model can answer from.
 
@@ -323,7 +358,10 @@ def format_search_result(
     for a dated thought, its date. `by_date` is a search by the thought's days
     with no query: its entries are in date order (thought-dates design
     decision 4). The filed day is the user's local day in `zone` (UTC when not
-    given), the same days as the model's today and its `since`.
+    given), the same days as the model's today and its `since`. With the
+    conversation's `refs`, each entry carries its thought's ref, and a thought
+    shown for the first time is numbered after every other (thought-appending
+    design decision 2).
     """
     filed_zone = zone or ZoneInfo(DEFAULT_ZONE)
     provider_id = result.embedding_provider or settings.embedding_provider
@@ -335,7 +373,11 @@ def format_search_result(
     used = 0
     for number, hit in enumerate(result.hits, start=1):
         thought = hit.thought
-        heading = f"{number}. {thought.title} · filed {_local_day(thought.created_at, filed_zone).isoformat()}"
+        ref = f"{refs.label(thought.id)} · " if refs is not None else ""
+        heading = (
+            f"{number}. {ref}{thought.title} · filed "
+            f"{_local_day(thought.created_at, filed_zone).isoformat()}"
+        )
         dated = thought_date_text(thought)
         if dated:
             heading += f" · on {dated}"
@@ -348,6 +390,8 @@ def format_search_result(
         if entries and used + len(entry) + 1 > config.budget_chars:
             break
         entries.append(entry)
+        if refs is not None:
+            refs.add(thought.id)
         sources.append(
             {
                 "id": str(thought.id),
@@ -387,8 +431,10 @@ async def search_tool_result(
     conversation_id: uuid.UUID | None = None,
     http_client: httpx2.AsyncClient | None = None,
     zone: ZoneInfo | None = None,
+    refs: Refs | None = None,
 ) -> SearchToolResult:
-    """The search tool's result for the model. A failed search becomes a note, never an error.
+    """The search tool's result for the model, with each thought's ref when
+    the conversation's `refs` are given. A failed search becomes a note, never an error.
 
     The dates are the user's local days in `zone` (UTC when not given)."""
     result = await search_thoughts(
@@ -406,5 +452,5 @@ async def search_tool_result(
         config=config,
     )
     return format_search_result(
-        result, config, settings, by_date=arguments.by_date_only, zone=zone
+        result, config, settings, by_date=arguments.by_date_only, zone=zone, refs=refs
     )

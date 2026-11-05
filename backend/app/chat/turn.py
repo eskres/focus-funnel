@@ -21,7 +21,7 @@ from app.chat.context import compact_suggestion
 from app.chat.conversations import ends_answered, interrupted_answer, last_message, next_position
 from app.chat.model_call import ModelCall
 from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, drop_held_note, tool_arguments
-from app.chat.proposal import Filing, proposal_payload, write_proposal
+from app.chat.proposal import Filing, proposal_payload, refs_for, write_proposal
 from app.chat.sse import Event
 from app.chat.usage import record_usage, usage_warning
 from app.chat.tools import (
@@ -369,6 +369,7 @@ class Turn:
                     conversation_id=self.conversation.id,
                     http_client=self.http_client,
                     zone=self.zone,
+                    refs=await refs_for(self.session, self.conversation),
                 )
                 result = found.text
                 extra = {"sources": found.sources}

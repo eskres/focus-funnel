@@ -180,6 +180,28 @@ The rule from decision 8 lives in `app/chat/raw_text.py` as pure functions: `add
 
 **Alternatives:** keep blocks in a JSON column (rejected: the raw text is what search and the detail view read, and a second copy would drift).
 
+### 15. Refs in detail (decided during task 2.1, 2026-11-05)
+
+Refs live in `app/chat/refs.py`. Details decision 2 left open:
+
+- **Order within the rows.** Rows are taken by position. Within one position: a tool message's `details.sources`, then its `details.similar`, then the parts of the proposals there (in `list_proposals()` order, then by part index). For each part, its `add_to` and `similar.thought_id` count at the proposal's position.
+- **A late confirm.** A part's `thought_id` is written when the user confirms, which can be long after the proposal. If it counted at the proposal's position, a thought first seen in a search between the proposal and the confirm would be renumbered. So confirm stamps the part with `seen_position`: the position after the conversation's last stored message, and the part's `thought_id` counts there. A part saved before this change has no stamp and counts at its proposal's position. The stamp is not sent to the chat.
+- **Another user's thought** can only be in a crafted row. It gets no number. The lookup is one query over every id the rows name: it reads the user's own thoughts in full and, for another user's, only that the row is not theirs (each column is a `CASE` on the owner), so a foreign id (skipped) and a deleted one (no row; it keeps its number) are told apart. An owner never changes, so a foreign id is skipped for good. The conversation answer takes its saved titles from the same lookup, so it still makes one `thoughts` query.
+- **Search results.** The search tool text gives each result its ref (`1. T3 · Title · date · #tags`). The turn computes the refs from the stored rows before each search, and a result seen for the first time is numbered after every other, in the order of `details.sources`, so the next turn computes the same numbers. Without refs, the text is unchanged.
+- **The note.** It is a system message just before the held-proposal note, listing ref, title, filing date, tags, category, and the summary cut at `filing.seen_summary_chars`, most recently seen first (by the last row that names the thought). Code defaults (3 and 1,500) apply when `chat.yaml` has no value. The context meter in the conversation answer counts it.
+- **The offer.** The seen-thoughts note replaces `FILED_NOTE`, which is removed. After `OFFER_NOTE`, when the note lists any thought, one more paragraph says those thoughts are filed already and that new facts about one of them are an addition with `add_to`.
+- **The held note** names an addition's target as `Adds to: T1`, so a re-proposed held addition keeps its target. `drop_held_note()` finds the note by its first line.
+
+**Alternatives:** number a foreign id but never list or resolve it (rejected: the task asks that it get no ref, and either way only a crafted row can hold one); a part's `thought_id` at its proposal's position (rejected: a late confirm renumbers later refs).
+
+### 16. Resolving a ref when the proposal is written (decided during task 2.3, 2026-11-05)
+
+`parse_proposal()` reads `add_to` (case and spaces are ignored: ` t2 ` is `T2`) and `new` (true, or the text "true"). Two parts with the same ref are a `ToolArgumentError`; an `add_to` that is not text is one too. Text that is not a ref is kept as it is, so it resolves to nothing. `ProposalPart.as_dict()` carries the ref as `add_to_ref`, and `new` is not stored.
+
+`write_proposal()` resolves the refs, from the rows it already loads, only when a part has one. A ref naming the user's existing seen thought gives the stored part `add_to` (the id), `based_on` (the thought's `updated_at` in ISO form, so confirm compares it exactly and the client sends it back unchanged), and the thought's current title in place of the model's: an addition never changes the title, so the model's is dropped. Any other ref leaves a plain new part, and is logged. The proposal payload carries `add_to` and `based_on` on every part, null for a new thought, in the stream event and the conversation answer alike.
+
+**Alternatives:** keep the model's title on the part for "File as new" (rejected: the spec says the model's title for an addition is ignored, and the card names the thought by its current title; the user can rename a card filed as new).
+
 ## Risks / Trade-offs
 
 - [Depends on `thought-editing`, not built, and on `explore`, merged and archived] → The tasks start after `thought-editing` merges. If `origin`, `check_category()`, the `saved_title` lookup, or the offer code (`asked_proposal()`, `offer_note()`, `Turn._proposed`) change shape, re-read decisions 2, 3, 4, 7, and 10.

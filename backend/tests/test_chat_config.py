@@ -78,11 +78,21 @@ def test_a_missing_value_fails_naming_it(tmp_path, key):
         ),
         ({"filing": {"known_tags": 0}}, "filing.known_tags"),
         ({"filing": 40}, "filing"),
+        ({"filing": {"known_tags": 40, "seen_thoughts": 0}}, "filing.seen_thoughts"),
+        ({"filing": {"known_tags": 40, "seen_summary_chars": "long"}}, "filing.seen_summary_chars"),
     ],
 )
 def test_an_out_of_range_value_fails_naming_it(tmp_path, change, name):
     with pytest.raises(ChatConfigError, match=name):
         load_chat_config(write(tmp_path, {**VALID, **change}))
+
+
+def test_the_seen_thoughts_settings_default_when_missing_and_load_when_given(tmp_path):
+    filing = load_chat_config(FIXTURES / "valid.yaml").filing
+    assert (filing.seen_thoughts, filing.seen_summary_chars) == (3, 1500)
+    changed = {"filing": {"known_tags": 40, "seen_thoughts": 5, "seen_summary_chars": 200}}
+    filing = load_chat_config(write(tmp_path, {**VALID, **changed})).filing
+    assert (filing.seen_thoughts, filing.seen_summary_chars) == (5, 200)
 
 
 def search_with(**change) -> dict:

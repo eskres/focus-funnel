@@ -65,6 +65,8 @@ PART = {
     "thought_id": None,
     "saved_title": None,
     "deleted": False,
+    "add_to": None,
+    "based_on": None,
 }
 
 

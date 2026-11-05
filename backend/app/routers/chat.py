@@ -34,7 +34,7 @@ from app.chat.loadout import find_loadout_model, get_default_model, get_loadout,
 from app.chat.model_call import open_model_call
 from app.chat.model_info import model_info
 from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, build_context, estimate_tokens, forced_tool
-from app.chat.proposal import filing_for, held_parts, held_proposal
+from app.chat.proposal import filing_for, held_parts, held_proposal, refs_for
 from app.chat.sse import log_response, sse_response
 from app.chat.turn import Turn
 from app.config import Settings, get_settings
@@ -191,7 +191,14 @@ async def chat(
         messages = await list_messages(session, conversation)
         # The user message this turn answers, stored or resent, is the last one.
         after_position = messages[-1].position
-        context = build_context(messages, held, today_in(zone))
+        refs = await refs_for(session, conversation, messages)
+        context = build_context(
+            messages,
+            held,
+            today_in(zone),
+            seen_note=refs.note(config.filing),
+            refs=refs.by_id(),
+        )
         filing = await filing_for(session, user, config)
         info = await model_info(
             session, user, conversation.provider_id, conversation.model, settings, http_client

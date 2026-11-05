@@ -41,6 +41,12 @@ filing:
   # The user's tags named in the proposal tool, most used first, so the model
   # reuses them. About 100 tokens at 40.
   known_tags: 40
+  # The thoughts this conversation has seen, listed by ref on every turn and
+  # in the offer (openspec thought-appending, design decision 2): at most
+  # this many, most recently seen first, each summary cut to
+  # seen_summary_chars. About 450 tokens a thought at 1,500.
+  seen_thoughts: 3
+  seen_summary_chars: 1500
 
 # Thought search (openspec thought-storage, design decisions 5, 7, and 8).
 # min_similarity is provisional until the evaluation in task 6.4 sets it:

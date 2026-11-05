@@ -79,6 +79,10 @@ class FilingConfig:
 
     # The user's tags named in the proposal tool, most used first.
     known_tags: int
+    # The seen-thoughts note (thought-appending design decision 2): the most
+    # recently seen thoughts it lists, and each one's summary cut to this.
+    seen_thoughts: int = 3
+    seen_summary_chars: int = 1500
 
 
 @dataclass(frozen=True)
@@ -184,7 +188,13 @@ def _parse_search(raw: object) -> SearchConfig:
 def _parse_filing(raw: object) -> FilingConfig:
     if not isinstance(raw, dict):
         raise ChatConfigError("'filing' must be a mapping of filing settings")
-    return FilingConfig(known_tags=_positive_int(raw, "known_tags", "filing."))
+    # Settings added after known_tags take their default when the file has none.
+    optional = {
+        name: _positive_int(raw, name, "filing.")
+        for name in ("seen_thoughts", "seen_summary_chars")
+        if name in raw
+    }
+    return FilingConfig(known_tags=_positive_int(raw, "known_tags", "filing."), **optional)
 
 
 def _parse_temperature(raw: object) -> TemperatureConfig:

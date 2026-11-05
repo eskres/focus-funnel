@@ -30,6 +30,7 @@ from app.chat.prompt import (
     tools_for,
     unsaved_parts,
 )
+from app.chat.refs import Refs, conversation_refs, resolve_additions
 from app.chat.tools import ToolArgumentError, parse_proposal
 from app.chat.usage import completion_usage, record_usage
 from app.config import Settings
@@ -118,15 +119,14 @@ def discussion_start(proposals: list[Proposal]) -> int:
     return 0
 
 
-def filed_titles(proposals: list[Proposal]) -> list[str]:
-    """The titles of the parts saved from these proposals, each once."""
-    titles = [
-        part.get("title", "")
-        for proposal in proposals
-        for part in proposal.parts
-        if part.get("thought_id")
-    ]
-    return list(dict.fromkeys(title for title in titles if title))
+async def refs_for(
+    session: AsyncSession, conversation: Conversation, messages: list[Message] | None = None
+) -> Refs:
+    """The conversation's refs as its rows stand now (design decision 2)."""
+    if messages is None:
+        messages = await list_messages(session, conversation)
+    proposals = await list_proposals(session, conversation)
+    return await conversation_refs(session, conversation.user_id, messages, proposals)
 
 
 async def raw_text_for(
@@ -155,10 +155,13 @@ async def write_proposal(
     push: bool = False,
 ) -> tuple[Proposal, uuid.UUID | None]:
     """Write a proposal and hold it. Returns it, and the id of the held
-    proposal it replaced, if any. The caller commits."""
-    raw = await raw_text_for(
-        session, conversation, await list_messages(session, conversation), push=push
-    )
+    proposal it replaced, if any. A part's ref is resolved now, into an
+    addition to a seen thought or a new thought (design decision 3). The
+    caller commits."""
+    messages = await list_messages(session, conversation)
+    raw = await raw_text_for(session, conversation, messages, push=push)
+    if any(part.get("add_to_ref") is not None for part in parts):
+        parts = resolve_additions(parts, await refs_for(session, conversation, messages))
     proposal = Proposal(
         id=uuid.uuid4(),
         conversation_id=conversation.id,
@@ -222,9 +225,13 @@ def proposal_payload(
         thought_id = part.get("thought_id")
         known = titles is not None and thought_id is not None
         return {
-            **part,
+            # Where the part was confirmed only fixes its ref; the chat does not need it.
+            **{key: value for key, value in part.items() if key != "seen_position"},
             "saved_title": titles.get(str(thought_id)) if known else None,
             "deleted": known and str(thought_id) not in titles,
+            # An addition's thought and version, null for a new thought.
+            "add_to": part.get("add_to"),
+            "based_on": part.get("based_on"),
         }
 
     return {
@@ -310,9 +317,13 @@ async def offer_proposal(
         settings=settings,
         http_client=http_client,
     )
+    refs = await conversation_refs(session, user.id, messages, proposals)
+    seen_note = refs.note(config.filing)
     try:
-        context = build_context(messages, today=today_in(zone))
-        context.append({"role": "system", "content": offer_note(filed_titles(proposals))})
+        context = build_context(
+            messages, today=today_in(zone), seen_note=seen_note, refs=refs.by_id()
+        )
+        context.append({"role": "system", "content": offer_note(seen_note is not None)})
         parts = await asked_proposal(session, call, context, filing, conversation.id, zone)
     finally:
         await call.aclose()

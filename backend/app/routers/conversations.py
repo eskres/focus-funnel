@@ -19,6 +19,7 @@ from app.chat.conversations import (
     claim_turn,
     get_conversation,
     list_messages,
+    next_position,
     now,
     release_turn,
     switch_model,
@@ -33,6 +34,7 @@ from app.chat.proposal import (
     proposal_payload,
     saved_titles,
 )
+from app.chat.refs import conversation_refs
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.errors import ApiError, ErrorCode
@@ -88,6 +90,11 @@ class ProposalPart(BaseModel):
     saved_title: str | None = None
     # True when the part was saved and its thought has since been deleted.
     deleted: bool = False
+    # An addition (thought-appending design decision 3): the thought it adds
+    # to, and that thought's updated_at when the proposal was written, as the
+    # server wrote it, so the client sends it back unchanged.
+    add_to: uuid.UUID | None = None
+    based_on: str | None = None
 
 
 class ProposalOut(BaseModel):
@@ -206,10 +213,14 @@ async def detail(
     )
     held = held_parts(await held_proposal(session, conversation))
     proposals = await list_proposals(session, conversation)
-    titles = await saved_titles(session, user, proposals)
+    # One lookup gives the refs, the seen-thoughts note, and the saved titles.
+    refs = await conversation_refs(session, user.id, messages, proposals)
+    titles = refs.titles()
     gauge = meter(
         conversation,
-        build_context(messages, held),
+        build_context(
+            messages, held, seen_note=refs.note(get_chat_config().filing), refs=refs.by_id()
+        ),
         info.context_length if info is not None else None,
     )
     return ConversationDetail(
@@ -497,9 +508,14 @@ async def confirm_proposal(
         http_client=http_client,
     )
     thought_id = str(outcome.thought.id)
+    # The conversation sees the thought now, after every stored row, so its
+    # ref comes after every ref given so far (thought-appending decision 15).
+    seen_position = await next_position(session, conversation)
     # A new list, so the JSON column is written.
     proposal.parts = [
-        {**part, "thought_id": thought_id} if index in indexes else part
+        {**part, "thought_id": thought_id, "seen_position": seen_position}
+        if index in indexes
+        else part
         for index, part in enumerate(proposal.parts)
     ]
     if conversation.held_proposal_id == proposal.id and not any(
