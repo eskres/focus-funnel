@@ -10,6 +10,7 @@ import {
   detail,
   done,
   errorEvent,
+  errorResponse,
   fakeApi,
   json,
   loadout,
@@ -376,6 +377,58 @@ describe("following an answer again after the connection breaks", () => {
 
     expect(await screen.findByText(/cut short/)).toBeInTheDocument();
     expect(screen.getByText("Want")).toBeInTheDocument();
+  });
+
+  it("connection drops and the answer stops at the tool round limit: shows that reason, not cut short", async () => {
+    await breakAfter("Let me", {
+      [DETAIL]: [
+        json(200, before),
+        json(200, detail({
+          messages: [
+            ...asked,
+            storedMessage(3, "assistant", "Let me look.", { ...call("a", "search_thoughts"), error_code: "tool_loop_limit" }),
+            storedMessage(4, "tool", "1 match", { tool_call_id: "a", details: { sources: [MILK] } }),
+          ],
+        })),
+      ],
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The answer could not be completed");
+    expect(screen.getByText("Let me look.")).toBeInTheDocument();
+    expect(screen.queryByText(/cut short/)).not.toBeInTheDocument();
+    await waitFor(() => expect(input()).toBeEnabled());
+  });
+
+  it("follows again at most three times, then says the answer was cut short", async () => {
+    // Every follow stream closes before the answer ends, and the turn keeps running.
+    const breaks = () =>
+      new Response(delta("Half an ans"), { status: 200, headers: { "Content-Type": "text/event-stream" } });
+    const { calls } = await breakAfter("Half an ans", {
+      [DETAIL]: [json(200, before), json(200, running(2, asked))],
+      [STREAM]: breaks,
+    });
+
+    expect(await screen.findByText(/cut short/)).toBeInTheDocument();
+    expect(screen.queryByText(/Open the conversation again/)).not.toBeInTheDocument();
+    expect(screen.getByText("Half an ans")).toBeInTheDocument();
+    await waitFor(() => expect(input()).toBeEnabled());
+    expect(calls.filter((c) => c.path === "/api/chat/c1/stream")).toHaveLength(3);
+  });
+
+  it("a follow the server refuses (the conversation was deleted): shows that error, not cut short", async () => {
+    const { calls } = await breakAfter("Half an ans", {
+      [DETAIL]: [json(200, before), json(200, running(2, asked))],
+      [STREAM]: errorResponse(404, "not_found", "Not found."),
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Not found.");
+    expect(screen.queryByText(/cut short/)).not.toBeInTheDocument();
+    await waitFor(() => expect(input()).toBeEnabled());
+    // The refusal is final: the conversation is not reloaded and followed again.
+    expect(calls.filter((c) => c.path === "/api/chat/c1/stream")).toHaveLength(1);
+    expect(calls.filter((c) => c.path === "/api/conversations/c1")).toHaveLength(2);
   });
 
   it("server cannot be reached again: keeps the part received, says it was cut short and to open it again", async () => {

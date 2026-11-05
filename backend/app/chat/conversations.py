@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.chat.config import ChatConfig
 from app.chat.loadout import find_loadout_model
@@ -145,7 +146,11 @@ async def claim_turn(session: AsyncSession, conversation: Conversation) -> None:
         await session.rollback()
         raise conversation_busy()
     await session.commit()
-    conversation.turn_started_at = started
+    # Set as already stored: a plain assignment would make the next flush
+    # write the claim again and hold that write open (a row lock, or SQLite's
+    # database lock) until the session commits, which a /compact draft does
+    # only when it ends.
+    set_committed_value(conversation, "turn_started_at", started)
 
 
 async def release_turn(session: AsyncSession, conversation_id: uuid.UUID) -> None:
@@ -182,6 +187,17 @@ def ends_answered(last: Message | None) -> bool:
     return last.role == "assistant" and not last.tool_calls
 
 
+def chat_turn_claim(conversation: Conversation) -> bool:
+    """Whether the conversation's claim was taken by a chat turn.
+
+    A chat turn sets `last_activity_at` when it stores its message, after it
+    claims. `/compact` and the proposal routes claim without touching it, so
+    their claims started after the last activity.
+    """
+    started = conversation.turn_started_at
+    return started is not None and conversation.last_activity_at >= started
+
+
 def interrupted_answer(conversation_id: uuid.UUID, position: int, content: str | None = None) -> Message:
     """The failed answer stored for a turn the server stopped."""
     return Message(
@@ -198,10 +214,11 @@ async def release_stale_turns(session: AsyncSession) -> int:
     """Free every claimed conversation; run once at startup, before serving.
 
     The backend runs as one process, so a claim that exists when it starts
-    belongs to a process that died mid-turn. A conversation whose turn
+    belongs to a process that died mid-turn. A conversation whose chat turn
     stopped before its answer was stored gets a failed `answer_interrupted`
-    answer, so it shows as not finished and can be sent again. Returns how
-    many claims were released.
+    answer, so it shows as not finished and can be sent again. Another claim
+    (a `/compact` draft, a proposal being offered) answers no message, so it
+    is only released. Returns how many claims were released.
     """
     claimed = list(
         (
@@ -212,7 +229,7 @@ async def release_stale_turns(session: AsyncSession) -> int:
     )
     for conversation in claimed:
         last = await last_message(session, conversation.id)
-        if not ends_answered(last):
+        if chat_turn_claim(conversation) and not ends_answered(last):
             session.add(interrupted_answer(conversation.id, last.position + 1))
         conversation.turn_started_at = None
     await session.commit()

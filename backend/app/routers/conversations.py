@@ -172,6 +172,10 @@ async def detail(
     settings: Settings,
     http_client: httpx2.AsyncClient | None,
 ) -> ConversationDetail:
+    # The registry is read before the messages: a turn that ends in between
+    # has stored its answer, so a null turn always comes with every message.
+    # A turn that ends after this read is harmless: following it answers 204.
+    turn = running_turn(user, conversation)
     messages = await list_messages(session, conversation)
     info = (
         await model_info(
@@ -212,7 +216,7 @@ async def detail(
         proposals=[
             ProposalOut(**proposal_payload(p)) for p in await list_proposals(session, conversation)
         ],
-        turn=running_turn(user, conversation),
+        turn=turn,
     )
 
 

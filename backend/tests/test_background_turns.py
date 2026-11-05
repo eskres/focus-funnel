@@ -12,12 +12,13 @@ from sqlalchemy import func, select
 
 from app.chat import running
 from app.demo_keys import held_keys
-from app.errors import ErrorCode
+from app.errors import ApiError, ErrorCode
 from app.models import Conversation, Message, Proposal, UsageEvent
 from tests.chat_helpers import (
     NANO,
     Hold,
     MidStreamFailure,
+    api_error,
     finish_chunk,
     text_chunks,
     tool_call_chunks,
@@ -212,6 +213,62 @@ async def test_the_tool_round_limit_is_stored(async_api):
     assert messages[-2].error_code == ErrorCode.TOOL_LOOP_LIMIT
 
 
+async def test_a_failure_opening_a_later_round_is_stored_as_failed(async_api):
+    api = async_api
+    # The provider refuses the second model call, every retry included.
+    conversation_id = await failing_turn(
+        api,
+        tool_round("search_thoughts", '{"query": "milk"}', "call_s", text="Let me look. "),
+        api_error(429),
+        api_error(429),
+        api_error(429),
+    )
+
+    messages = await messages_of(api, conversation_id)
+    assert [m.role for m in messages] == ["user", "assistant", "tool", "assistant"]
+    assert (messages[1].status, messages[1].content) == ("complete", "Let me look. ")
+    assert (messages[-1].status, messages[-1].content, messages[-1].error_code) == (
+        "failed",
+        None,
+        ErrorCode.PROVIDER_RATE_LIMITED,
+    )
+    response = await api.http.get(f"/api/conversations/{conversation_id}", headers=api.headers)
+    assert response.json()["messages"][-1]["error_code"] == ErrorCode.PROVIDER_RATE_LIMITED
+
+
+async def test_a_failing_tool_is_stored_as_failed_with_the_text_so_far(async_api, monkeypatch):
+    from app.chat import turn as turn_module
+
+    async def refused(*args, **kwargs):
+        raise ApiError(503, ErrorCode.PROVIDER_UNREACHABLE, "The provider is unreachable.")
+
+    monkeypatch.setattr(turn_module, "search_tool_result", refused)
+    conversation_id = await failing_turn(
+        async_api, tool_round("search_thoughts", '{"query": "milk"}', "call_s", text="Let me look. ")
+    )
+
+    messages = await messages_of(async_api, conversation_id)
+    assert [m.role for m in messages] == ["user", "assistant", "assistant"]
+    assert (messages[-1].status, messages[-1].error_code) == ("failed", ErrorCode.PROVIDER_UNREACHABLE)
+
+
+async def test_a_failure_after_the_answer_is_stored_adds_nothing(async_api, monkeypatch):
+    from app.chat.turn import Turn
+
+    async def broken(self):
+        raise RuntimeError("the meter broke")
+        yield  # an async generator, like the method it replaces
+
+    monkeypatch.setattr(Turn, "_suggest_compact", broken)
+    conversation_id = await failing_turn(async_api, text_chunks("All ", "done.") + [usage_chunk()])
+
+    messages = await messages_of(async_api, conversation_id)
+    assert [(m.role, m.status, m.content) for m in messages] == [
+        ("user", "complete", "hello"),
+        ("assistant", "complete", "All done."),
+    ]
+
+
 # --- 1.4 /compact frees the conversation when its client goes away ---
 
 
@@ -326,6 +383,27 @@ async def test_the_owner_follows_a_running_turn_from_its_first_event(async_api):
     assert await claim_of(api, conversation_id) is None
 
 
+async def test_a_follower_holds_no_database_connection_while_it_waits(async_api):
+    from app.db import get_engine
+
+    api = async_api
+    await api.ready()
+    conversation_id, hold = await held_turn(api)
+    await asyncio.sleep(0.05)
+    before = get_engine().pool.checkedout()
+
+    following = asyncio.ensure_future(api.http.get(stream_path(conversation_id), headers=api.headers))
+    await asyncio.sleep(0.1)
+    during = get_engine().pool.checkedout()
+    hold.release.set()
+    response = await asyncio.wait_for(following, 5)
+    await turns_settled()
+
+    assert response.status_code == 200
+    assert parse_events(response.text)[-1] == ("done", {})
+    assert during == before
+
+
 async def test_following_a_conversation_with_no_running_turn_answers_204(async_api):
     api = async_api
     await api.ready()
@@ -384,6 +462,35 @@ async def test_the_detail_carries_the_running_turn_while_it_runs(async_api):
     assert positions == [(0, "user"), (1, "assistant"), (2, "user"), (3, "assistant")]
 
 
+async def test_a_turn_that_ends_while_the_detail_loads_leaves_its_answer_in_it(
+    async_api, monkeypatch
+):
+    from app.routers import conversations
+
+    api = async_api
+    await api.ready()
+    conversation_id, hold = await held_turn(api)
+    model_info = conversations.model_info
+
+    async def turn_ends_meanwhile(*args, **kwargs):
+        # The detail has read what it reads first; now the turn ends.
+        hold.release.set()
+        await turns_settled()
+        return await model_info(*args, **kwargs)
+
+    monkeypatch.setattr(conversations, "model_info", turn_ends_meanwhile)
+    response = await api.http.get(f"/api/conversations/{conversation_id}", headers=api.headers)
+
+    body = response.json()
+    assert running.get(uuid.UUID(conversation_id)) is None
+    # Never "no turn" with the answer missing: the turn was read first, and
+    # following it now answers 204, so the chat loads the stored answer.
+    assert [m["role"] for m in body["messages"]] == ["user"]
+    assert body["turn"] == {"after_position": 0}
+    follow = await api.http.get(stream_path(conversation_id), headers=api.headers)
+    assert follow.status_code == 204
+
+
 async def test_a_compact_claim_is_not_a_running_turn(async_api):
     api = async_api
     await api.ready()
@@ -395,13 +502,39 @@ async def test_a_compact_claim_is_not_a_running_turn(async_api):
     await asyncio.wait_for(hold.reached.wait(), 5)
 
     assert await claim_of(api, conversation_id) is not None
-    assert await detail_turn(api, conversation_id) is None
-    follow = await api.http.get(stream_path(conversation_id), headers=api.headers)
+    # Asked while the draft holds its claim, not after it timed out.
+    assert await asyncio.wait_for(detail_turn(api, conversation_id), 2) is None
+    follow = await asyncio.wait_for(
+        api.http.get(stream_path(conversation_id), headers=api.headers), 2
+    )
     assert follow.status_code == 204
+    assert await claim_of(api, conversation_id) is not None
+    assert not drafting.done()
 
     gone.set()
     await drafting
+    hold.release.set()
     assert await claim_of(api, conversation_id) is None
+
+
+async def test_deleting_a_conversation_while_its_turn_runs_keeps_the_usage(async_api):
+    api = async_api
+    await api.ready()
+    conversation_id, hold = await held_turn(api)
+    turn = running.get(uuid.UUID(conversation_id))
+
+    deleted = await api.http.delete(f"/api/conversations/{conversation_id}", headers=api.headers)
+    assert deleted.status_code == 204
+    hold.release.set()
+    await turns_settled()
+
+    # The call that was running is recorded, without its conversation, and
+    # the turn makes no further call.
+    [row] = await usage_rows(api)
+    assert (row.kind, row.conversation_id, row.prompt_tokens) == ("chat", None, 100)
+    assert len(api.fake.chat_requests) == 1
+    assert turn.events[-1] == ("error", {"error": {"code": ErrorCode.NOT_FOUND, "message": "Not found."}})
+    assert await messages_of(api, conversation_id) == []
 
 
 # --- 3.1 a demo visitor's key lasts the whole turn, and goes nowhere else ---
@@ -650,6 +783,41 @@ async def test_a_turn_cancelled_after_a_tool_round_keeps_that_round(async_api):
     assert await claim_of(api, conversation_id) is None
 
 
+async def test_a_turn_cancelled_after_its_answer_is_stored_adds_no_failed_answer(
+    async_api, monkeypatch
+):
+    from app.chat.turn import Turn
+
+    api = async_api
+    await api.ready()
+    stored = asyncio.Event()
+
+    async def after_the_answer(self):
+        # The complete answer is committed; the turn is still running.
+        stored.set()
+        await asyncio.Event().wait()
+        yield  # an async generator, like the method it replaces
+
+    monkeypatch.setattr(Turn, "_suggest_compact", after_the_answer)
+    api.fake.queue(text_chunks("All ", "done.") + [usage_chunk()])
+    watcher = await watch_chat(api, "hello")
+    await asyncio.wait_for(stored.wait(), 5)
+    [turn] = running.running_turns()
+    conversation_id = str(turn.conversation_id)
+
+    turn.task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(turn.task, 5)
+    await asyncio.wait_for(watcher, 5)
+
+    messages = await messages_of(api, conversation_id)
+    assert [(m.role, m.status, m.content, m.error_code) for m in messages] == [
+        ("user", "complete", "hello", None),
+        ("assistant", "complete", "All done.", None),
+    ]
+    assert await claim_of(api, conversation_id) is None
+
+
 async def test_the_lifespan_exit_interrupts_running_turns_and_frees_them(async_api):
     from app.main import app, lifespan
 
@@ -685,9 +853,12 @@ async def test_the_lifespan_exit_interrupts_running_turns_and_frees_them(async_a
 # --- 4.2 the startup sweep frees what a stopped server left ---
 
 
-def _seed(url, client, headers, messages, claimed: bool, **extra_last) -> str:
+def _seed(url, client, headers, messages, claimed: bool | str, **extra_last) -> str:
     """A conversation with these messages (alternating user and assistant),
-    claimed or not; `extra_last` sets fields on the last message."""
+    claimed or not; `extra_last` sets fields on the last message.
+
+    `claimed=True` is a chat turn's claim, which sets the last activity when
+    it stores its message; `claimed="compact"` is a claim that does not."""
     from sqlalchemy import update
 
     from tests.chat_helpers import run_db, seed_conversation
@@ -696,10 +867,14 @@ def _seed(url, client, headers, messages, claimed: bool, **extra_last) -> str:
 
     async def work(session):
         if claimed:
+            started = datetime.now(UTC)
+            values = {"turn_started_at": started}
+            if claimed is True:
+                values["last_activity_at"] = started
             await session.execute(
                 update(Conversation)
                 .where(Conversation.id == uuid.UUID(conversation_id))
-                .values(turn_started_at=datetime.now(UTC))
+                .values(**values)
             )
         if extra_last:
             await session.execute(
@@ -761,9 +936,11 @@ def test_the_sweep_stores_an_interrupted_answer_and_frees_the_claim(
     answered = _seed(url, client, alice, ("hello", "Hi!"), claimed=True)
     compacted = _seed(url, client, alice, ("hello", "Hi!", "Summary."), claimed=True, role="summary")
     free = _seed(url, client, alice, ("hello", "Hi!", "unanswered"), claimed=False)
-    before = {cid: _state(url, cid) for cid in (answered, compacted, free)}
+    # A /compact draft over a message that got no answer (context_full).
+    drafting = _seed(url, client, alice, ("hello", "Hi!", "too long"), claimed="compact")
+    before = {cid: _state(url, cid) for cid in (answered, compacted, free, drafting)}
 
-    assert _sweep(url) == 4
+    assert _sweep(url) == 5
 
     claim, messages = _state(url, unanswered)
     assert claim is None
@@ -772,8 +949,9 @@ def test_the_sweep_stores_an_interrupted_answer_and_frees_the_claim(
     claim, messages = _state(url, mid_tools)
     assert claim is None
     assert messages[-1] == (2, "assistant", "failed", None, ErrorCode.ANSWER_INTERRUPTED)
-    # A finished answer (or an accepted summary) only gets its claim cleared.
-    for conversation_id in (answered, compacted):
+    # A finished answer (or an accepted summary), or a claim that was not a
+    # chat turn's, only gets its claim cleared.
+    for conversation_id in (answered, compacted, drafting):
         claim, messages = _state(url, conversation_id)
         assert claim is None
         assert messages == before[conversation_id][1]

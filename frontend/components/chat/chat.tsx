@@ -66,12 +66,18 @@ import type { CompactModel, Proposal, SseEvent } from "@/lib/sse";
 const MAX_FOLLOWS = 3;
 
 /**
- * True when the last stored message is a finished turn's answer: an assistant
- * message with no tool calls, whether it completed, failed, or was cut.
+ * True when the stored messages end with a finished turn's answer: an
+ * assistant message with no tool calls, whether it completed, failed, or was
+ * cut, or a turn that stored its reason for ending on a tool round (the tool
+ * round limit), which `fromStored` shows as failed.
  */
 function endsAnswered(stored: StoredMessage[]): boolean {
   const last = stored.at(-1);
-  return last?.role === "assistant" && !last.tool_calls?.length;
+  if (last?.role === "assistant" && !last.tool_calls?.length) return true;
+  const asked = stored.findLastIndex((message) => message.role === "user");
+  return stored
+    .slice(asked + 1)
+    .some((message) => message.role === "assistant" && (message.status !== "complete" || !!message.error_code));
 }
 
 /**
