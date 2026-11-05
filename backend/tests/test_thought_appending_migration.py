@@ -12,7 +12,7 @@ from tests.test_provider_key_migration import run_alembic
 from tests.test_thought_migration import with_database
 
 REVISION = "0162bb890895"
-PREVIOUS = "2bea7235fdf6"
+PREVIOUS = "8de09c18db91"
 BASELINE_COLUMNS = {"similarity_p95", "similarity_p99", "baseline_thoughts"}
 ADDITION_COLUMNS = {
     "id", "thought_id", "user_id", "proposal_id", "from_position", "to_position",

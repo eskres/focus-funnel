@@ -34,6 +34,7 @@ from app.chat.refs import (
     Refs,
     SeenThought,
     conversation_refs,
+    date_fields,
     resolve_additions,
     saved_ids,
 )
@@ -267,6 +268,7 @@ async def part_lookup(session: AsyncSession, user: User, proposals: list[Proposa
                 category=thought.category,
                 created_at=thought.created_at,
                 updated_at=thought.updated_at,
+                **date_fields(thought),
             )
     return PartLookup(thoughts, await _additions_of(session, user, proposals))
 
@@ -421,7 +423,7 @@ async def offer_proposal(
     refs = await conversation_refs(session, user.id, messages, proposals)
     # Every thought the conversation filed is listed, past the cap, so the
     # model can add to it rather than file it again.
-    seen_note = refs.note(config.filing, keep=saved_ids(proposals))
+    seen_note = refs.note(config.filing, keep=saved_ids(proposals), zone=zone)
 
     async def check(parts: list[ProposalPart], again: bool) -> Check:
         return await check_parts(
@@ -449,7 +451,9 @@ async def offer_proposal(
             # Layer 2 (design decision 4): the model is asked once more, with
             # the candidates, numbered after the conversation's refs. It may
             # decline again, and then nothing is offered.
-            note, _ = candidates_note(parts, checked, refs, config.filing.seen_summary_chars)
+            note, _ = candidates_note(
+                parts, checked, refs, config.filing.seen_summary_chars, zone
+            )
             context.append({"role": "system", "content": note})
             parts = await asked_proposal(
                 session, call, context, filing, conversation.id, zone

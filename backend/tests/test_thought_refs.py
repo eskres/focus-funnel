@@ -3,7 +3,9 @@
 import json
 import re
 import uuid
-from datetime import UTC, datetime, timedelta
+from dataclasses import replace
+from datetime import UTC, date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import delete, select
@@ -308,6 +310,40 @@ def test_the_note_lists_ref_title_date_tags_category_and_summary_and_no_id():
     assert not UUID_TEXT.search(note)
 
 
+def test_the_note_writes_the_local_filing_day_and_the_thoughts_own_date():
+    # With thought-dates: as the search tool writes them (thought-dates design decision 12).
+    dated = replace(
+        seen("T1", "Dinner with Sam", tags=("sam",), category="event"),
+        created_at=datetime(2026, 3, 1, 2, 0, tzinfo=UTC),
+        starts_on=date(2026, 10, 2),
+        starts_at=time(19, 0),
+    )
+    undated = seen("T2", "Oat milk")
+
+    note = seen_thoughts_note([dated, undated], 3, 1500, ZoneInfo("America/Los_Angeles"))
+
+    assert "T1 · Dinner with Sam · filed 2026-02-28 · on Fri 2026-10-02 19:00 · #sam · event\n" in note
+    assert "T2 · Oat milk · filed 2026-02-28 · #misc · note\n" in note
+    # Without a zone, the filing day is UTC's.
+    assert "T1 · Dinner with Sam · filed 2026-03-01 · on Fri 2026-10-02 19:00" in seen_thoughts_note(
+        [dated], 3, 1500
+    )
+
+
+def test_the_held_note_says_an_addition_keeps_its_thoughts_date_and_names_its_ref():
+    lock = str(uuid.uuid4())
+    day = {"start": "2026-10-02", "end": None, "time_zone": "UTC"}
+    held = [
+        part(title="Buy a bike lock") | {"add_to": lock, "when": day},
+        part(title="Bike light") | {"when": {**day, "start": "2026-10-09"}},
+    ]
+
+    note = held_proposal_note(held, {lock: "T1"})
+
+    assert "Category: task\nDate: unchanged (an addition keeps its thought's date)\nAdds to: T1" in note
+    assert "Title: Bike light\nSummary: Buy oat milk tomorrow.\nTags: shopping\nCategory: task\nDate: 2026-10-09" in note
+
+
 def test_the_note_is_capped_by_count_and_summary_length():
     thoughts = [seen("T3", "Newest", summary="word " * 50), seen("T1", "Middle"), seen("T2", "Oldest")]
 
@@ -544,6 +580,26 @@ def test_a_seen_ref_becomes_an_addition_part(client, alice, fake_llm, test_datab
     [event] = [data for name, data in parse_events(response.text) if name == "proposal"]
     assert event["parts"][0]["add_to"] == lock and event["parts"][0]["title"] == "Buy a bike lock"
     assert tool_results(fake_llm.chat_requests[1])[-1].startswith("The proposal is now shown")
+
+
+def test_an_addition_part_drops_the_models_date_and_a_new_part_keeps_its_own(
+    client, alice, fake_llm, test_database_url, lock_conversation
+):
+    # An addition keeps its thought's date (design decision 22, with thought-dates).
+    conversation_id, lock = lock_conversation
+    propose(
+        fake_llm,
+        thought_args(add_to="T1", when_choices=[{"start": "2026-10-02"}, {"start": "2026-10-09"}]),
+        thought_args(title="Bike light", summary="Buy a bike light.", when={"start": "2026-10-09"}),
+    )
+
+    chat(client, alice, "black or red, and a light by the 9th", conversation_id)
+
+    [[addition, new]] = stored_parts(test_database_url, conversation_id)[1:]
+    assert addition["add_to"] == lock
+    assert (addition["when"], addition["when_choices"]) == (None, None)
+    assert "add_to" not in new
+    assert new["when"] == {"start": "2026-10-09", "end": None, "time_zone": "UTC"}
 
 
 def test_an_unknown_ref_becomes_a_new_part(client, alice, fake_llm, test_database_url, lock_conversation):

@@ -520,6 +520,11 @@ class EvalThought:
     category: str | None
     created_at: datetime
     updated_at: datetime
+    # The corpus has no thought dates (thought-dates); the note reads them.
+    starts_on: date | None = None
+    starts_at: time | None = None
+    ends_on: date | None = None
+    ends_at: time | None = None
 
 
 def _thought(item: Item) -> EvalThought:

@@ -269,6 +269,19 @@ The diff is `lib/word-diff.ts`; the card is in `proposal-card.tsx`; the list and
 
 **Alternatives:** an overlay of marks over the textarea (rejected: fragile with wrapping and scrolling, for no gain over a preview); the hint's "After" as the card's summary alone (rejected: confirming it would replace the thought's summary with the new idea and drop what it held).
 
+### 22. An addition keeps its thought's date (decided when restacking onto `thought-dates`, 2026-11-05)
+
+`thought-dates` gives a thought its own date and a proposal part `when` or `when_choices`. Neither design says what an addition does to the date, so: an addition never changes the target's date, as it never changes its title.
+
+- **Writing the proposal.** `resolve_additions()` drops the model's `when` and `when_choices` from a part it turns into an addition, so the part stores both as null. The `add_to` description tells the model to give no date with `add_to`.
+- **Confirm.** `mode: "add"` skips the date-pick check and passes no `when` to `apply_update()`, so a `when` in the body is ignored. A new part with `when_choices` that took the "Similar" hint is added without a pick.
+- **Undo.** `before` holds no date and undo passes none, so the date stays as it is. A date edit after the addition changes `updated_at`, so the undo is then refused like any other edit.
+- **Notes.** The held-proposal note's `Date:` line says `unchanged (an addition keeps its thought's date)` for an addition, followed by its `Adds to:` line. The seen-thoughts note and the candidate list write each thought as the search tool does: filed on the user's local day, with ` · on <date>` when it has one, so the model sees the date it keeps.
+- **The card and the sheet.** The addition card has no date fields and sends no `when`; the sheet shows "When:" and the date fields beside the additions list, and an undo leaves the date shown.
+- **Migration.** The migration now follows `thought-dates`' `8de09c18db91`, so there is one head.
+
+**Alternatives:** let an addition set the date the model gives (rejected: a follow-up about a dated event would move the event; the user can change the date in the sheet).
+
 ## Risks / Trade-offs
 
 - [Depends on `thought-editing`, not built, and on `explore`, merged and archived] → The tasks start after `thought-editing` merges. If `origin`, `check_category()`, the `saved_title` lookup, or the offer code (`asked_proposal()`, `offer_note()`, `Turn._proposed`) change shape, re-read decisions 2, 3, 4, 7, and 10.

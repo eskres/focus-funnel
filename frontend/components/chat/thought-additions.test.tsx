@@ -192,6 +192,37 @@ describe("the additions in the thought sheet", () => {
     window.removeEventListener(THOUGHT_CHANGED_EVENT, listen);
   });
 
+  it("shows a dated thought's date with its additions, and keeps it after an undo (thought-dates)", async () => {
+    const when = { start: "2026-10-02T19:00", end: null, time_zone: "UTC" };
+    at("/app/c1?thought=t1");
+    api({
+      "GET /api/thoughts/t1": json(200, { ...THOUGHT, when }),
+      [UNDO]: json(200, { ...RESTORED, when }),
+    });
+    render(<Chat conversationId="c1" />);
+    const dialog = await sheet();
+
+    expect(within(dialog).getByText(/^When: /)).toHaveTextContent(/2026/);
+    expect(within(dialog).getByRole("region", { name: "Additions" })).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Undo last addition" }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Undo the last addition?" })).getByRole("button", {
+        name: "Undo",
+      }),
+    );
+
+    expect(await within(dialog).findByText("Buy a black lock.")).toBeInTheDocument();
+    expect(within(dialog).getByText(/^When: /)).toHaveTextContent(/2026/);
+
+    // Editing shows the date fields beside the additions list.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Edit" }));
+    expect(within(dialog).getByRole("region", { name: "Additions" })).toBeInTheDocument();
+    const editing = within(dialog).getByRole("region", { name: "Edit thought" });
+    expect(within(editing).getByLabelText("Start date")).toHaveValue("2026-10-02");
+    expect(within(editing).getByLabelText("Start time")).toHaveValue("19:00");
+  });
+
   it("says why when the undo is refused because the thought changed, and changes nothing", async () => {
     at("/app/c1?thought=t1");
     api({

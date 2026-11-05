@@ -19,8 +19,9 @@ import re
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +53,21 @@ class SeenThought:
     category: str | None
     created_at: datetime
     updated_at: datetime
+    # The thought's own date (thought-dates), as thought_date_text() reads it.
+    starts_on: date | None = None
+    starts_at: time | None = None
+    ends_on: date | None = None
+    ends_at: time | None = None
+
+
+def date_fields(thought: Any) -> dict[str, Any]:
+    """A thought's date columns, for a SeenThought."""
+    return {
+        "starts_on": thought.starts_on,
+        "starts_at": thought.starts_at,
+        "ends_on": thought.ends_on,
+        "ends_at": thought.ends_at,
+    }
 
 
 def _thought_id(value: Any) -> uuid.UUID | None:
@@ -166,6 +182,7 @@ class Refs:
                 category=thought.category,
                 created_at=thought.created_at,
                 updated_at=thought.updated_at,
+                **date_fields(thought),
             )
         return ref
 
@@ -189,15 +206,20 @@ class Refs:
         return {str(thought.id): thought.ref for thought in self.thoughts.values()}
 
     def note(
-        self, filing: FilingConfig, keep: set[uuid.UUID] | frozenset[uuid.UUID] = frozenset()
+        self,
+        filing: FilingConfig,
+        keep: set[uuid.UUID] | frozenset[uuid.UUID] = frozenset(),
+        zone: ZoneInfo | None = None,
     ) -> str | None:
         """The seen-thoughts note, or None when no seen thought exists: the
         `filing.seen_thoughts` most recently seen, and every thought in
-        `keep` past them (the offer keeps the thoughts the conversation filed)."""
+        `keep` past them (the offer keeps the thoughts the conversation filed).
+        Filing days are the user's local days in `zone` (UTC when not given),
+        as in the search tool's text."""
         seen = self.seen()
         cap = filing.seen_thoughts
         listed = seen[:cap] + [thought for thought in seen[cap:] if thought.id in keep]
-        return seen_thoughts_note(listed, len(listed), filing.seen_summary_chars)
+        return seen_thoughts_note(listed, len(listed), filing.seen_summary_chars, zone)
 
 
 async def conversation_refs(
@@ -232,6 +254,10 @@ async def conversation_refs(
                 own(Thought.category).label("category"),
                 own(Thought.created_at).label("created_at"),
                 own(Thought.updated_at).label("updated_at"),
+                own(Thought.starts_on).label("starts_on"),
+                own(Thought.starts_at).label("starts_at"),
+                own(Thought.ends_on).label("ends_on"),
+                own(Thought.ends_at).label("ends_at"),
             ).where(Thought.id.in_(distinct))
         )
     ).all()
@@ -250,6 +276,7 @@ async def conversation_refs(
             category=row.category,
             created_at=row.created_at,
             updated_at=row.updated_at,
+            **date_fields(row),
         )
         for row in rows
         if row.own
@@ -272,8 +299,10 @@ def resolve_additions(parts: list[dict[str, Any]], refs: Refs) -> list[dict[str,
     """The parts as stored: a part whose `add_to_ref` names a seen thought
     becomes an addition to it (design decision 3), with `add_to` (its id),
     `based_on` (its `updated_at`), and its current title, since an addition
-    never changes the title and the model's is ignored. Any other ref makes
-    the part a new thought, and is logged."""
+    never changes the title and the model's is ignored. An addition never
+    changes the thought's date either (design decision 22), so the model's
+    date or date choices are dropped. Any other ref makes the part a new
+    thought, and is logged."""
     resolved: list[dict[str, Any]] = []
     for part in parts:
         ref = part.get("add_to_ref")
@@ -294,6 +323,8 @@ def resolve_additions(parts: list[dict[str, Any]], refs: Refs) -> list[dict[str,
             {
                 **stored,
                 "title": target.title,
+                "when": None,
+                "when_choices": None,
                 "add_to": str(target.id),
                 "based_on": target.updated_at.isoformat(),
             }

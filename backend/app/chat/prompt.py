@@ -11,7 +11,7 @@ from app.chat.commands import parse_message
 from app.errors import ApiError
 from app.models import Message
 from app.thoughts.categories import FIXED_CATEGORIES
-from app.thoughts.dates import DEFAULT_ZONE, today_in
+from app.thoughts.dates import DEFAULT_ZONE, local_day, thought_date_text, today_in
 
 SEARCH_TOOL = "search_thoughts"
 PROPOSE_TOOL = "propose_thought"
@@ -116,7 +116,8 @@ ADD_TO_DESCRIPTION = (
     "The ref, such as T2, of a thought this conversation has seen, to add this entry "
     "to it instead of filing a new thought. Give it when the entry continues that "
     "thought. The summary is then the whole new summary of that thought, and says "
-    "what changed and when; its title is kept and the title here is ignored."
+    "what changed and when; its title is kept and the title here is ignored. Its "
+    "date is kept too: give no when or when_choices with add_to."
 )
 NEW_DESCRIPTION = (
     "true to keep this entry a new thought after similar thoughts were listed for it."
@@ -256,7 +257,11 @@ def _date_text(when: dict[str, Any]) -> str:
 
 
 def date_line(part: dict[str, Any]) -> str:
-    """A part's date for the held-proposal note: one date, both choices, or none."""
+    """A part's date for the held-proposal note: one date, both choices, or
+    none. An addition keeps its thought's date (thought-appending design
+    decision 22), so it says so."""
+    if part.get("add_to"):
+        return "unchanged (an addition keeps its thought's date)"
     choices = part.get("when_choices")
     if choices:
         return " or ".join(_date_text(choice) for choice in choices) + " (not picked yet)"
@@ -304,10 +309,19 @@ def _cut(text: str, limit: int) -> str:
     return text[:limit].rsplit(" ", 1)[0].rstrip(",;:.") + "…"
 
 
-def thought_entry(ref: str, thought: Any, summary_chars: int) -> str:
+def thought_entry(
+    ref: str, thought: Any, summary_chars: int, zone: ZoneInfo | None = None
+) -> str:
     """A filed thought as the model reads it by ref: ref, title, filing date,
-    tags, and category, then the summary cut at `summary_chars`."""
-    heading = f"{ref} · {thought.title} · filed {thought.created_at.date().isoformat()}"
+    the thought's own date when it has one, tags, and category, then the
+    summary cut at `summary_chars`. The filing day is the user's local day in
+    `zone` (UTC when not given), and the own date reads as in the search
+    tool's text (thought-dates design decision 12)."""
+    filed = local_day(thought.created_at, zone or ZoneInfo(DEFAULT_ZONE))
+    heading = f"{ref} · {thought.title} · filed {filed.isoformat()}"
+    dated = thought_date_text(thought)
+    if dated:
+        heading += f" · on {dated}"
     if thought.tags:
         heading += " · " + " ".join(f"#{tag}" for tag in thought.tags)
     if thought.category:
@@ -315,14 +329,16 @@ def thought_entry(ref: str, thought: Any, summary_chars: int) -> str:
     return heading + "\n   " + _cut(thought.summary, summary_chars)
 
 
-def seen_thoughts_note(seen: Sequence[Any], limit: int, summary_chars: int) -> str | None:
+def seen_thoughts_note(
+    seen: Sequence[Any], limit: int, summary_chars: int, zone: ZoneInfo | None = None
+) -> str | None:
     """The note naming the thoughts this conversation has seen, by ref and
     never by id (thought-appending design decision 2): the first `limit` of
-    `seen`, which comes most recently seen first, each with its title, filing
-    date, tags, category, and summary cut at `summary_chars`. None when
-    nothing was seen."""
+    `seen`, which comes most recently seen first, each as thought_entry()
+    writes it, filed on its local day in `zone`. None when nothing was seen."""
     entries = [
-        thought_entry(thought.ref, thought, summary_chars) for thought in list(seen)[:limit]
+        thought_entry(thought.ref, thought, summary_chars, zone)
+        for thought in list(seen)[:limit]
     ]
     if not entries:
         return None

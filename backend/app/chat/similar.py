@@ -23,6 +23,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx2
 from sqlalchemy import exists, select
@@ -246,7 +247,11 @@ async def check_parts(
 
 
 def candidates_note(
-    parts: Sequence[ProposalPart], check: Check, refs: Refs, summary_chars: int
+    parts: Sequence[ProposalPart],
+    check: Check,
+    refs: Refs,
+    summary_chars: int,
+    zone: ZoneInfo | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Layer 2: the text that lists each part's candidates by ref and asks
     for the call again, and the candidates as the tool message stores them
@@ -254,6 +259,8 @@ def candidates_note(
 
     A thought new to the conversation is numbered after every other, in the
     order of the list, as the next turn numbers it from the stored rows.
+    Each is listed as thought_entry() writes it, filed on its local day in
+    `zone`, with its own date when it has one.
     """
     similar: list[dict[str, Any]] = []
     listed: set[uuid.UUID] = set()
@@ -264,7 +271,7 @@ def candidates_note(
         entries = []
         for candidate in part_check.candidates:
             thought = candidate.thought
-            entries.append(thought_entry(refs.see(thought), thought, summary_chars))
+            entries.append(thought_entry(refs.see(thought), thought, summary_chars, zone))
             if thought.id not in listed:
                 listed.add(thought.id)
                 similar.append(

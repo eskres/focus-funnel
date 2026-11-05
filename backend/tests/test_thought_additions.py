@@ -731,3 +731,85 @@ def test_an_undo_survives_an_unreachable_provider(client, alice, lock, added, fa
     assert response.status_code == 200, response.text
     assert response.json()["summary"] == FILED["summary"]
     assert found_by_words(test_database_url, user_id_for(client, alice), "new lock") == [FILED["title"]]
+
+
+# --- with thought-dates: an addition keeps its thought's date (design decision 22) ---
+
+
+def dated_lock(client, headers, lock: dict) -> dict:
+    response = client.patch(
+        f"/api/thoughts/{lock['id']}",
+        headers=headers,
+        json={"when": {"start": "2026-10-02T19:00", "end": "2026-10-02T21:00", "time_zone": "Europe/Berlin"}},
+    )
+    assert response.status_code == 200, response.text
+    return {**lock, **response.json()}
+
+
+CHOICES = [
+    {"start": "2026-10-09", "end": None, "time_zone": "Europe/Berlin"},
+    {"start": "2026-10-16", "end": None, "time_zone": "Europe/Berlin"},
+]
+
+
+def test_an_addition_keeps_the_date_and_the_detail_shows_it_with_the_additions(
+    client, alice, lock, test_database_url
+):
+    lock = dated_lock(client, alice, lock)
+    # A part that still carries date choices, as a row from before the restack
+    # might: the addition needs no pick, and a date in the body is ignored.
+    proposal_id = seed_proposal(
+        test_database_url,
+        lock["conversation_id"],
+        [addition_part(lock) | {"when": None, "when_choices": CHOICES}],
+        position=5,
+        raw_text="Prices run from 40 to 80 euros.",
+        from_position=2,
+        to_position=4,
+    )
+
+    response = add(
+        client, alice, lock["conversation_id"], proposal_id, when={"start": "2027-01-01", "time_zone": "UTC"}
+    )
+
+    assert response.status_code == 200, response.text
+    after = thought(client, alice, lock["id"])
+    assert after["summary"] == ADDED["summary"]
+    assert after["when"] == lock["when"]
+    [addition] = after["additions"]
+    assert (addition["proposal_id"], addition["undone"]) == (proposal_id, False)
+
+    restored = undo(client, alice, lock["id"], addition["id"])
+
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["summary"] == FILED["summary"]
+    assert restored.json()["when"] == lock["when"]
+    assert restored.json()["additions"][0]["undone"] is True
+
+
+def test_the_similar_hint_adds_a_part_with_date_choices_without_a_pick(
+    client, alice, lock, test_database_url
+):
+    lock = dated_lock(client, alice, lock)
+    new_part = part(title="Lock prices", summary=ADDED["summary"]) | {
+        "when": None,
+        "when_choices": CHOICES,
+        "similar": {"thought_id": lock["id"]},
+    }
+    proposal_id = seed_proposal(
+        test_database_url, lock["conversation_id"], [new_part], position=5, from_position=2, to_position=4
+    )
+    # Filed as new, the card must pick a date first (thought-dates).
+    refused = confirm(client, alice, lock["conversation_id"], proposal_id, **ADDED)
+    assert refused.status_code == 422
+    assert refused.json()["error"]["message"].startswith("when:")
+
+    response = add(
+        client, alice, lock["conversation_id"], proposal_id, add_to=lock["id"], based_on=lock["updated_at"]
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["thought_id"] == lock["id"]
+    after = thought(client, alice, lock["id"])
+    assert after["when"] == lock["when"]
+    assert len(after["additions"]) == 1

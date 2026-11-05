@@ -382,6 +382,33 @@ describe("the Similar hint", () => {
     });
   });
 
+  it("adds a card with date choices without a pick, and sends no date (thought-dates)", async () => {
+    const choices = [
+      { start: "2026-10-09", end: null, time_zone: "UTC" },
+      { start: "2026-10-16", end: null, time_zone: "UTC" },
+    ];
+    const { calls } = api({
+      "POST /api/chat": proposing({ ...IDEA, when: null, when_choices: choices }),
+      [CONFIRM]: saved("t9"),
+    });
+    await openChat();
+    const card = await proposed();
+    expect(within(card).getByRole("group", { name: "Which date?" })).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Confirm" })).toBeDisabled();
+
+    fireEvent.click(within(card).getByRole("button", { name: "Add to it instead" }));
+
+    // An addition keeps its thought's date: no choices, and Add needs no pick.
+    const addition = screen.getByRole("group", { name: "Addition: Cycle to the office" });
+    expect(within(addition).queryByRole("group", { name: "Which date?" })).not.toBeInTheDocument();
+    fireEvent.click(within(addition).getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByRole("group", { name: "Added to: Cycle to the office" })).toBeInTheDocument();
+    const body = calls.find((call) => call.path.endsWith("/confirm"))?.body as Record<string, unknown>;
+    expect(body).toMatchObject({ mode: "add", add_to: "t9" });
+    expect(body).not.toHaveProperty("when");
+  });
+
   it("goes back to the card as proposed with File as new", async () => {
     api({ "POST /api/chat": proposing(IDEA) });
     await openChat();
