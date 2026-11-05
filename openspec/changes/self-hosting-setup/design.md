@@ -288,6 +288,19 @@ Demo mode is used because it needs no login, and it runs every runtime path that
 
 The status's `connectors` item and the doctor read the settings and the `connectors.yaml` loader that `mcp-connectors` adds, and nothing else from that change. Connector tokens stay in the environment variables that `connectors.yaml` names, set in `.env`; the setup script does not generate them (they come from the connected service), and says so when `MCP_ENABLED=true`. `docs/setup.md` and `docs/offline.md` say the same. The loader already refuses startup when one is unset, so the doctor reports that as a config-file failure naming the connector and the variable. Connector URLs are printed redacted (decision 11 step 8). The offline guide says that operator connectors work offline only as sidecars on the compose network (the `docker-compose.mcp.yml` pattern) and that user connectors to outside URLs cannot.
 
+### 18. Status details left open by decision 7
+
+Decision 7 fixes the items and their rules; these choices fill in what it leaves open, each the simplest that fits the spec.
+
+- **Order and the 409 message.** The items come in the order of decision 7's table (`database`, `encryption_key`, `login`, `allow_list`, `search_key`, `chat_model`, `custom_provider`, `connectors`). "The first missing item" is the first required item that is not `ok` in that order, and `setup_incomplete` carries that item's own message, so a missing default model answers "Choose a default model in the model step."
+- **Values in messages.** An item carries no fields beyond id, state, required, message, and settings, so the non-secret values the wizard shows are in the messages: the `login` message names the issuer, client id, and internal URL (or the Firebase project), and the `allow_list` message lists its entries or says "none set". The `custom_provider` item also lists the preset labels and names `PROVIDERS_CONFIG_PATH`, since decision 3 says the wizard shows the presets.
+- **A keyless preset with a row that does not decrypt** is `ok` for `search_key` and `chat_model`, as `load_api_key` then sends the placeholder key and the provider works. `failed` is only for a preset that needs a key.
+- **SQLite** (tests only) gets `database` `ok` "The database answers." with no pgvector check, as the startup check does.
+- **Connectors before `mcp-connectors` lands.** The item reads `mcp_enabled` and `mcp_user_connectors` with `getattr` and imports the `connectors.yaml` loader only when connectors are on, so on a branch without that change it reports "Connectors are off." and still names `MCP_ENABLED`, `MCP_USER_CONNECTORS`, and `MCP_CONNECTORS_PATH`.
+- **Redaction is cautious.** `redact_url` takes the userinfo to end at the last `@` before the query (or the last `@` anywhere when only the query has one), so an unencoded `/` or `?` in a password cannot leak part of it as the host; a string with no `://` is shown as "(not a URL)".
+
+*Alternatives:* extra structured fields on the items for the login values (rejected: the spec's item shape has none, and the wizard can render messages); a `failed` search key for any undecryptable row (rejected: it would block finishing on an install whose search works).
+
 ## Risks / Trade-offs
 
 - [The token sits in the backend log, and log shippers keep it] → it is invalid after the next restart or once setup finishes, and it grants only the configuration report and the finished flag, never data or keys.
