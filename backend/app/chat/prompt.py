@@ -2,13 +2,15 @@
 
 import json
 import math
-from datetime import UTC, date, datetime
+from datetime import date
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.chat.commands import parse_message
 from app.errors import ApiError
 from app.models import Message
 from app.thoughts.categories import FIXED_CATEGORIES
+from app.thoughts.dates import DEFAULT_ZONE, today_in
 
 SEARCH_TOOL = "search_thoughts"
 PROPOSE_TOOL = "propose_thought"
@@ -25,7 +27,7 @@ names to look for, not a question. When the user names a time, such as this \
 month, also pass the start date; when they name a kind of thought, such as \
 work, also pass it as a tag.
 - propose_thought: propose a thought to file, with a short title, a summary, \
-tags, and a category. Use it when the user states something clearly worth \
+tags, a category, and a date when the thought is about a set date or time. Use it when the user states something clearly worth \
 keeping, such as a to-do or an idea, and when a discussion reaches a \
 conclusion or a decision. The summary keeps the key findings, including your \
 points the user agreed with. When a message holds several separate things to \
@@ -53,7 +55,10 @@ SEARCH_TOOL_SCHEMA: dict[str, Any] = {
         "name": SEARCH_TOOL,
         "description": (
             "Search the thoughts the user filed before, by meaning and by words. "
-            "Returns the best matches, or says that none matched."
+            "Returns the best matches, or says that none matched. When the user asks "
+            "what is on, coming up, or planned for a time, pass dated_from and "
+            "dated_to, with no query unless they name a subject; the result then "
+            "lists the thoughts dated in those days, in date order."
         ),
         "parameters": {
             "type": "object",
@@ -62,7 +67,8 @@ SEARCH_TOOL_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "description": (
                         "The key words and names to look for, not a question. "
-                        "For example: 'dentist appointment' or 'ACME-4471 invoice'."
+                        "For example: 'dentist appointment' or 'ACME-4471 invoice'. "
+                        "Needed unless dated_from or dated_to is given."
                     ),
                 },
                 "tags": {
@@ -74,8 +80,21 @@ SEARCH_TOOL_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "description": "Only thoughts filed on or after this date, YYYY-MM-DD.",
                 },
+                "dated_from": {
+                    "type": "string",
+                    "description": (
+                        "The first of the days the thought happens on, not the day it "
+                        "was filed, YYYY-MM-DD. Only thoughts dated on or after it."
+                    ),
+                },
+                "dated_to": {
+                    "type": "string",
+                    "description": (
+                        "The last of the days the thought happens on, not the day it "
+                        "was filed, YYYY-MM-DD. Only thoughts dated on or before it."
+                    ),
+                },
             },
-            "required": ["query"],
         },
     },
 }
@@ -91,6 +110,40 @@ CATEGORY_DESCRIPTION = (
     "categories are for their own kinds."
 )
 TAGS_DESCRIPTION = "A few short tags."
+
+# The model gives a start and an end only; the server adds the user's zone
+# (thought-dates design decisions 2 and 5).
+DATE_POINT_DESCRIPTION = "YYYY-MM-DD for a day, or YYYY-MM-DDTHH:MM for a day and a time."
+DATE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "start": {"type": "string", "description": "The start: " + DATE_POINT_DESCRIPTION},
+        "end": {
+            "type": "string",
+            "description": (
+                "The end, only when the user names one: " + DATE_POINT_DESCRIPTION
+                + " Give it a time only when the start has one."
+            ),
+        },
+    },
+    "required": ["start"],
+}
+WHEN_DESCRIPTION = (
+    "The thought's date. Give it only when the thought is about a set date or time; "
+    "leave it out otherwise. Work out weekdays and relative days such as 'tomorrow' "
+    "from today's date. A weekday means the soonest such day after today. Give a "
+    "time or an end only when the user names one. For example, said on Wednesday "
+    "2026-09-30, 'dinner Friday at 7' is {\"start\": \"2026-10-02T19:00\"}, and "
+    "'trip 3-6 Nov' is {\"start\": \"2026-11-03\", \"end\": \"2026-11-06\"}."
+)
+WHEN_CHOICES_DESCRIPTION = (
+    "Do not guess an unclear day: give two choices here instead, and no when. The "
+    "day is unclear in two cases. A weekday that is today's weekday: today, and the "
+    "same weekday one week later; said on Friday 2026-10-02, 'Friday at 7' gives "
+    "2026-10-02T19:00 and 2026-10-09T19:00. 'Next' with a weekday: the soonest such "
+    "day after today, and the same weekday one week after that; said on Wednesday "
+    "2026-09-30, 'next Friday' gives 2026-10-02 and 2026-10-09. The user picks one."
+)
 
 
 def propose_tool_schema(categories: list[str], known_tags: list[str]) -> dict[str, Any]:
@@ -120,6 +173,14 @@ def propose_tool_schema(categories: list[str], known_tags: list[str]) -> dict[st
                 "type": "string",
                 "enum": categories,
                 "description": CATEGORY_DESCRIPTION,
+            },
+            "when": {**DATE_SCHEMA, "description": WHEN_DESCRIPTION},
+            "when_choices": {
+                "type": "array",
+                "items": DATE_SCHEMA,
+                "minItems": 2,
+                "maxItems": 2,
+                "description": WHEN_CHOICES_DESCRIPTION,
             },
         },
         "required": ["title", "summary", "tags", "category"],
@@ -176,14 +237,30 @@ def unsaved_parts(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [part for part in parts if not part.get("thought_id")]
 
 
+def _date_text(when: dict[str, Any]) -> str:
+    start = when.get("start") or ""
+    return f"{start} to {when['end']}" if when.get("end") else start
+
+
+def date_line(part: dict[str, Any]) -> str:
+    """A part's date for the held-proposal note: one date, both choices, or none."""
+    choices = part.get("when_choices")
+    if choices:
+        return " or ".join(_date_text(choice) for choice in choices) + " (not picked yet)"
+    if part.get("when"):
+        return _date_text(part["when"])
+    return "none"
+
+
 def held_proposal_note(parts: list[dict[str, Any]]) -> str:
     """The note for a held proposal: its parts the user has not saved."""
     blocks = [
-        "Title: {title}\nSummary: {summary}\nTags: {tags}\nCategory: {category}".format(
+        "Title: {title}\nSummary: {summary}\nTags: {tags}\nCategory: {category}\nDate: {date}".format(
             title=part.get("title", ""),
             summary=part.get("summary", ""),
             tags=", ".join(part.get("tags") or []) or "none",
             category=part.get("category") or "none",
+            date=date_line(part),
         )
         for part in unsaved_parts(parts)
     ]
@@ -256,9 +333,13 @@ def _as_model_message(message: Message) -> dict[str, Any] | None:
 
 
 def system_prompt(today: date | None = None) -> str:
-    """The system prompt with today's date, so the model can pass a start date."""
-    today = today or datetime.now(UTC).date()
-    return f"{SYSTEM_PROMPT}\n\nToday is {today.strftime('%A')} {today.isoformat()}."
+    """The system prompt with today's date, the user's local date when the
+    caller knows their zone, so the model can work out dates."""
+    today = today or today_in(ZoneInfo(DEFAULT_ZONE))
+    return (
+        f"{SYSTEM_PROMPT}\n\nToday is {today.strftime('%A')} {today.isoformat()}. "
+        "Weeks start on Monday."
+    )
 
 
 def build_context(

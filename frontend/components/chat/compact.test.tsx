@@ -2,6 +2,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { browserTimeZone } from "@/lib/time-zone";
 import {
   compactDraftEvent,
   compactModelsEvent,
@@ -181,6 +182,7 @@ describe("the compact suggestion", () => {
     expect(await screen.findByLabelText("Summary")).toHaveValue("We agreed on 900.");
     expect(calls.filter((c) => c.path === "/api/chat").at(-1)?.body).toEqual({
       message: "/compact",
+      time_zone: browserTimeZone(),
       conversation_id: "c1",
     });
   });
@@ -307,6 +309,7 @@ describe("the /compact dialog", () => {
     expect(screen.getByText(`Written by ${BIG}.`)).toBeInTheDocument();
     expect(calls.filter((c) => c.path === "/api/chat").at(-1)?.body).toEqual({
       message: "/compact",
+      time_zone: browserTimeZone(),
       conversation_id: "c1",
       compact_model: { provider_id: "nebius", model: BIG },
     });

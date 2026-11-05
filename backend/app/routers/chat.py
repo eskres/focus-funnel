@@ -42,6 +42,7 @@ from app.db import get_session, get_sessionmaker
 from app.errors import ApiError, ErrorCode, context_full, model_not_set
 from app.models import Conversation, Message, User
 from app.providers import get_provider_http_client, provider_for_user
+from app.thoughts.dates import today_in, zone_from
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,8 @@ class ChatRequest(BaseModel):
     # For /compact only: the loadout model the user chose to write this one
     # summary, when the conversation does not fit its own model.
     compact_model: ModelRef | None = None
+    # The browser's IANA zone. Missing or unknown reads as UTC, never refused.
+    time_zone: str | None = None
 
 
 def get_session_factory() -> async_sessionmaker[AsyncSession]:
@@ -153,6 +156,8 @@ async def chat(
     if parsed.command == "compact":
         return await compact(body, user, session_factory(), config, settings, http_client)
 
+    # Read once, and handed to the turn (thought-dates design decision 3).
+    zone = zone_from(body.time_zone)
     session = session_factory()
     conversation_id: uuid.UUID | None = None
     claimed = False
@@ -186,7 +191,7 @@ async def chat(
         messages = await list_messages(session, conversation)
         # The user message this turn answers, stored or resent, is the last one.
         after_position = messages[-1].position
-        context = build_context(messages, held)
+        context = build_context(messages, held, today_in(zone))
         filing = await filing_for(session, user, config)
         info = await model_info(
             session, user, conversation.provider_id, conversation.model, settings, http_client
@@ -222,6 +227,7 @@ async def chat(
             held_parts=held,
             settings=settings,
             http_client=http_client,
+            zone=zone,
         )
         try:
             await turn.open()

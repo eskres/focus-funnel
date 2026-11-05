@@ -36,12 +36,19 @@ export const toolEvent = (
     ...(sources ? { sources } : {}),
   })}\n\n`;
 
+/** A date as the server sends it. */
+export type WireWhen = { start: string; end: string | null; time_zone: string };
+
 /** A proposal part as the server sends it. */
 export type WirePart = {
   title: string;
   summary: string;
   tags: string[];
   category?: string | null;
+  /** The proposed date; left out, as an older server does. */
+  when?: WireWhen | null;
+  /** Two dates for the user to pick from; left out, as an older server does. */
+  when_choices?: WireWhen[] | null;
   thought_id?: string | null;
   /** The saved thought's current title; left out, as an older server does. */
   saved_title?: string | null;

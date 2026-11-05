@@ -4,6 +4,7 @@ import { delta, done, errorResponse, fakeApi, streamOf, toolEvent } from "@/test
 
 import { BackendUnreachableError, NotFoundError, ModelNotSetError } from "./api";
 import { COMMANDS, followTurn, isDeleteCommand, streamChat } from "./chat";
+import { browserTimeZone } from "./time-zone";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -33,6 +34,7 @@ describe("streamChat", () => {
     expect(path).toBe("/api/chat");
     expect(JSON.parse(String(init.body))).toEqual({
       message: "hello",
+      time_zone: browserTimeZone(),
       conversation_id: "c1",
       provider_id: "nebius",
       model: "vendor/big",
@@ -40,14 +42,14 @@ describe("streamChat", () => {
     });
   });
 
-  it("sends only the message for a new conversation with no choice", async () => {
+  it("sends only the message and the zone for a new conversation with no choice", async () => {
     const fetchMock = vi.fn(async () => new Response("", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await drain(streamChat({ message: "hi" }));
 
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(JSON.parse(String(init.body))).toEqual({ message: "hi" });
+    expect(JSON.parse(String(init.body))).toEqual({ message: "hi", time_zone: browserTimeZone() });
   });
 
   it("reports the conversation a refused message was stored in, then throws", async () => {

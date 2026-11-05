@@ -1,6 +1,8 @@
 // Typed client for the stored conversations (`/api/conversations`).
 import { apiFetch } from "@/lib/api";
+import type { When } from "@/lib/dates";
 import { toProposal, toSources, type Proposal, type Source } from "@/lib/sse";
+import { browserTimeZone } from "@/lib/time-zone";
 
 export type ConversationSummary = {
   id: string;
@@ -89,6 +91,11 @@ export type ConfirmRequest = {
   summary: string;
   tags: string[];
   category: string | null;
+  /**
+   * The card's date with the browser's zone, or null for no date. Left out, the
+   * thought gets no date; a part with two date choices needs it.
+   */
+  when?: When | null;
 };
 
 export type ConfirmOutcome = { saved: boolean; thought_id: string; message: string };
@@ -129,11 +136,14 @@ export function confirmProposal(
   );
 }
 
-/** The held proposal to show before archive or /compact; the server asks the model when none is held. */
+/**
+ * The held proposal to show before archive or /compact; the server asks the
+ * model when none is held, with the browser's zone for its "today".
+ */
 export async function offerProposal(id: string): Promise<Proposal | null> {
   const offered = await apiFetch<{ proposal: unknown }>(
     `${BASE}/${encodeURIComponent(id)}/proposal`,
-    { method: "POST" },
+    { method: "POST", body: JSON.stringify({ time_zone: browserTimeZone() }) },
   );
   return toProposal(offered.proposal);
 }

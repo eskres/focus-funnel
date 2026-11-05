@@ -2,17 +2,21 @@
 
 import { useEffect, useState } from "react";
 
+import { DateFields, type DateText, dateTextOf, whenOfText } from "@/components/chat/date-fields";
 import { ThoughtLink } from "@/components/chat/thought-link";
 import { type FieldText, hasEmptyField, parseTags, ThoughtFields } from "@/components/chat/thought-fields";
 import { Button } from "@/components/ui/button";
 import { confirmProposal } from "@/lib/conversations";
+import { formatWhen, type When } from "@/lib/dates";
 import type { Proposal, ProposalPart } from "@/lib/sse";
 import { THOUGHT_CHANGED_EVENT, type ThoughtChanged } from "@/lib/thoughts";
+import { browserTimeZone } from "@/lib/time-zone";
 import { cn } from "@/lib/utils";
 
 /**
  * A card: the parts it covers, and the text as the user left it. Once saved,
  * `savedTitle` is the thought's current title and `deleted` says it is gone.
+ * `whenChoices` are two dates for the user to pick from, in place of `when`.
  */
 type Card = {
   parts: number[];
@@ -20,6 +24,8 @@ type Card = {
   summary: string;
   tags: string;
   category: string | null;
+  when: When | null;
+  whenChoices: When[] | null;
   thoughtId: string | null;
   savedTitle: string | null;
   deleted: boolean;
@@ -32,6 +38,8 @@ function cardOf(part: ProposalPart, index: number): Card {
     summary: part.summary,
     tags: part.tags.join(", "),
     category: part.category,
+    when: part.when,
+    whenChoices: part.whenChoices,
     thoughtId: part.thoughtId,
     savedTitle: part.savedTitle,
     deleted: part.deleted,
@@ -39,8 +47,9 @@ function cardOf(part: ProposalPart, index: number): Card {
 }
 
 /**
- * Every part in one card, with no model call: the first part's title and
- * category, the summaries as paragraphs in order, and every tag once.
+ * Every part in one card, with no model call: the first part's title,
+ * category, and date (or date choices), the summaries as paragraphs in
+ * order, and every tag once.
  */
 export function mergeParts(parts: ProposalPart[]): Card {
   const tags: string[] = [];
@@ -53,6 +62,8 @@ export function mergeParts(parts: ProposalPart[]): Card {
     summary: parts.map((part) => part.summary).join("\n\n"),
     tags: tags.join(", "),
     category: parts[0].category,
+    when: parts[0].when,
+    whenChoices: parts[0].whenChoices,
     thoughtId: null,
     // Merged parts are saved as one thought, so the first part says how it is now.
     savedTitle: parts[0].savedTitle,
@@ -161,6 +172,12 @@ function ProposalCard({
     tags: card.tags,
     category: card.category ?? "",
   }));
+  // The date as fields: the proposed one, or none ("Add date"). With two
+  // choices, nothing until the user picks one or "No date".
+  const [date, setDate] = useState<DateText | null>(() => (card.whenChoices ? null : dateTextOf(card.when)));
+  // The choice picked: its index, "none" for "No date", or null before a pick.
+  const [pick, setPick] = useState<number | "none" | null>(null);
+  const mustPick = Boolean(card.whenChoices) && pick === null;
   // The saved thought as it is now: its title once it changed, and whether it is gone.
   const [now, setNow] = useState({ title: card.savedTitle, deleted: card.deleted });
   const [busy, setBusy] = useState(false);
@@ -182,8 +199,13 @@ function ProposalCard({
     return () => window.removeEventListener(THOUGHT_CHANGED_EVENT, follow);
   }, [thoughtId]);
 
+  function choose(choice: number | "none") {
+    setPick(choice);
+    setDate(choice === "none" ? null : dateTextOf(card.whenChoices?.[choice]));
+  }
+
   async function confirm() {
-    if (!conversationId || empty) return;
+    if (!conversationId || empty || mustPick) return;
     setBusy(true);
     setError(null);
     try {
@@ -193,6 +215,8 @@ function ProposalCard({
         summary: text.summary.trim(),
         tags: parseTags(text.tags),
         category: text.category || null,
+        // Always sent, with the browser's zone: null is "no date".
+        when: whenOfText(date, browserTimeZone()),
       });
       onSaved(card.parts, outcome.thought_id);
     } catch (err) {
@@ -246,10 +270,43 @@ function ProposalCard({
     >
       <p className="text-xs font-medium text-muted-foreground">A thought to file</p>
       <ThoughtFields value={text} onChange={setText} />
+      {card.whenChoices && (
+        <div role="group" aria-label="Which date?" className="flex flex-col gap-1">
+          <p className="text-xs font-medium">Which date did you mean?</p>
+          <div className="flex flex-wrap gap-2">
+            {card.whenChoices.map((choice, index) => (
+              <Button
+                key={index}
+                type="button"
+                size="sm"
+                variant={pick === index ? "default" : "outline"}
+                aria-pressed={pick === index}
+                disabled={busy}
+                onClick={() => choose(index)}
+              >
+                {formatWhen(choice, { year: false })}
+              </Button>
+            ))}
+            <Button
+              type="button"
+              size="sm"
+              variant={pick === "none" ? "default" : "outline"}
+              aria-pressed={pick === "none"}
+              disabled={busy}
+              onClick={() => choose("none")}
+            >
+              No date
+            </Button>
+          </div>
+        </div>
+      )}
+      {/* With two choices, the fields come once the user picked, to adjust the date. */}
+      {!mustPick && <DateFields value={date} onChange={setDate} disabled={busy} />}
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" onClick={confirm} disabled={busy || empty || !conversationId}>
+        <Button size="sm" onClick={confirm} disabled={busy || empty || mustPick || !conversationId}>
           Confirm
         </Button>
+        {mustPick && <p className="text-xs text-muted-foreground">Pick a date, or No date.</p>}
         {error && (
           <p role="alert" className="text-xs text-destructive">
             {error}

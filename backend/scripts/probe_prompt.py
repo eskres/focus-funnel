@@ -1,6 +1,6 @@
 """Probe the chat's system prompt and tools against a real model.
 
-Eight probes, each with its data set in scripts/probe_data/:
+Nine probes, each with its data set in scripts/probe_data/:
 
   tools    labelled messages: does the model pick the tool the label names?
   topic    a held proposal, then an unrelated or a related message: does the
@@ -17,6 +17,9 @@ Eight probes, each with its data set in scripts/probe_data/:
            expected category, and reuse an existing tag where one fits?
   nomatch  recall questions whose search finds nothing: does the answer say
            so plainly, without claiming anything was filed?
+  dates    /push messages and questions on a fixed day: does the part get the
+           right date, two choices for an ambiguous day and one for a clear
+           one, and does "what is on this week" search the thought's dates?
 
 `topic` and `repeat` together are the discussion probes.
 
@@ -221,13 +224,15 @@ async def run_turn(
     *,
     tools: list[dict[str, Any]] | None = None,
     forced: str | None = None,
+    today: date | None = None,
 ) -> Turn:
     """Run one user turn the way the chat does: with tools, running each call
     and calling the model again, up to the round limit. The search tool finds
     nothing and a proposal is shown. `forced` names the tool the first round
-    must call, as /push and /pull do."""
+    must call, as /push and /pull do. `today` is the date the prompt names
+    (the real UTC date when not given)."""
     turn = Turn(held=held)
-    context = build_context(messages, held)
+    context = build_context(messages, held, today)
     async with settings.limit:
         for round_number in range(settings.tool_rounds):
             started = time.monotonic()
@@ -562,7 +567,7 @@ async def probe_search(settings: Settings, runs: int) -> tuple[list[str], bool]:
         search = next((c for c in turn.calls if c["name"] == SEARCH_TOOL and c["valid"]), None)
         searched = not turn.error and turn.first_tool == SEARCH_TOOL and search is not None
         args = parse_search(tool_arguments(search["arguments"])) if search else None
-        query = args.query.lower() if args else ""
+        query = (args.query or "").lower() if args else ""
         keywords = bool(args) and "?" not in query and not query.startswith(QUESTION_WORDS) and any(
             word in query for word in case["words"]
         )
@@ -750,6 +755,133 @@ async def probe_nomatch(settings: Settings, runs: int) -> tuple[list[str], bool]
     return lines, share >= 0.95
 
 
+def _span(value: dict[str, Any] | None) -> tuple[str, str | None] | None:
+    """A date as (start, end), with no zone, to compare with the data set."""
+    if not value:
+        return None
+    return (value.get("start"), value.get("end"))
+
+
+def _dates_cell(when: tuple | None, choices: list[tuple] | None) -> str:
+    def text(span: tuple) -> str:
+        return span[0] + (f" to {span[1]}" if span[1] else "")
+
+    if choices:
+        return " or ".join(text(choice) for choice in choices) + " (choices)"
+    return text(when) if when else "no date"
+
+
+def _expected_dates(case: dict[str, Any]) -> tuple[tuple | None, list[tuple] | None]:
+    if case.get("when_choices"):
+        return None, [_span(choice) for choice in case["when_choices"]]
+    return _span(case.get("when")), None
+
+
+def _first_search(turn: Turn) -> dict[str, Any] | None:
+    """The first search call's raw arguments, read as the model wrote them."""
+    for call in turn.calls:
+        if call["name"] == SEARCH_TOOL:
+            try:
+                return tool_arguments(call["arguments"])
+            except ValueError:
+                return {}
+    return None
+
+
+def _query_ok(words: list[str] | None, query: Any) -> bool:
+    text = query.strip().lower() if isinstance(query, str) else ""
+    if words is None:
+        return not text
+    return "?" not in text and any(word in text for word in words)
+
+
+async def probe_dates(settings: Settings, runs: int) -> tuple[list[str], bool]:
+    cases = yaml.safe_load((DATA / "dates.yaml").read_text())["cases"]
+    jobs = [
+        (
+            run,
+            case,
+            run_turn(
+                settings,
+                transcript([{"user": case["message"]}]),
+                None,
+                forced=PROPOSE_TOOL if case.get("push") else None,
+                today=date.fromisoformat(case["today"]),
+            ),
+        )
+        for run in range(runs)
+        for case in cases
+    ]
+    results = await asyncio.gather(*(job for _, _, job in jobs))
+
+    lines = _header("Dates probe", settings, runs)
+    lines += [
+        (
+            "Each case runs on its own fixed today. A push case is sent as /push, so the "
+            "proposal tool is forced."
+        ),
+        "",
+    ]
+    lines += ["| Run | Case | Today | Expected | Got | Message |"]
+    lines += ["|---|---|---|---|---|---|"]
+    right: list[bool] = []
+    unclear_given_one: list[str] = []
+    clear_given_two: list[str] = []
+    for (run, case, _), turn in zip(jobs, results):
+        today = date.fromisoformat(case["today"])
+        weekday = today.strftime("%a")
+        if "search" in case:
+            expected = case["search"]
+            args = _first_search(turn)
+            ok = (
+                not turn.error
+                and args is not None
+                and args.get("dated_from") == expected["dated_from"]
+                and args.get("dated_to") == expected["dated_to"]
+                and _query_ok(expected["words"], args.get("query"))
+            )
+            wanted = f"search {expected['dated_from']} to {expected['dated_to']}" + (
+                "" if expected["words"] is None else f", query with {'/'.join(expected['words'])}"
+            )
+            got = _short(json.dumps(args) if args is not None else _tool_cell(turn), 60)
+        else:
+            parts = turn.first_parts()
+            part = parts[0] if parts else None
+            want_when, want_choices = _expected_dates(case)
+            got_when = _span(part["when"]) if part else None
+            got_choices = [_span(c) for c in part["when_choices"]] if part and part["when_choices"] else None
+            ok = (
+                not turn.error
+                and part is not None
+                and got_when == want_when
+                and sorted(got_choices or []) == sorted(want_choices or [])
+            )
+            if want_choices and part is not None and got_when is not None:
+                unclear_given_one.append(f"run {run + 1} {case['id']}")
+            if want_when and got_choices:
+                clear_given_two.append(f"run {run + 1} {case['id']}")
+            wanted = _dates_cell(want_when, want_choices)
+            got = _dates_cell(got_when, got_choices) if part else _tool_cell(turn)
+        right.append(ok)
+        lines.append(
+            f"| {run + 1} | {case['id']} | {weekday} {today.isoformat()} | {wanted} | "
+            f"{'✓ ' if ok else '✗ '}{got} | {_short(case['message'], 40)} |"
+        )
+    share = sum(right) / len(right)
+    lines += ["", "## Summary", ""]
+    lines.append(f"- Expected date, choices, or search: {sum(right)} of {len(right)} ({share:.0%})")
+    lines.append(
+        "- Ambiguous days given one date: "
+        + (", ".join(unclear_given_one) if unclear_given_one else "none")
+    )
+    lines.append(
+        "- Clear days given two choices: "
+        + (", ".join(clear_given_two) if clear_given_two else "none")
+    )
+    lines.append(f"- {_timing(list(results))}")
+    return lines, share >= 0.8
+
+
 PROBES = {
     "tools": probe_tools,
     "topic": probe_topic,
@@ -759,6 +891,7 @@ PROBES = {
     "split": probe_split,
     "filing": probe_filing,
     "nomatch": probe_nomatch,
+    "dates": probe_dates,
 }
 
 

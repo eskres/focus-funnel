@@ -1,16 +1,18 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime, time
 
 from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy import (
     DDL,
     JSON,
+    Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
     String,
     Text,
+    Time,
     UniqueConstraint,
     Uuid,
     event,
@@ -51,6 +53,14 @@ class Thought(Base):
         Index(
             "ix_thoughts_search_tsv", "search_tsv", postgresql_using="gin", info=POSTGRES_ONLY
         ).ddl_if(dialect="postgresql"),
+        # Serves the thought-date range filter and the Upcoming list.
+        Index(
+            "ix_thoughts_user_id_starts_on",
+            "user_id",
+            "starts_on",
+            postgresql_where=text("starts_on IS NOT NULL"),
+            info=POSTGRES_ONLY,
+        ).ddl_if(dialect="postgresql"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -62,6 +72,14 @@ class Thought(Base):
     raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list[str]] = mapped_column(TagsType, nullable=False, default=list)
+    # The thought's date, as the user's wall time in time_zone (see
+    # app/thoughts/dates.py). All null for a thought with no date; a null
+    # starts_at is a day with no time, and ends_at is set only with starts_at.
+    starts_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    starts_at: Mapped[time | None] = mapped_column(Time, nullable=True)
+    ends_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    ends_at: Mapped[time | None] = mapped_column(Time, nullable=True)
+    time_zone: Mapped[str | None] = mapped_column(Text, nullable=True)
     # The proposal the thought was saved from, and so its conversation. Deleting
     # the conversation deletes the proposal and clears this; the thought stays.
     proposal_id: Mapped[uuid.UUID | None] = mapped_column(

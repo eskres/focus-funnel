@@ -162,6 +162,56 @@ If `thought-dates` is built before `thought-editing`, tasks 4.x wait; the rest o
 
 The `chat-interface` requirement "A proposal can be reviewed in the chat" lists the card's fields, so it must name the date. A new requirement cannot fix a list in another one, so this change modifies it. `thought-editing` modifies the same requirement. This change's delta is `thought-editing`'s version with "and date" added to the field list and one dated-card scenario. So **`thought-editing` must be archived before `thought-dates`**; archiving in the other order would drop `thought-editing`'s saved-title and deleted-card rules. Task group 4 already depends on `thought-editing`, so the order costs nothing. If `thought-editing`'s delta changes before it is archived, copy the new version into this delta again.
 
+### 10. The date index is Postgres only; "today" comes from one clock
+
+The partial index `ix_thoughts_user_id_starts_on` is declared like the GIN indexes: `info=POSTGRES_ONLY` with `ddl_if(dialect="postgresql")`, and the revision creates it only on Postgres. SQLite runs only the rest of the app's tests, where the date queries are small. `alembic check` still passes on both, because `alembic/env.py` leaves Postgres-only indexes out of the SQLite comparison.
+
+`app/thoughts/dates.py` reads the time from one function, `utc_now()`, and `today_in(zone)` turns it into the local date. Tests replace `utc_now()` to fix "today"; no time-freezing dependency is added. A `when` that is not an object or null is refused naming `when`, like a bad start.
+
+**Alternatives:** a partial index on both databases with `sqlite_where`, as `uq_search_indexes_one_active` does (rejected: the design asks for one Postgres index, and nothing on SQLite needs it); `freezegun` (rejected: a new dev dependency for one clock).
+
+### 11. Details of the model's dates, settled while building them
+
+- The system prompt ends "Today is <Weekday> <YYYY-MM-DD>. Weeks start on Monday." The date is the user's local date for the turn and the offer; the context meter and a caller with no zone use the UTC date.
+- Every stored part has the keys `when` and `when_choices`, null when unused, so the stream event, the conversation, and the offer answer show one shape. Older stored parts without the keys read as null.
+- `parse_proposal()` counts only a non-empty `when_choices` list as choices; null or `[]` leaves `when` to stand. Two choices that are the same date count as one, which then becomes `when`. Any `time_zone` the model writes is ignored; the turn's zone is stamped.
+- The held-proposal note gives each part a `Date:` line after `Category:`: `Date: 2026-10-02T19:00`, `Date: 2026-11-03 to 2026-11-06`, `Date: 2026-10-02 or 2026-10-09 (not picked yet)`, or `Date: none`, as `Category: none` does.
+- `POST /api/conversations/{id}/proposal` takes an optional body, so an older frontend's empty POST still works (UTC).
+- Confirm checks the pick after the already-saved check, so a repeated confirm of a saved part still answers its thought, and before anything is stored: a card whose first part has `when_choices` and whose body has no `when` key gets 422 "when: pick a date, or no date". With a merge, only the first part's choices count, as merge keeps the first part's date.
+- The `dates` probe reads the search call's `dated_from`, `dated_to`, and `query` from the raw arguments, so it scores the model's call whether or not `parse_search()` accepts it yet.
+
+**Alternatives:** leave the date keys out of a part with no date (rejected: the conversation's answer model adds them as null anyway, so the event and the conversation would differ); refuse a confirm that picks a date outside the two choices (rejected in decision 2: the fields are the source of truth).
+
+### 12. Details of searching by the thought's date, settled while building them
+
+- Every search result entry now says `filed` before its filing day, so the two dates cannot be confused: `1. Oat milk · filed 2026-09-20 · #groceries`. The filing day is the local day in the turn's zone, the same days as the model's today and its `since`, so a thought filed at 20:00 on 30 September in Los Angeles reads `filed 2026-09-30`, not the UTC day. A dated entry adds `on` and its date after it, before the tags. Both sides of a range carry their weekday, as a single date does (`on Tue 2026-11-03 to Fri 2026-11-06`), so the model can answer "what is on Friday" from either end; an end later the same day gives only its time (`on Mon 2026-10-05 09:30 to 11:00`). Undated entries have no `on` part. The sources under an answer stay as they were.
+- A date-only search answers "N of your thoughts are dated in those days (date order):", and "M more are dated in those days. Narrow the days or add tags to see them." when the limit cuts it. With nothing found it answers "No filed thoughts are dated in those days. Say so plainly, and do not answer as if the user had filed something." A search with a query and a date range keeps the usual header and note.
+- `parse_search()` refuses neither a query nor a `dated_*` field as "query must be a non-empty string, unless dated_from or dated_to is given". `dated_from` and `dated_to` must be written `YYYY-MM-DD` (checked by pattern first, as `when` is), and `dated_to` before `dated_from` is refused, so the model gets another round instead of an empty result.
+- `search_thoughts()` takes `query=None`; an empty or blank query counts as none. Without a query and without a `dated_*` day it raises `validation_error` "query: …", for callers other than the tool. The date-only listing keeps the tag, `since`, and `until` filters, ties on the same start break by filing time, and the hits carry no similarity, rank, or excerpt.
+- The chat's tool line for a date-only search reads "Looked up your thoughts dated 2026-09-28 to 2026-10-04" ("from …", "up to …", or "on …" for one side or one day).
+
+**Alternatives:** keep undated headings as they were and add only the `on` part (rejected: an unlabelled filing day next to an `on` date reads as two event dates); a weekday on the single date only, as decision 4's example shows (rejected: a range is just as often asked about by weekday).
+
+### 13. Details of editing the date, settled while building them
+
+- `PATCH /api/thoughts/{id}` takes `when` as `ThoughtPatch` takes the other fields: a missing key keeps the date, `null` clears it, and an object is checked by the same parser as confirm, so a refusal is 422 `validation_error` "when: …" with the thought unchanged. `GET` and `PATCH` answer `when` (`{start, end, time_zone}` or null). A date-only change commits without touching `search_tsv` or the embeddings.
+- The sheet sends `when` only when the start or end changed, as it sends only the changed fields; the zone alone never counts as a change. A changed date carries the browser's zone at save, so a date set in Oslo and moved in Tokyo is stored with `Asia/Tokyo`.
+- `date-fields.tsx` holds the fields as text (`start`, `startTime`, `end`, `endTime`, `""` for empty, and `end: null` for no end) and turns them into `when` only at save. A native date or time input reports `""` as soon as one of its parts is cleared, so an emptied field is never read as a choice: an emptied End date keeps the end row (and is sent as written, so the server's refusal names `when`), and an emptied start time hides the end time and leaves it out of `when` but keeps it for when the start time is typed again. "Add date" starts the start day at the browser's local today, so the fields never hold a date with no start. Setting a start time while an end exists gives the end the same time when it has none; with no start time the end has no time either, so both or neither have a time. "Add end" starts the end as the start; "Remove end" and "Clear date" undo each.
+- The sheet's date line ("When: Fri 2 Oct 2026, 19:00", "When: Tue 3 Nov 2026 – Fri 6 Nov 2026", or "Mon 5 Oct 2026, 09:30 – 11:00" for an end later the same day) sits in the header between the title and the filed and changed dates, and shows the stored date in edit mode too, so a refused save still shows what is stored. `lib/dates.ts` formats it from the string with fixed English weekday and month names; `lib/time-zone.ts` reads the browser's zone. Both were added with task 4.2, ahead of group 5, which uses them.
+
+**Alternatives:** send `when` on every save (rejected: an unchanged field is never sent, so a stale browser zone would overwrite the stored one on any title edit); leave "Add date" with an empty start (rejected: a save would then be refused for a missing start the user never saw as a field to fill).
+
+### 14. Details of the card, the Upcoming page, and the zone on requests, settled while building them
+
+- `streamChat()` puts `time_zone` on every `POST /api/chat` body, and `offerProposal()` posts `{time_zone}`; both read `lib/time-zone.ts` at send time. The exact-body chat tests gained the zone.
+- The proposal card always sends `when` on confirm, an object with the browser's zone or null, so the server never has to guess between a missing key and no date; the existing confirm-body test gained `when: null`. A part from an older server, with no date fields, reads as no date.
+- A part with `when_choices` shows the choices ("Fri 2 Oct, 19:00", no year, as decision 6 shows) and "No date" as a group named "Which date?", and no fields until a pick, with "Pick a date, or No date." beside the disabled Confirm. The choice buttons stay after a pick, the picked one pressed, so the user can switch; the fields then work as in decision 13.
+- `GET /api/thoughts/upcoming` needs `from` as a `YYYY-MM-DD` query parameter; a missing or bad one is 422 `validation_error` naming `from`. Items are `{id, title, category, when}`. The query is plain SQL with no search columns, so its tests run on SQLite in the default suite (and pass on Postgres).
+- The page shows "Nothing is coming up." for an empty list and "More dated thoughts are coming up than this page shows." when `more` is true. A day heading carries the year only when it is not this year's ("Monday 4 January 2027"). An item shows "until Fri 6 Nov" (with ", 18:00" when the end has a time) for a date over several days, "19:00" or "09:30 – 10:15" for a timed day, and nothing for an untimed day. The list loads again when the sheet closes and on the `thought-changed` event, and only the latest load may answer.
+- The sidebar link "Upcoming" sits under "New conversation" (the button's text; decision 8 says "New chat") and is marked `aria-current="page"` while the page is open.
+
+**Alternatives:** send `when` from the card only when it has a date (rejected: a missing key on a part with choices is a refusal, so the card would need two rules); hide the choices after a pick (rejected: "No date" after a pick would then need the "Clear date" button, a second way to say the same thing).
+
 ## Risks / Trade-offs
 
 - [The model gives two choices for a clear day, or one date for an unclear day] → Task 2.5 measures both on the preferred model. A wrong single date still shows on the card, where the user checks it before confirming.

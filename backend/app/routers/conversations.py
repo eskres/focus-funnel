@@ -39,6 +39,8 @@ from app.errors import ApiError, ErrorCode
 from app.models import Conversation, Proposal, User
 from app.providers import get_provider_http_client
 from app.thoughts.categories import check_category
+from app.thoughts.dates import FIELD as WHEN_FIELD
+from app.thoughts.dates import zone_from
 from app.thoughts.store import add_thought
 
 router = APIRouter(prefix="/api/conversations")
@@ -75,6 +77,10 @@ class ProposalPart(BaseModel):
     summary: str
     tags: list[str]
     category: str | None
+    # The date, {start, end, time_zone}, or two choices of it for the user
+    # to pick from; at most one of the two is set.
+    when: dict[str, Any] | None = None
+    when_choices: list[dict[str, Any]] | None = None
     # Set once the part is saved.
     thought_id: uuid.UUID | None
     # The saved thought's current title; null before the part is saved, and
@@ -138,6 +144,9 @@ class ConfirmIn(BaseModel):
     summary: Any = None
     tags: Any = None
     category: str | None = None
+    # The card's date with the browser's zone, or null for no date. A missing
+    # key is not a pick: a part with two date choices then gets 422.
+    when: Any = None
 
 
 class ConfirmOutcome(BaseModel):
@@ -148,6 +157,11 @@ class ConfirmOutcome(BaseModel):
 
 class OfferedProposal(BaseModel):
     proposal: ProposalOut | None
+
+
+class OfferIn(BaseModel):
+    # The browser's IANA zone. Missing or unknown reads as UTC, never refused.
+    time_zone: str | None = None
 
 
 class ConversationPatch(BaseModel):
@@ -370,6 +384,7 @@ async def delete_conversation(
 @router.post("/{conversation_id}/proposal", response_model=OfferedProposal)
 async def offer_held_proposal(
     conversation_id: uuid.UUID,
+    body: OfferIn | None = None,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     config: ChatConfig = Depends(get_chat_config),
@@ -389,7 +404,15 @@ async def offer_held_proposal(
         return OfferedProposal(proposal=ProposalOut(**proposal_payload(held, titles)))
     await claim_turn(session, conversation)
     try:
-        offered = await offer_proposal(session, user, conversation, config, settings, http_client)
+        offered = await offer_proposal(
+            session,
+            user,
+            conversation,
+            config,
+            settings,
+            http_client,
+            zone=zone_from(body.time_zone if body is not None else None),
+        )
         payload = (
             proposal_payload(offered, await saved_titles(session, user, [offered]))
             if offered is not None
@@ -454,6 +477,10 @@ async def confirm_proposal(
         raise part_already_saved()
 
     category = await check_category(session, user, body.category)
+    # A merged card keeps the first part's date or choices. With choices, the
+    # card must say which the user picked: a date, or null for no date.
+    if proposal.parts[indexes[0]].get("when_choices") and "when" not in body.model_fields_set:
+        raise ApiError(422, ErrorCode.VALIDATION_ERROR, f"{WHEN_FIELD}: pick a date, or no date")
 
     outcome = await add_thought(
         session,
@@ -463,6 +490,7 @@ async def confirm_proposal(
         tags=body.tags,
         raw_text=proposal.raw_text,
         category=category,
+        when=body.when,
         settings=settings,
         conversation_id=conversation.id,
         proposal_id=proposal.id,

@@ -9,11 +9,11 @@ fail a store. These operations run on Postgres only.
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import httpx2
-from sqlalchemy import delete, func, literal_column, select
+from sqlalchemy import delete, func, literal_column, nulls_first, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -22,6 +22,7 @@ from app.config import Settings
 from app.errors import ApiError, ErrorCode
 from app.models import Conversation, Proposal, SearchIndex, Thought, ThoughtEmbedding, User
 from app.thoughts.chunking import Piece, pieces
+from app.thoughts.dates import parse_when
 from app.thoughts.indexing import (
     ACTIVE,
     BUILDING,
@@ -202,6 +203,7 @@ async def add_thought(
     tags: Any = None,
     raw_text: Any = None,
     category: Any = None,
+    when: Any = None,
     settings: Settings,
     conversation_id: uuid.UUID | None = None,
     proposal_id: uuid.UUID | None = None,
@@ -211,8 +213,10 @@ async def add_thought(
     caller can commit it with other changes. Raises validation_error only.
 
     conversation_id is for the embedding's usage record; proposal_id is the
-    thought's origin, the proposal it was saved from."""
+    thought's origin, the proposal it was saved from. when is the thought's
+    date (see dates.py), or None for no date."""
     fields = check_fields(title, summary, tags, raw_text, category)
+    date_columns = parse_when(when)
     thought = Thought(
         id=uuid.uuid4(),
         user_id=user.id,
@@ -221,6 +225,7 @@ async def add_thought(
         tags=fields.tags,
         raw_text=fields.raw_text,
         category=fields.category,
+        **date_columns.values(),
         proposal_id=proposal_id,
         search_tsv=search_vector(fields.title, fields.tags, fields.summary, fields.raw_text),
     )
@@ -280,6 +285,48 @@ async def known_tags(session: AsyncSession, user: User, limit: int) -> list[str]
         .limit(limit)
     )
     return list(rows.scalars())
+
+
+UPCOMING_LIMIT = 200
+
+
+async def list_upcoming(
+    session: AsyncSession, user: User, from_day: date, limit: int = UPCOMING_LIMIT
+) -> tuple[list[Any], bool]:
+    """The user's dated thoughts that end, or start when they have no end, on
+    `from_day` or later, in date order, and whether more than `limit` exist.
+
+    Date order is by start day, a day with no time before one with a time, then
+    by start time and filing time (thought-dates design decision 8). `from_day`
+    is the browser's local today; the server does not guess it.
+    """
+    rows = (
+        await session.execute(
+            select(
+                Thought.id,
+                Thought.title,
+                Thought.category,
+                Thought.starts_on,
+                Thought.starts_at,
+                Thought.ends_on,
+                Thought.ends_at,
+                Thought.time_zone,
+            )
+            .where(
+                Thought.user_id == user.id,
+                Thought.starts_on.is_not(None),
+                func.coalesce(Thought.ends_on, Thought.starts_on) >= from_day,
+            )
+            .order_by(
+                Thought.starts_on,
+                nulls_first(Thought.starts_at),
+                Thought.created_at,
+                Thought.id,
+            )
+            .limit(limit + 1)
+        )
+    ).all()
+    return list(rows[:limit]), len(rows) > limit
 
 
 async def get_thought(session: AsyncSession, user: User, thought_id: uuid.UUID) -> Thought:
@@ -347,6 +394,7 @@ async def update_thought(
     tags: Any = _UNSET,
     raw_text: Any = _UNSET,
     category: Any = _UNSET,
+    when: Any = _UNSET,
     settings: Settings,
     conversation_id: uuid.UUID | None = None,
     http_client: httpx2.AsyncClient | None = None,
@@ -354,7 +402,8 @@ async def update_thought(
     """Change some of a thought's fields, and index again only what changed.
 
     A new title, summary, or raw text replaces all the thought's entries; new
-    tags replace its head; a new category touches no entry.
+    tags replace its head; a new category or date touches no entry. A when
+    of None clears the date.
     """
     thought = await get_thought(session, user, thought_id)
 
@@ -368,6 +417,7 @@ async def update_thought(
         pick(raw_text, thought.raw_text),
         pick(category, thought.category),
     )
+    date_columns = None if when is _UNSET else parse_when(when)
     content_changed = (fields.title, fields.summary, fields.raw_text) != (
         thought.title,
         thought.summary,
@@ -377,6 +427,9 @@ async def update_thought(
 
     thought.title, thought.summary, thought.raw_text = fields.title, fields.summary, fields.raw_text
     thought.tags, thought.category = fields.tags, fields.category
+    if date_columns is not None:
+        for name, value in date_columns.values().items():
+            setattr(thought, name, value)
     if not (content_changed or tags_changed):
         await session.commit()
         await session.refresh(thought)

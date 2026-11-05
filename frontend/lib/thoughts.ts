@@ -1,6 +1,7 @@
 // Typed clients for one stored thought (`/api/thoughts`) and the categories
 // setting (`/api/settings/categories`).
 import { apiFetch } from "@/lib/api";
+import type { When } from "@/lib/dates";
 
 /** The conversation and proposal a thought was saved from, as they are now. */
 export type ThoughtOrigin = {
@@ -18,6 +19,8 @@ export type Thought = {
   tags: string[];
   category: string | null;
   raw_text: string | null;
+  /** The thought's own date; null, or missing from an older server, when it has none. */
+  when?: When | null;
   created_at: string;
   updated_at: string;
   /** Null, or missing from an older server, when there is no origin. */
@@ -30,8 +33,13 @@ export function getThought(id: string): Promise<Thought> {
   return apiFetch<Thought>(thoughtPath(id));
 }
 
-/** The fields of a thought the user can change. Raw text is not one of them. */
-export type ThoughtChange = Partial<Pick<Thought, "title" | "summary" | "tags" | "category">>;
+/**
+ * The fields of a thought the user can change. Raw text is not one of them.
+ * A `when` of null clears the date.
+ */
+export type ThoughtChange = Partial<Pick<Thought, "title" | "summary" | "tags" | "category">> & {
+  when?: When | null;
+};
 
 /**
  * Sent on window after a thought is changed or deleted in this page, so a
@@ -53,6 +61,20 @@ export async function updateThought(id: string, fields: ThoughtChange): Promise<
   });
   announce({ id: thought.id, title: thought.title });
   return thought;
+}
+
+/** A dated thought on the Upcoming page. */
+export type UpcomingItem = { id: string; title: string; category: string | null; when: When };
+
+/** At most 200 items; `more` says that more exist. */
+export type Upcoming = { items: UpcomingItem[]; more: boolean };
+
+/**
+ * The dated thoughts that end, or start when they have no end, on `from` or
+ * later, in date order. `from` is the browser's local today, `YYYY-MM-DD`.
+ */
+export function getUpcoming(from: string): Promise<Upcoming> {
+  return apiFetch<Upcoming>(`/api/thoughts/upcoming?from=${encodeURIComponent(from)}`);
 }
 
 /** Deletes the thought for good. */

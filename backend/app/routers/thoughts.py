@@ -1,11 +1,11 @@
 """One stored thought and its origin, for the detail view, and changing or deleting it."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import httpx2
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,10 +15,12 @@ from app.db import get_session
 from app.models import User
 from app.providers import get_provider_http_client
 from app.thoughts.categories import check_category
+from app.thoughts.dates import when_of
 from app.thoughts.store import (
     delete_thought,
     get_thought,
     get_thought_with_origin,
+    list_upcoming,
     update_thought,
 )
 
@@ -40,6 +42,8 @@ class ThoughtOut(BaseModel):
     tags: list[str]
     category: str | None
     raw_text: str | None
+    # The thought's own date, {start, end, time_zone}; null when it has none.
+    when: dict[str, str | None] | None
     created_at: datetime
     updated_at: datetime
     # The conversation and proposal it was saved from; null when there is none,
@@ -59,6 +63,9 @@ class ThoughtPatch(BaseModel):
     tags: Any = None
     # Null or empty clears it.
     category: str | None = None
+    # {start, end, time_zone}, with the browser's zone; null clears the date.
+    # The thought store checks it, so a refusal names `when`.
+    when: Any = None
 
 
 async def thought_answer(session: AsyncSession, user: User, thought_id: uuid.UUID) -> ThoughtOut:
@@ -72,9 +79,41 @@ async def thought_answer(session: AsyncSession, user: User, thought_id: uuid.UUI
         tags=list(thought.tags or []),
         category=thought.category,
         raw_text=thought.raw_text,
+        when=when_of(thought),
         created_at=thought.created_at,
         updated_at=thought.updated_at,
         origin=OriginOut(**vars(origin)) if origin else None,
+    )
+
+
+class UpcomingItem(BaseModel):
+    id: uuid.UUID
+    title: str
+    category: str | None
+    when: dict[str, str | None]
+
+
+class UpcomingOut(BaseModel):
+    items: list[UpcomingItem]
+    # True when more dated thoughts from that day on exist than the list shows.
+    more: bool
+
+
+# Declared before /{thought_id}, so "upcoming" is never read as an id.
+@router.get("/upcoming", response_model=UpcomingOut)
+async def upcoming_thoughts(
+    from_day: date = Query(alias="from", description="The browser's local today, YYYY-MM-DD."),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UpcomingOut:
+    """The user's dated thoughts from that day on, in date order, at most 200."""
+    rows, more = await list_upcoming(session, user, from_day)
+    return UpcomingOut(
+        items=[
+            UpcomingItem(id=row.id, title=row.title, category=row.category, when=when_of(row))
+            for row in rows
+        ],
+        more=more,
     )
 
 
@@ -99,7 +138,8 @@ async def change_thought(
 ) -> ThoughtOut:
     """Change the fields the body names, and answer the thought as GET does.
 
-    Only what changed is embedded again. An embedding failure does not fail
+    Only what changed is embedded again; a new date or category is not
+    embedded at all. An embedding failure does not fail
     the change, as for confirm: search finds it by its words at once, and the
     missing entries are filled in by the next call that reaches the provider.
     """
