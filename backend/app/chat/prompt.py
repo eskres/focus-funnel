@@ -343,9 +343,19 @@ def estimate_text_tokens(text: str) -> int:
     return math.ceil(len(text) / CHARS_PER_TOKEN)
 
 
-def estimate_tokens(context: list[dict[str, Any]]) -> int:
-    """An estimate of a request's prompt tokens: its text, and its tool calls as JSON."""
-    chars = 0
+def estimate_tool_tokens(tools: list[dict[str, Any]] | None) -> int:
+    """An estimate of the tokens the offered tool definitions take, as JSON."""
+    if not tools:
+        return 0
+    return math.ceil(len(json.dumps(tools)) / CHARS_PER_TOKEN)
+
+
+def estimate_tokens(
+    context: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None
+) -> int:
+    """An estimate of a request's prompt tokens: its text, its tool calls as
+    JSON, and the definitions of the tools it offers."""
+    chars = len(json.dumps(tools)) if tools else 0
     for message in context:
         chars += len(message.get("content") or "")
         if message.get("tool_calls"):

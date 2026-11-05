@@ -19,6 +19,7 @@ import {
   type ToolIndication,
 } from "@/components/chat/message-list";
 import { ModelPicker, type ModelOption } from "@/components/chat/model-picker";
+import { ConnectorPicker, type PickerConnector } from "@/components/chat/connector-picker";
 import { withSources } from "@/components/chat/sources-list";
 import { ThoughtSheet } from "@/components/chat/thought-sheet";
 import {
@@ -29,10 +30,12 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ApiError, UnauthenticatedError, createApiError } from "@/lib/api";
 import { isCompactCommand, isDeleteCommand, streamChat, type ModelChoice } from "@/lib/chat";
+import { getConnectors, switchedOnTools, type ConnectorsListing } from "@/lib/connectors";
 import {
   acceptCompaction,
   deleteConversation,
   getConversation,
+  setConversationConnectors,
   storedActions,
   storedProposals,
   storedSources,
@@ -165,7 +168,19 @@ function defaultChoice(settings: ModelSettings | null): ModelChoice | null {
 
 function toMeter(context: StoredMeter | undefined): Meter | null {
   return context
-    ? { tokens: context.tokens, estimated: context.estimated, contextLength: context.context_length }
+    ? {
+        tokens: context.tokens,
+        estimated: context.estimated,
+        contextLength: context.context_length,
+        toolTokens: context.tool_tokens,
+      }
+    : null;
+}
+
+/** The connectors the picker lists, or null while connectors are off. */
+function pickerConnectors(listing: ConnectorsListing | null): PickerConnector[] | null {
+  return listing
+    ? listing.connectors.map((c) => ({ id: c.id, name: c.name, tools: switchedOnTools(c) }))
     : null;
 }
 
@@ -206,6 +221,9 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [offer, setOffer] = useState<HeldOffer | null>(null);
   const [meter, setMeter] = useState<Meter | null>(null);
+  // Null while connectors are off on the server, or could not be listed.
+  const [connectorListing, setConnectorListing] = useState<ConnectorsListing | null>(null);
+  const [connectorsOn, setConnectorsOn] = useState<string[]>([]);
   const [compactSuggested, setCompactSuggested] = useState(false);
   const [usageWarning, setUsageWarning] = useState<UsageWarning | null>(null);
   const [compactState, setCompactState] = useState<CompactState | null>(null);
@@ -233,6 +251,17 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
     };
   }, [initialId]);
 
+  // Connectors are optional: any failure (404 while they are off) hides the picker.
+  useEffect(() => {
+    let cancelled = false;
+    getConnectors()
+      .then((listing) => !cancelled && setConnectorListing(listing))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (!initialId) return;
     let cancelled = false;
@@ -249,6 +278,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
           ),
         );
         setMeter(toMeter(conversation.context));
+        setConnectorsOn((conversation.connectors ?? []).map((c) => c.id));
         const stored = storedChoice(conversation);
         setOwn(stored);
         setChoice((current) => stored ?? current);
@@ -485,6 +515,31 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
     );
   }
 
+  /** Turn connectors on or off; the change applies from the next turn. */
+  async function changeConnectors(connectorIds: string[]) {
+    if (!conversationId) return;
+    let detail: ConversationDetail;
+    try {
+      detail = await setConversationConnectors(conversationId, connectorIds);
+    } catch (error) {
+      if (error instanceof UnauthenticatedError) {
+        redirectToLogin(`/app/${conversationId}`);
+        return;
+      }
+      throw error;
+    }
+    setConnectorsOn((detail.connectors ?? []).map((c) => c.id));
+    // A change of the offered tools makes the figure an estimate until the
+    // next answer (the server says so). A model chosen but not yet sent keeps
+    // its context length and its estimate mark.
+    const next = toMeter(detail.context);
+    setMeter((current) =>
+      next && choiceChanged && current
+        ? { ...next, estimated: true, contextLength: current.contextLength }
+        : next,
+    );
+  }
+
   async function runAnswer(answerId: number, message: string) {
     setAnswering(true);
     const controller = new AbortController();
@@ -549,6 +604,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
               tokens: event.promptTokens,
               estimated: false,
               contextLength: event.contextLength ?? current?.contextLength ?? null,
+              toolTokens: current?.toolTokens,
             }));
             break;
           case "notice":
@@ -654,12 +710,22 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
           )}
           <Composer disabled={answering || loading || Boolean(loadError)} onSend={send}>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <ModelPicker
-                options={options}
-                choice={choice}
-                disabled={answering}
-                onChange={chooseModel}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <ModelPicker
+                  options={options}
+                  choice={choice}
+                  disabled={answering}
+                  onChange={chooseModel}
+                />
+                <ConnectorPicker
+                  connectors={pickerConnectors(connectorListing)}
+                  on={connectorsOn}
+                  maxTools={connectorListing?.max_tools ?? 0}
+                  canChange={Boolean(conversationId)}
+                  disabled={answering || loading}
+                  onChange={changeConnectors}
+                />
+              </div>
               <ContextMeter meter={meter} />
             </div>
           </Composer>

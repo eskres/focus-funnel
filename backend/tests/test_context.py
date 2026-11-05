@@ -44,6 +44,13 @@ def stored(client, headers, conversation_id) -> dict:
     return response.json()
 
 
+def without_tools(meter: dict) -> dict:
+    """The meter without its tools figure, which the built-in tools always fill."""
+    rest = dict(meter)
+    assert rest.pop("tool_tokens") > 0
+    return rest
+
+
 def usage_rows(url: str) -> list[UsageEvent]:
     async def work(session):
         return list(
@@ -90,7 +97,11 @@ def test_the_prompt_tokens_are_stored_and_sent_with_the_context_length(client, a
     assert names(response)[-1] == "done"
     body = stored(client, alice, conversation_id_of(response))
     assert body["last_prompt_tokens"] == 500
-    assert body["context"] == {"tokens": 500, "estimated": False, "context_length": 131072}
+    assert without_tools(body["context"]) == {
+        "tokens": 500,
+        "estimated": False,
+        "context_length": 131072,
+    }
 
 
 def test_the_model_list_is_read_once_for_several_turns(client, alice, fake_llm):
@@ -127,7 +138,11 @@ def test_a_missing_context_length_is_left_out(client, alice, fake_llm):
 
     assert events_of(response, "usage") == [{"prompt_tokens": 300, "completion_tokens": 5}]
     body = stored(client, alice, conversation_id_of(response))
-    assert body["context"] == {"tokens": 300, "estimated": False, "context_length": None}
+    assert without_tools(body["context"]) == {
+        "tokens": 300,
+        "estimated": False,
+        "context_length": None,
+    }
 
 
 # --- 8.2 the soft limit ---
@@ -463,7 +478,7 @@ def test_a_switch_changes_the_limit_and_marks_the_figure_as_an_estimate(
 ):
     ready_user(client, alice, entry(NANO, default=True), entry(BIG))
     conversation_id = seeded(test_database_url, client, alice, last_prompt_tokens=2_000)
-    assert stored(client, alice, conversation_id)["context"] == {
+    assert without_tools(stored(client, alice, conversation_id)["context"]) == {
         "tokens": 2_000,
         "estimated": False,
         "context_length": 131072,

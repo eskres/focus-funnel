@@ -35,7 +35,11 @@ from app.chat.model_info import model_info
 from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, build_context, estimate_tokens, forced_tool
 from app.chat.proposal import filing_for, held_parts, held_proposal
 from app.chat.sse import sse_response
-from app.chat.tool_providers import connector_tool_count, conversation_connector_tools
+from app.chat.tool_providers import (
+    connector_definitions,
+    connector_tool_count,
+    conversation_connector_tools,
+)
 from app.chat.turn import BuiltinTools, Turn
 from app.config import Settings, get_settings
 from app.db import get_sessionmaker
@@ -204,7 +208,13 @@ async def chat(
             session, user, conversation.provider_id, conversation.model, settings, http_client
         )
         check_room(
-            conversation, context, body.message, info.context_length if info else None, config
+            conversation,
+            context,
+            body.message,
+            info.context_length if info else None,
+            config,
+            tools=[*filing.tools, *connector_definitions(connectors)],
+            connectors=bool(connectors),
         )
 
         provider = await provider_for_user(session, user, conversation.provider_id, settings)

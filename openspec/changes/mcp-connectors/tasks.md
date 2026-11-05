@@ -53,9 +53,9 @@
 
 ## 8. Conversations and the meter
 
-- [ ] 8.1 Add `PUT /api/conversations/{id}/connectors` and `connectors` on the conversation details. Check with pytest that a new conversation has none, that turning one on and off is stored and kept through archive and restore, that a connector with no switched-on tools or one past `max_tools` gives `validation_error` or `422 too_many_tools`, that another user's conversation or connector gives 404, and that the change clears `last_prompt_tokens`
-- [ ] 8.2 Count tool definitions in `estimate_tokens`, `meter`, and `check_room`, and return `tool_tokens` with the meter. Check with pytest that turning on a connector raises the estimate by its definitions, that `context_full` accounts for them, and that the `context_full` message mentions turning connectors off when any are on
-- [ ] 8.3 Add `connector-picker.tsx` beside the model picker, and the tools figure to `context-meter.tsx`. Check with Vitest that the picker lists connectors, shows "N of 20 tools", disables connectors with no switched-on tools, shows the `too_many_tools` message, and is hidden when connectors are off, and that the meter shows the tools figure and marks an estimate after a toggle
+- [x] 8.1 Add `PUT /api/conversations/{id}/connectors` and `connectors` on the conversation details. Check with pytest that a new conversation has none, that turning one on and off is stored and kept through archive and restore, that a connector with no switched-on tools or one past `max_tools` gives `validation_error` or `422 too_many_tools`, that another user's conversation or connector gives 404, and that the change clears `last_prompt_tokens`
+- [x] 8.2 Count tool definitions in `estimate_tokens`, `meter`, and `check_room`, and return `tool_tokens` with the meter. Check with pytest that turning on a connector raises the estimate by its definitions, that `context_full` accounts for them, and that the `context_full` message mentions turning connectors off when any are on
+- [x] 8.3 Add `connector-picker.tsx` beside the model picker, and the tools figure to `context-meter.tsx`. Check with Vitest that the picker lists connectors, shows "N of 20 tools", disables connectors with no switched-on tools, shows the `too_many_tools` message, and is hidden when connectors are off, and that the meter shows the tools figure and marks an estimate after a toggle
 
 ## 9. Connectors settings
 

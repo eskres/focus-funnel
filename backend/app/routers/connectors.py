@@ -207,7 +207,7 @@ def connector_out(connector: Connector, config: ConnectorConfig) -> ConnectorOut
     )
 
 
-async def _get_visible(
+async def get_visible(
     session: AsyncSession,
     connector_id: uuid.UUID,
     user: User,
@@ -447,7 +447,7 @@ async def test_connector(
 ) -> ConnectorOut:
     config = get_connector_config()
     limits = get_chat_config().connectors
-    connector = await _get_visible(session, connector_id, user, config, settings)
+    connector = await get_visible(session, connector_id, user, config, settings)
     url = connector_url(connector, config)
     if url is None:
         raise not_found()
@@ -487,7 +487,7 @@ async def change_tool(
     settings: Settings = Depends(get_settings),
 ) -> ConnectorOut:
     config = get_connector_config()
-    connector = await _get_visible(session, connector_id, user, config, settings)
+    connector = await get_visible(session, connector_id, user, config, settings)
     stored: dict[str, Any] | None = next(
         (item for item in offered_tools(connector, config) if item["name"] == tool),
         None,
