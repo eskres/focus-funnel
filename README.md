@@ -18,7 +18,7 @@ You bring your own model provider. Each user saves their own API key for Nebius,
 
 - **Conversations:** each conversation is stored. The sidebar lists them newest first, and you can rename, archive, restore, or delete each one.
 - **Models:** in Settings you choose up to five models. One of them is the default. Each model has a reasoning effort, and you set one temperature for all of them. The message box has a dropdown to switch model inside a conversation.
-- **Filing:** a proposal shows as a card you can edit. Confirm saves it as a thought, with the text you wrote as its raw text, and the card links to it. A message with several things to keep shows one card per part, and "Merge into one" joins them. Each thought has a category: one of five fixed kinds, or one you add in **Settings**.
+- **Filing:** a proposal shows as a card you can edit. Confirm saves it as a thought, with the text you wrote as its raw text, and the card links to it. A message with several things to keep shows one card per part, and "Merge into one" joins them. Each thought has a category: one of six fixed kinds, or one you add in **Settings**.
 - **Search:** the search tool finds your filed thoughts by meaning and by words at once, in Postgres with pgvector. The thoughts an answer used show under it as sources, which you can sort newest first and filter by tag. [docs/search.md](docs/search.md) covers the embedding model, tuning, and rebuilding search indexes.
 - **Thoughts:** a source or a saved card opens the thought in a side sheet over the chat. The address names the open thought, so you can copy it, and Back closes the sheet.
 

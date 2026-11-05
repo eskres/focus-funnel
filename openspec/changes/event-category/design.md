@@ -49,6 +49,10 @@ The "even on a set day" clause is new next to the proposal's wording. Without it
 
 `frontend/lib/thoughts.ts` keeps `FIXED_CATEGORIES`, now with `event`. It is only a first value before the settings answer arrives. Deleting it would leave the card's dropdown empty for that moment. The two lists are kept in step by the tests that list the kinds on each side.
 
+### 5. The `event` sentence follows `reference`
+
+The sentence from decision 3 goes right after the `reference` sentence and before "The user's own categories are for their own kinds.", so the description defines the kinds in the order of the fixed list. Decision 3 gives the text but not its place; this keeps the user's own categories last, as in the enum.
+
 ## Risks / Trade-offs
 
 - [The model files dated to-dos as `event`] → The description says that something to do is a `task` even on a set day, and the spec has a scenario for each line. The user can change the category on the card.

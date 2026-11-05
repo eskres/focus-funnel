@@ -85,7 +85,10 @@ CATEGORY_DESCRIPTION = (
     "The kind of thought. task: something to do. idea: something to try, make, or "
     "change. decision: a choice made. note: something that happened or someone said. "
     "reference: facts to look up later, such as numbers, codes, names, or a "
-    "recommendation. The user's own categories are for their own kinds."
+    "recommendation. event: something planned for a set date or time, such as an "
+    "appointment, a meeting, a trip, or a dinner. Something to do or arrange is a task, "
+    "even on a set day; something that already happened is a note. The user's own "
+    "categories are for their own kinds."
 )
 TAGS_DESCRIPTION = "A few short tags."
 

@@ -17,3 +17,8 @@ cases:
   - {id: report, category: task, tag: work, message: "finish the quarterly report draft by Thursday"}
   - {id: book, category: reference, tag: reading, message: "book recommendation from Tom: The Overstory by Richard Powers"}
   - {id: chess, category: idea, tag: null, message: "idea: learn chess openings with a short puzzle every morning"}
+  # event-category task 2.2: the four "Every thought has a category" scenarios.
+  - {id: plumber, category: task, tag: home, message: "call the plumber on Monday"}
+  - {id: dinner, category: event, tag: null, message: "dinner with Sam on Friday at 7"}
+  - {id: table, category: task, tag: null, message: "book a table for dinner with Sam"}
+  - {id: oslo, category: note, tag: null, message: "had dinner with Sam last night, she is moving to Oslo"}
