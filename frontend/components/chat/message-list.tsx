@@ -35,6 +35,11 @@ export type AnswerMessage = {
   /** The thoughts this answer's searches returned, each once. */
   sources?: Source[];
   status: "streaming" | "done" | "failed" | "cut";
+  /**
+   * The answer ran and ended during its turn (at the spend cap): its rounds
+   * are stored, so sending the same text again is a new message, not a resend.
+   */
+  endedInTurn?: boolean;
   /** Cut short because the server could not be reached to follow it again. */
   unreached?: boolean;
   error?: ApiError;

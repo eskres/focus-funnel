@@ -161,6 +161,32 @@ describe("ModelSettingsSection", () => {
       expect(calls.find((c) => c.method === "PUT")?.body).toMatchObject({ warning: null });
     });
 
+    it("stays apart from the spend cap: same choices and note, and no cap is sent", async () => {
+      const { calls } = api(loadout([loadoutEntry(NANO, { is_default: true })]), {
+        "PUT /api/settings/models": json(200, loadout([loadoutEntry(NANO, { is_default: true })])),
+      });
+      render(<ModelSettingsSection />);
+      await waitFor(() => expect(screen.getByLabelText("Model 1 model")).toHaveDisplayValue(NANO));
+
+      const unit = screen.getByLabelText("Warning unit");
+      expect(within(unit).getAllByRole("option").map((o) => o.textContent)).toEqual([
+        "No warning",
+        "Estimated dollars",
+        "Tokens",
+      ]);
+      expect(screen.getByText(/It never stops the chat\./)).toBeInTheDocument();
+      expect(screen.queryByLabelText(/Spend cap/)).not.toBeInTheDocument();
+
+      fireEvent.change(unit, { target: { value: "tokens" } });
+      fireEvent.change(screen.getByLabelText("Warning amount"), { target: { value: "1000" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save models" }));
+
+      await screen.findByText("Saved.");
+      const body = calls.find((c) => c.method === "PUT")?.body as Record<string, unknown>;
+      expect(body.warning).toEqual({ unit: "tokens", amount: 1000 });
+      expect(body).not.toHaveProperty("cap");
+    });
+
     it("refuses a threshold without an amount, before saving", async () => {
       const { calls } = api();
       render(<ModelSettingsSection />);

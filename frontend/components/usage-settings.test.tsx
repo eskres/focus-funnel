@@ -2,8 +2,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { DemoProvider } from "@/components/demo/demo-context";
 import { USAGE_DELETED } from "@/lib/account";
-import { fakeApi, json } from "@/test/fake-api";
+import { errorResponse, fakeApi, json } from "@/test/fake-api";
 
 import { niceTicks, tickDecimals } from "./usage-chart";
 import { UsageSection } from "./usage-settings";
@@ -35,6 +36,7 @@ function report(days: number, used: Record<number, Record<string, number>> = {},
       : [],
     month: { start: "2026-09-01", cost_usd: 0.01212, tokens: 9910, unknown_cost_calls: 1, calls },
     warning: null,
+    cap: null,
     consoles: [],
     ...extra,
   };
@@ -138,6 +140,170 @@ describe("UsageSection", () => {
 
     expect(await screen.findByText(/Warning threshold: \$0\.01\./)).toBeInTheDocument();
     expect(screen.getByText("Reached this month.")).toBeInTheDocument();
+  });
+});
+
+describe("the monthly spend cap", () => {
+  const usdCap = { unit: "usd", amount: 5, reached: false, resets_on: "2026-10-01" };
+  const HISTORY = "Deleting your usage history makes the cap count from zero again for this month.";
+
+  function capPuts(calls: { method: string; path: string; body: unknown }[]) {
+    return calls.filter((call) => call.method === "PUT" && call.path === "/api/usage/cap");
+  }
+
+  it("loads the saved cap into the form", async () => {
+    fakeApi({ "GET /api/usage": json(200, report(30, used, { cap: usdCap })) });
+    render(<UsageSection />);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Spend cap unit")).toHaveDisplayValue("Estimated dollars"),
+    );
+    expect(screen.getByLabelText("Spend cap amount")).toHaveValue(5);
+    expect(screen.getByText("Spend cap: $5.00. Not reached.")).toBeInTheDocument();
+  });
+
+  it("saves a new cap and shows it in the month total", async () => {
+    const { calls } = fakeApi({
+      "GET /api/usage": json(200, report(30, used)),
+      "PUT /api/usage/cap": json(200, { cap: { ...usdCap, reached: true } }),
+    });
+    render(<UsageSection />);
+    fireEvent.change(await screen.findByLabelText("Spend cap unit"), { target: { value: "usd" } });
+    fireEvent.change(screen.getByLabelText("Spend cap amount"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save cap" }));
+
+    expect(await screen.findByText("Spend cap: $5.00. Reached this month.")).toBeInTheDocument();
+    expect(capPuts(calls).map((call) => call.body)).toEqual([{ cap: { unit: "usd", amount: 5 } }]);
+    expect(screen.getByText("Saved.")).toBeInTheDocument();
+  });
+
+  it("saves null for No cap", async () => {
+    const { calls } = fakeApi({
+      "GET /api/usage": json(200, report(30, used, { cap: usdCap })),
+      "PUT /api/usage/cap": json(200, { cap: null }),
+    });
+    render(<UsageSection />);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Spend cap unit")).toHaveDisplayValue("Estimated dollars"),
+    );
+
+    fireEvent.change(screen.getByLabelText("Spend cap unit"), { target: { value: "" } });
+    expect(screen.queryByLabelText("Spend cap amount")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save cap" }));
+
+    await waitFor(() => expect(screen.queryByText(/^Spend cap:/)).not.toBeInTheDocument());
+    expect(capPuts(calls).map((call) => call.body)).toEqual([{ cap: null }]);
+  });
+
+  it.each([
+    ["empty", ""],
+    ["zero", "0"],
+  ])("says an %s amount is not valid and sends nothing", async (_name, value) => {
+    const { calls } = fakeApi({ "GET /api/usage": json(200, report(30, used)) });
+    render(<UsageSection />);
+    fireEvent.change(await screen.findByLabelText("Spend cap unit"), { target: { value: "tokens" } });
+    fireEvent.change(screen.getByLabelText("Spend cap amount"), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "Save cap" }));
+
+    expect(await screen.findByText("The spend cap needs an amount above zero.")).toBeInTheDocument();
+    expect(capPuts(calls)).toEqual([]);
+  });
+
+  it("shows the backend's message on a 422 and keeps the input", async () => {
+    fakeApi({
+      "GET /api/usage": json(200, report(30, used)),
+      "PUT /api/usage/cap": errorResponse(
+        422,
+        "validation_error",
+        "cap.amount: Decimal input should have no more than 6 decimal places",
+      ),
+    });
+    render(<UsageSection />);
+    fireEvent.change(await screen.findByLabelText("Spend cap unit"), { target: { value: "usd" } });
+    fireEvent.change(screen.getByLabelText("Spend cap amount"), { target: { value: "0.0000001" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save cap" }));
+
+    expect(
+      await screen.findByText("cap.amount: Decimal input should have no more than 6 decimal places"),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Spend cap unit")).toHaveDisplayValue("Estimated dollars");
+    expect(screen.getByLabelText("Spend cap amount")).toHaveValue(0.0000001);
+    expect(screen.queryByText("Saved.")).not.toBeInTheDocument();
+  });
+
+  it("shows a reached dollar cap in the month total", async () => {
+    fakeApi({ "GET /api/usage": json(200, report(30, used, { cap: { ...usdCap, reached: true } })) });
+    render(<UsageSection />);
+
+    expect(await screen.findByText("Spend cap: $5.00. Reached this month.")).toBeInTheDocument();
+  });
+
+  it.each([
+    [true, "Spend cap: 2,000,000 tokens. Reached this month."],
+    [false, "Spend cap: 2,000,000 tokens. Not reached."],
+  ])("shows a token cap (reached: %s)", async (reached, text) => {
+    fakeApi({
+      "GET /api/usage": json(
+        200,
+        report(30, used, { cap: { unit: "tokens", amount: 2_000_000, reached, resets_on: "2026-10-01" } }),
+      ),
+    });
+    render(<UsageSection />);
+
+    expect(await screen.findByText(text)).toBeInTheDocument();
+    expect(screen.getByLabelText("Spend cap unit")).toHaveDisplayValue("Tokens");
+  });
+
+  it("says when the cap resets, how unknown costs count, and what deleting the history does", async () => {
+    fakeApi({ "GET /api/usage": json(200, report(30, used, { cap: { ...usdCap, resets_on: "2027-01-01" } })) });
+    render(<UsageSection />);
+
+    const help = await screen.findByText(/New chat messages are refused once/);
+    expect(help).toHaveTextContent("It resets on 1 January 2027 (UTC).");
+    expect(help).toHaveTextContent("Calls with unknown cost count in tokens only.");
+    expect(help).toHaveTextContent(HISTORY);
+  });
+
+  it("names the next month's first day before any cap is set", async () => {
+    fakeApi({ "GET /api/usage": json(200, report(30, used)) });
+    render(<UsageSection />);
+
+    expect(await screen.findByText(/New chat messages are refused once/)).toHaveTextContent(
+      "It resets on 1 October 2026 (UTC).",
+    );
+  });
+
+  it("leaves out the usage-history sentence in demo mode", async () => {
+    fakeApi({
+      "GET /api/me": json(200, { id: "u1", mode: "demo", expires_at: "2026-09-25T12:00:00Z" }),
+      "GET /api/usage": json(200, report(30, used, { cap: usdCap })),
+    });
+    render(
+      <DemoProvider settings={{ keyTtlMinutes: 30, keyMaxHours: 4 }}>
+        <UsageSection />
+      </DemoProvider>,
+    );
+
+    const help = await screen.findByText(/New chat messages are refused once/);
+    expect(screen.getByLabelText("Spend cap unit")).toHaveDisplayValue("Estimated dollars");
+    expect(screen.getByRole("button", { name: "Save cap" })).toBeInTheDocument();
+    expect(help).toHaveTextContent("It resets on 1 October 2026 (UTC).");
+    expect(help).toHaveTextContent("Calls with unknown cost count in tokens only.");
+    expect(help).not.toHaveTextContent("Deleting your usage history");
+    expect(screen.queryByText(/Deleting your usage history/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the warning threshold apart from the cap", async () => {
+    fakeApi({
+      "GET /api/usage": json(
+        200,
+        report(30, used, { warning: { unit: "usd", amount: 3, reached: true }, cap: usdCap }),
+      ),
+    });
+    render(<UsageSection />);
+
+    expect(await screen.findByText(/Warning threshold: \$3\.00\./)).toBeInTheDocument();
+    expect(screen.getByText("Spend cap: $5.00. Not reached.")).toBeInTheDocument();
   });
 });
 

@@ -290,6 +290,14 @@ A task's `cancel` cannot be replaced on an `asyncio.Task` instance, so the tests
 
 The MCP SDK used here gives the client no session id, so closing a connector session sends no HTTP `DELETE`. Task 3.2's "the fake server sees the session end" is therefore checked as: the client session the turn opened ran its `aclose()` in the turn (its background task is gone) and the test server holds no open connection from it. The test server gained a hold for `create_event`, the method of each request, and its count of open connections.
 
+### 26. Build note: the cap form
+
+The form sits under the month total in `UsageSection` as its own `SpendCapForm`, with a unit select ("Spend cap unit": No cap / Estimated dollars / Tokens), an amount ("Spend cap amount"), and "Save cap". It starts from the cap the first report loaded and keeps what the user typed while the report reloads (a period change or a deleted history); a save puts the answered cap state into the report, so the month total's "Spend cap: …" line follows at once. An empty, zero, or unreadable amount shows "The spend cap needs an amount above zero." and sends nothing, as the warning field in the model settings does; a backend error shows its message and keeps the input. The reset date is written with its year ("It resets on 1 January 2027 (UTC)."), from `cap.resets_on`, or, with no cap set, the first day after the report's month: in December the year changes, and the form is the place the user plans from. The backend's refusal keeps "1 December" without the year (decision 17). The month total's line reads "Spend cap: $5.00. Reached this month." or "Not reached.", with the amount formatted by the chat's `formatThreshold`.
+
+### 27. Build note: where the chat shows the cap
+
+`ChatError` shows `SpendCapAlert` after the provider-key and model alerts, for a `SpendCapReachedError`. The alert puts the message in its own element, before the "Go to usage settings" link. `fromStored` checks `error_code == "spend_cap_reached"` before its generic failed branch, so a stored answer that ended at the cap gets decision 10's text and `endedInTurn`, whatever its status. A stream `error` event with that code sets `endedInTurn` too; a `409` refusal before any turn does not, so its resend still takes the shortcut. Where an answer restarts (`retry()`, a replay), `endedInTurn` is cleared with the error. The compact dialog's failed step shows `SpendCapAlert` and, under it, "Nothing in the conversation changed." in place of the plain alert.
+
 ## Risks / Trade-offs
 
 - [Two conversations crossing the cap together] → Each turn checks before its next round, so the overshoot is at most one round per running conversation. Accepted: a strict cap would need a lock on every model call.

@@ -142,6 +142,8 @@ describe("createApiError", () => {
     ["tool_loop_limit", "ToolLoopLimitError"],
     ["answer_interrupted", "AnswerInterruptedError"],
     ["thought_changed", "ThoughtChangedError"],
+    ["spend_cap_reached", "SpendCapReachedError"],
+    ["answer_stopped", "AnswerStoppedError"],
   ])("turns %s into %s", async (code, className) => {
     const api = await import("./api");
     const ErrorClass = api[className as keyof typeof api] as typeof ApiError;

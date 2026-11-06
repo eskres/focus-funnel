@@ -37,7 +37,9 @@ export type ApiErrorCode =
   | "connector_auth_failed"
   | "connector_protocol_error"
   | "setup_token_invalid"
-  | "setup_incomplete";
+  | "setup_incomplete"
+  | "spend_cap_reached"
+  | "answer_stopped";
 
 export class ApiError extends Error {
   readonly code: string;
@@ -91,6 +93,10 @@ export class ConnectorAuthFailedError extends ApiError {}
 export class ConnectorProtocolError extends ApiError {}
 export class SetupTokenInvalidError extends ApiError {}
 export class SetupIncompleteError extends ApiError {}
+/** The month's usage reached the user's spend cap; the message names the cap. */
+export class SpendCapReachedError extends ApiError {}
+/** The user stopped the answer. */
+export class AnswerStoppedError extends ApiError {}
 
 /** Sent on window when a call finds that the demo session has ended. */
 export const DEMO_EXPIRED_EVENT = "ff:demo-session-expired";
@@ -131,6 +137,8 @@ const errorClasses: Record<ApiErrorCode, typeof ApiError> = {
   connector_protocol_error: ConnectorProtocolError,
   setup_token_invalid: SetupTokenInvalidError,
   setup_incomplete: SetupIncompleteError,
+  spend_cap_reached: SpendCapReachedError,
+  answer_stopped: AnswerStoppedError,
 };
 
 function isKnownCode(code: string): code is ApiErrorCode {

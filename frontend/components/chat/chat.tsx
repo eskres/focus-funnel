@@ -66,6 +66,11 @@ import {
 import { redirectToLogin } from "@/lib/redirect-to-login";
 import type { Action, CompactModel, Proposal, SseEvent } from "@/lib/sse";
 
+// What a stored answer that ended at the spend cap says. It names no amount:
+// the stored message holds only the code, and the cap may have changed since.
+const SPEND_CAP_ANSWER =
+  "Your monthly spend cap was reached during this answer. Raise or remove it in Settings to keep chatting.";
+
 // How many times one answer is followed again after its stream breaks,
 // before the chat says it was cut short.
 const MAX_FOLLOWS = 3;
@@ -160,7 +165,13 @@ function fromStored(
     }
     answer.text += message.content ?? "";
     answerAt.push({ position: message.position, answer });
-    if (message.status !== "complete" || message.error_code) {
+    if (message.error_code === "spend_cap_reached") {
+      // The turn ran and stopped at the cap: its rounds stay, so the same
+      // text sent again is a new message.
+      answer.status = "failed";
+      answer.endedInTurn = true;
+      answer.error = createApiError(message.error_code, SPEND_CAP_ANSWER, 200);
+    } else if (message.status !== "complete" || message.error_code) {
       answer.status = message.status === "cut" && !message.error_code ? "cut" : "failed";
       answer.error = createApiError(
         message.error_code ?? "internal_error",
@@ -427,7 +438,12 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
     // Sending the same text after an unanswered message resends it, as the
     // server does, rather than showing it twice.
     const last = messages.at(-1);
-    const unfinished = last?.role === "assistant" && (last.status === "failed" || last.status === "cut");
+    // An answer that ended during its turn (at the spend cap) was answered: its
+    // rounds are stored, so the same text is a new message.
+    const unfinished =
+      last?.role === "assistant" &&
+      !last.endedInTurn &&
+      (last.status === "failed" || last.status === "cut");
     if (unfinished && last.prompt === text) {
       await retry(last);
       return;
@@ -460,6 +476,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
       actions: undefined,
       sources: undefined,
       error: undefined,
+      endedInTurn: undefined,
       unreached: undefined,
       status: "streaming",
     }));
@@ -494,7 +511,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         } else if (event.type === "compact_models") {
           outcome = { step: "choose", models: event.models, contextLength: event.contextLength };
         } else if (event.type === "error") {
-          outcome = { step: "failed", message: event.message };
+          outcome = { step: "failed", message: event.message, code: event.code };
         }
       }
       if (sentChoice) {
@@ -507,10 +524,10 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         redirectToLogin(conversationId ? `/app/${conversationId}` : "/app");
         return;
       }
-      outcome = {
-        step: "failed",
-        message: error instanceof ApiError ? error.message : "The summary could not be written.",
-      };
+      outcome =
+        error instanceof ApiError
+          ? { step: "failed", message: error.message, code: error.code }
+          : { step: "failed", message: "The summary could not be written." };
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       if (!controller.signal.aborted) setAnswering(false);
@@ -658,6 +675,8 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
           ...a,
           status: "failed",
           error: createApiError(event.code, event.message, 200),
+          // A turn that ended at the spend cap between rounds stored what it did.
+          ...(event.code === "spend_cap_reached" ? { endedInTurn: true } : {}),
         }));
         return true;
       case "done":
@@ -691,6 +710,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
           actions: undefined,
           sources: undefined,
           error: undefined,
+          endedInTurn: undefined,
         }));
       }
       if (applyEvent(answerId, event)) finished = true;

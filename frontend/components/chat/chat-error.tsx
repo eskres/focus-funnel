@@ -1,3 +1,4 @@
+import { SpendCapAlert } from "@/components/chat/spend-cap-alert";
 import { ModelAlert, modelAlertCode } from "@/components/model-alert";
 import { ProviderKeyAlert, providerKeyAlertCode } from "@/components/provider-key-alert";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -8,6 +9,7 @@ import {
   ConversationBusyError,
   OutputLimitReachedError,
   ProviderRateLimitedError,
+  SpendCapReachedError,
   ToolLoopLimitError,
   type ApiError,
 } from "@/lib/api";
@@ -54,6 +56,8 @@ export function ChatError({
 
   const modelCode = modelAlertCode(error);
   if (modelCode) return <ModelAlert code={modelCode} message={error.message} />;
+
+  if (error instanceof SpendCapReachedError) return <SpendCapAlert message={error.message} />;
 
   const title = titles.get(error.constructor);
   const canTryAgain = retryable.some((ErrorClass) => error instanceof ErrorClass);

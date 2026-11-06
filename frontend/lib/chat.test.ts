@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { delta, done, errorResponse, fakeApi, streamOf, toolEvent } from "@/test/fake-api";
 
-import { BackendUnreachableError, NotFoundError, ModelNotSetError } from "./api";
+import { BackendUnreachableError, NotFoundError, ModelNotSetError, SpendCapReachedError } from "./api";
 import { COMMANDS, followTurn, isDeleteCommand, streamChat } from "./chat";
 import { browserTimeZone } from "./time-zone";
 
@@ -68,6 +68,21 @@ describe("streamChat", () => {
 
     expect(stored).toHaveBeenCalledWith("c9");
     expect(error).toBeInstanceOf(ModelNotSetError);
+  });
+
+  it("reports the new conversation a message refused at the spend cap was stored in", async () => {
+    const message = "Your monthly spend cap of $5.00 is reached.";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => errorResponse(409, "spend_cap_reached", message, { "X-Conversation-Id": "c1" })),
+    );
+    const stored = vi.fn();
+
+    const error = await drain(streamChat({ message: "hi" }, undefined, stored)).catch((e) => e);
+
+    expect(stored).toHaveBeenCalledWith("c1");
+    expect(error).toBeInstanceOf(SpendCapReachedError);
+    expect(error).toMatchObject({ message, status: 409 });
   });
 });
 

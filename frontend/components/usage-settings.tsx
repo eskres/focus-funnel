@@ -3,20 +3,48 @@
 import { useEffect, useState } from "react";
 
 import { formatThreshold } from "@/components/chat/chat-notices";
+import { useDemo } from "@/components/demo/demo-context";
 import { UsageChart } from "@/components/usage-chart";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { USAGE_DELETED } from "@/lib/account";
 import { ApiError, UnauthenticatedError } from "@/lib/api";
 import { redirectToLogin } from "@/lib/redirect-to-login";
-import { USAGE_PERIODS, formatUsd, getUsage, type UsageReport } from "@/lib/usage";
+import {
+  USAGE_PERIODS,
+  formatUsd,
+  getUsage,
+  saveCap,
+  type CapState,
+  type SpendCap,
+  type UsageReport,
+} from "@/lib/usage";
 
 function monthName(iso: string): string {
   return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en", {
     month: "long",
     timeZone: "UTC",
   });
+}
+
+/** A UTC day as "1 December 2026". */
+function longDate(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** The first day of the month after the one `monthStart` begins, as an ISO date. */
+function nextMonthStart(monthStart: string): string {
+  const start = new Date(`${monthStart}T00:00:00Z`);
+  return new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1))
+    .toISOString()
+    .slice(0, 10);
 }
 
 /**
@@ -110,6 +138,11 @@ export function UsageSection() {
             aria-busy={loading}
           >
             <MonthTotal report={report} />
+            <SpendCapForm
+              cap={report.cap}
+              resetsOn={report.cap?.resets_on ?? nextMonthStart(report.month.start)}
+              onSaved={(cap) => setReport((current) => current && { ...current, cap })}
+            />
 
             {neverUsed ? (
               <p className="text-sm text-muted-foreground">Nothing has been used yet.</p>
@@ -160,7 +193,7 @@ export function UsageSection() {
 }
 
 function MonthTotal({ report }: { report: UsageReport }) {
-  const { month, warning } = report;
+  const { month, warning, cap } = report;
   return (
     <div className="flex flex-col gap-1">
       <p className="text-xs text-muted-foreground">{monthName(month.start)} so far (estimate)</p>
@@ -183,7 +216,114 @@ function MonthTotal({ report }: { report: UsageReport }) {
           )}
         </p>
       )}
+      {cap && (
+        <p className={cap.reached ? "text-xs font-medium" : "text-xs"}>
+          {`Spend cap: ${formatThreshold(cap)}. ${cap.reached ? "Reached this month." : "Not reached."}`}
+        </p>
+      )}
     </div>
+  );
+}
+
+/**
+ * The monthly spend cap, saved on its own: new chat messages are refused once
+ * the month's usage reaches it. The form keeps what the user typed when the
+ * report reloads, and starts from the cap the first report loaded.
+ */
+function SpendCapForm({
+  cap,
+  resetsOn,
+  onSaved,
+}: {
+  cap: CapState | null;
+  /** The first day of the next month in UTC, when the cap counts from zero. */
+  resetsOn: string;
+  onSaved: (cap: CapState | null) => void;
+}) {
+  const demo = useDemo();
+  const [unit, setUnit] = useState<"" | SpendCap["unit"]>(cap?.unit ?? "");
+  const [amount, setAmount] = useState(cap ? String(cap.amount) : "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  async function save() {
+    setSaved(false);
+    let next: SpendCap | null = null;
+    if (unit) {
+      const value = Number(amount);
+      if (amount.trim() === "" || Number.isNaN(value) || value <= 0) {
+        setError("The spend cap needs an amount above zero.");
+        return;
+      }
+      next = { unit, amount: value };
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      onSaved(await saveCap(next));
+      setSaved(true);
+    } catch (caught) {
+      if (caught instanceof UnauthenticatedError) {
+        redirectToLogin("/settings");
+        return;
+      }
+      setError(caught instanceof ApiError ? caught.message : "Could not save the spend cap.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <fieldset className="flex flex-col gap-1 text-sm">
+      <legend className="font-medium">Monthly spend cap</legend>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          aria-label="Spend cap unit"
+          className="rounded-md border bg-background px-2 py-1 text-sm"
+          value={unit}
+          disabled={busy}
+          onChange={(event) => {
+            setUnit(event.target.value as "" | SpendCap["unit"]);
+            setSaved(false);
+          }}
+        >
+          <option value="">No cap</option>
+          <option value="usd">Estimated dollars</option>
+          <option value="tokens">Tokens</option>
+        </select>
+        {unit && (
+          <Input
+            type="number"
+            aria-label="Spend cap amount"
+            className="w-36"
+            min={0}
+            step={unit === "usd" ? "0.01" : "1000"}
+            placeholder={unit === "usd" ? "5.00" : "2000000"}
+            value={amount}
+            onChange={(event) => {
+              setAmount(event.target.value);
+              setSaved(false);
+            }}
+            disabled={busy}
+          />
+        )}
+        <Button type="button" size="sm" variant="outline" onClick={save} disabled={busy}>
+          {busy ? "Saving…" : "Save cap"}
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        New chat messages are refused once this month&apos;s usage reaches the cap. It resets on{" "}
+        {longDate(resetsOn)} (UTC). Calls with unknown cost count in tokens only.
+        {!demo && " Deleting your usage history makes the cap count from zero again for this month."}
+      </p>
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      {saved && <p className="text-xs text-muted-foreground">Saved.</p>}
+    </fieldset>
   );
 }
 

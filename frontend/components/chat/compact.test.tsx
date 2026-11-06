@@ -9,6 +9,7 @@ import {
   delta,
   done,
   errorEvent,
+  errorResponse,
   fakeApi,
   json,
   loadout,
@@ -270,6 +271,57 @@ describe("the /compact dialog", () => {
       await screen.findByText("Couldn't reach Nebius. Try again. Nothing in the conversation changed."),
     ).toBeInTheDocument();
     expect(screen.queryByText("Compacted")).not.toBeInTheDocument();
+  });
+
+  it("shows the spend cap alert when /compact is refused at the cap, and changes nothing", async () => {
+    const message =
+      "Your monthly spend cap of $5.00 is reached (this month so far: $5.12, estimated). Raise or remove it in Settings to keep chatting. It resets on 1 December (UTC).";
+    const { calls } = fakeApi({
+      "GET /api/settings/models": json(200, settings),
+      "GET /api/conversations/c1": json(200, conversation()),
+      "POST /api/conversations/c1/proposal": nothingHeld,
+      "POST /api/chat": () => errorResponse(409, "spend_cap_reached", message),
+    });
+    render(<Chat conversationId="c1" />);
+    await screen.findByText("message 9");
+
+    send("/compact");
+
+    const dialog = await screen.findByRole("dialog");
+    const alert = await within(dialog).findByRole("alert");
+    expect(within(alert).getByText("Monthly spend cap reached")).toBeInTheDocument();
+    expect(within(alert).getByText(message)).toBeInTheDocument();
+    expect(within(alert).getByRole("link", { name: "Go to usage settings" })).toHaveAttribute(
+      "href",
+      "/settings#usage",
+    );
+    expect(within(dialog).getByText("Nothing in the conversation changed.")).toBeInTheDocument();
+    expect(calls.some((c) => c.path.endsWith("/compaction"))).toBe(false);
+    expect(screen.queryByText("Compacted")).not.toBeInTheDocument();
+    expect(screen.queryByText("/compact", { selector: "p" })).not.toBeInTheDocument();
+  });
+
+  it("shows a refused /compact with nothing to compact as plain text, with no cap alert", async () => {
+    fakeApi({
+      "GET /api/settings/models": json(200, settings),
+      "GET /api/conversations/c1": json(200, conversation()),
+      "POST /api/conversations/c1/proposal": nothingHeld,
+      "POST /api/chat": () =>
+        errorResponse(422, "validation_error", "There is nothing to compact yet."),
+    });
+    render(<Chat conversationId="c1" />);
+    await screen.findByText("message 9");
+
+    send("/compact");
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      await within(dialog).findByText(
+        "There is nothing to compact yet. Nothing in the conversation changed.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText("Monthly spend cap reached")).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("link", { name: "Go to usage settings" })).not.toBeInTheDocument();
   });
 
   it("asks the user to choose a larger loadout model when the conversation is too long", async () => {
