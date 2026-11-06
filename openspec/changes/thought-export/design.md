@@ -397,6 +397,12 @@ Task 3.2 says a new `app/settings/page.test.tsx`. That file already exists, with
 
 **Alternatives:** a second page test file (rejected: two files would each mock `@/lib/demo-settings` for the same page); a local error parser in the section (rejected: it would repeat `readErrorBody()`).
 
+### 27. The proxy's export check, its `no-store` test, and the login page test
+
+The proxy refuses the export by its decoded segments whatever the method, not only for `GET`: the backend has no other method on that path, so a refusal there costs nothing and the check stays a single line. It keeps `no-store` when one comma-separated directive of the upstream `cache-control` is `no-store`, ignoring case, rather than when the string merely contains it. Task 4.1 asks that the session read is not called for a refused export; `route.test.ts` mocks `@/lib/session` with the real module and `readSession` wrapped in `vi.fn`, so every other test there runs as before. Task 4.3's page check is a new `app/login/page.test.tsx` that mocks `getAuthConfig()` to answer firebase mode and `FirebaseLogin` to record its props, and renders what the server component returns. `safeReturnTo()` also falls back when the URL parser throws, which a value starting with `/` does not do today.
+
+**Alternatives:** a `GET`-only check (rejected: no gain, and a later `HEAD` or `POST` on the path would pass it); a substring test on `cache-control` (rejected: `no-store` inside another token would match); stubbing firebase environment variables for the page test (rejected: the page needs only the parsed config, and the mock keeps the test off the env parsing).
+
 ## Risks / Trade-offs
 
 - [Not a snapshot: edits and deletes while the export runs show up in later batches] → Each thought is whole and current as of its batch. `exported_at` says when the export started. A user who wants a fixed copy exports while not editing. Deleting all content or the account, or ending the demo, during an export ends that export as failed (decision 15).

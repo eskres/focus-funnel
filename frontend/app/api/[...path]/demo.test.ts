@@ -335,6 +335,82 @@ describe("the end of a demo session", () => {
   });
 });
 
+describe("the export in demo mode (thought-export task 4.2)", () => {
+  const DISPOSITION = 'attachment; filename="focus-funnel-thoughts-2026-11-05.json"';
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const exportRequest = (cookie = "") =>
+    visitor(`${APP}/api/me/export?format=json`, { headers: { "Sec-Fetch-Site": "same-origin" } }, cookie);
+
+  it("streams the file in parts with its name and no-store, and refreshes the held keys", async () => {
+    const parts = ['{"thoughts":[\n', '{"id":"a"},\n', '{"id":"b"}\n],"count":2}\n'];
+    const sentAt: number[] = [];
+    backend = await startBackend(async (_req, _body, res) => {
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": DISPOSITION,
+        "Cache-Control": "no-store",
+      });
+      for (const part of parts) {
+        sentAt.push(performance.now());
+        res.write(part);
+        await sleep(150);
+      }
+      res.end();
+    });
+    useDemo(backend.url);
+    const now = Date.now();
+    const cookie = await keysCookie({
+      keys: { nebius: { key: KEY, set_at: now - 10 * MINUTE } },
+      last_used_at: now - 5 * MINUTE,
+    });
+
+    const response = await GET(exportRequest(cookie), ctx("me", "export"));
+
+    expect(response.status).toBe(200);
+    expect(backend.requests[0].url).toBe("/api/me/export?format=json");
+    expect(backend.requests[0].headers.authorization).toBe("Bearer visitor-session");
+    expect(response.headers.get("content-disposition")).toBe(DISPOSITION);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    // The held keys go to the backend and their last use is refreshed, as for any call.
+    expect(sentKeys().nebius.key).toBe(KEY);
+    const held = await readHeldKeys(new Request(APP, { headers: { cookie: cookieHeader(response) } }), SECRET);
+    expect(held!.last_used_at).toBeGreaterThanOrEqual(now);
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    const received: { text: string; at: number }[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received.push({ text: decoder.decode(value), at: performance.now() });
+    }
+    expect(received.map((chunk) => chunk.text)).toEqual(parts);
+    for (let i = 0; i < parts.length - 1; i++) {
+      expect(received[i].at).toBeLessThan(sentAt[i + 1]);
+    }
+  });
+
+  it("passes on demo_session_expired and clears the demo cookies", async () => {
+    backend = await startBackend(
+      json(401, { error: { code: "demo_session_expired", message: "Your demo session has ended." } }),
+    );
+    useDemo(backend.url);
+
+    const response = await GET(exportRequest(), ctx("me", "export"));
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: { code: "demo_session_expired", message: "Your demo session has ended." },
+    });
+    expect(response.headers.getSetCookie()).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(new RegExp(`^${DEMO_SESSION_COOKIE}=;.*Max-Age=0`)),
+        expect.stringMatching(new RegExp(`^${DEMO_KEYS_COOKIE}=;.*Max-Age=0`)),
+      ]),
+    );
+  });
+});
+
 describe("a demo cookie the backend no longer knows", () => {
   /** The browser's cookie jar, shared by its tabs. */
   class Jar {

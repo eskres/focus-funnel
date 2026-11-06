@@ -107,6 +107,21 @@ function backendTarget(backendUrl: string, segments: string[], search: string): 
   return target;
 }
 
+/** `GET /api/me/export`, matched on the decoded route segments. */
+function isExport(path: string[]): boolean {
+  return path.length === 2 && path[0] === "me" && path[1] === "export";
+}
+
+/**
+ * True unless the browser says another site started the request. `none` is a
+ * navigation the user started; a request without the header (an older browser,
+ * or curl) passes, since no current browser can be made to omit it.
+ */
+function fromThisSite(request: Request): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  return site === null || site === "same-origin" || site === "none";
+}
+
 async function forward(request: Request, context: ProxyContext): Promise<Response> {
   const backendUrl = process.env.BACKEND_URL;
   if (!backendUrl) {
@@ -115,6 +130,12 @@ async function forward(request: Request, context: ProxyContext): Promise<Respons
   }
 
   const { path } = await context.params;
+  // Only the app's own page may start an export (another site could otherwise
+  // open it with the user's cookie and save their whole store). The check reads
+  // the decoded segments, not the URL, so `%65`-style encodings cannot pass it.
+  if (isExport(path) && !fromThisSite(request)) {
+    return errorResponse(403, "validation_error", "Start the export from Settings.");
+  }
   const target = backendTarget(backendUrl, path, new URL(request.url).search);
   if (!target) {
     return errorResponse(404, "not_found", "Not found.");
@@ -192,7 +213,12 @@ async function forward(request: Request, context: ProxyContext): Promise<Respons
     const value = upstream.headers.get(name);
     if (value !== null) responseHeaders.set(name, value);
   }
-  responseHeaders.set("Cache-Control", "no-cache");
+  // `no-cache` lets a browser keep the answer on disk; an answer the backend
+  // marks `no-store` (the export) keeps that rule.
+  const noStore = (upstream.headers.get("cache-control") ?? "")
+    .split(",")
+    .some((directive) => directive.trim().toLowerCase() === "no-store");
+  responseHeaders.set("Cache-Control", noStore ? "no-store" : "no-cache");
   responseHeaders.set("X-Accel-Buffering", "no");
   // A renewed session.
   for (const cookie of auth.setCookies) responseHeaders.append("set-cookie", cookie);
