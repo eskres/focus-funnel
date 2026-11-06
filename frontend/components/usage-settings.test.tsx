@@ -239,13 +239,14 @@ describe("the monthly spend cap", () => {
   });
 
   it.each([
-    [true, "Spend cap: 2,000,000 tokens. Reached this month."],
-    [false, "Spend cap: 2,000,000 tokens. Not reached."],
-  ])("shows a token cap (reached: %s)", async (reached, text) => {
+    [true, "Spend cap: 2,000,000 tokens. Reached this month.", 2_000_000],
+    [false, "Spend cap: 2,000,000 tokens. Not reached.", 2_000_000],
+    [false, "Spend cap: 1 token. Not reached.", 1],
+  ])("shows a token cap (reached: %s): %s", async (reached, text, amount) => {
     fakeApi({
       "GET /api/usage": json(
         200,
-        report(30, used, { cap: { unit: "tokens", amount: 2_000_000, reached, resets_on: "2026-10-01" } }),
+        report(30, used, { cap: { unit: "tokens", amount, reached, resets_on: "2026-10-01" } }),
       ),
     });
     render(<UsageSection />);

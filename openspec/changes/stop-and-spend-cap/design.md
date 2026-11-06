@@ -302,6 +302,10 @@ The form sits under the month total in `UsageSection` as its own `SpendCapForm`,
 
 `streamChat` and `followTurn` take an optional `onOpen` callback, called once the server has answered with the stream (a 2xx response, before its first event; not on a refusal or a follow's `204`). The chat keeps three states apart from `answering`: `chatTurn` (a chat turn is being sent or followed, so `/compact` and the held-proposal check never get `onStop`), `streamOpen` (set by `onOpen`), and `stopping`. `Composer` gets one more prop than decision 5 names, `canStop`: Stop shows in place of Send for the whole turn, and is disabled until `streamOpen` and the conversation id are both known, which for a new conversation means after its `conversation` event. Stop is a `type="button"`, so Enter in the input never presses it. A failed stop request sets `stopFailed` on the answer the chat is reading ("The answer could not be stopped. Try again.") and clears `stopping`; the next press and any terminal event clear it. A `401` from the stop request sends the user to log in, as other requests do. Each tool line carries `data-state`, so tests can see a stopped line is not running. The two existing tests that expected a disabled Send while an answer runs now expect Stop in its place, as decision 5 says.
 
+### 29. Build note: a one-token cap reads "1 token"
+
+The end-to-end run's demo step sets a token cap of 1, and the usage section then read "Spend cap: 1 tokens." while the refusal (decision 17) read "1 token". `formatThreshold()` in `components/chat/chat-notices.tsx` now writes the singular for an amount of exactly 1, so the cap line, the warning line, and the backend's message agree. `components/usage-settings.test.tsx` covers it.
+
 ## Risks / Trade-offs
 
 - [Two conversations crossing the cap together] → Each turn checks before its next round, so the overshoot is at most one round per running conversation. Accepted: a strict cap would need a lock on every model call.
