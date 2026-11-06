@@ -389,6 +389,14 @@ Task 2.3's by-hand check renders the two indented summary lines with `markdown-i
 
 Task 2.10 starts `uvicorn` on port 8765 with the settings in `backend/.env`. In this workspace the app runs on port 8300 and its databases are named `ff_f4_*`, and there is no `backend/.env`. So the check ran `uv run uvicorn app.main:app --port 8300 2> <log>` in `backend/`, with `DATABASE_URL` at a fresh `ff_f4_logcheck` database migrated to the current head (`460c92991076`), `AUTH_MODE=demo`, `SETUP_WIZARD=false`, and a generated `KEY_ENCRYPTION_KEY` in the environment, and no `--log-config`.
 
+### 26. The section's heading, its reading of the refusal, and the extended page test
+
+The card's title wraps an `<h2>Export</h2>` in `CardTitle`, as the Connectors card does, since `CardTitle` is a `div` and task 3.2 finds "Export" as a heading. The frame's `load` handler reads the shared error format with `readErrorBody()`, now exported from `lib/api.ts`, instead of a second copy of it. A `demo_session_expired` refusal also shows its message in the card's alert, as any error but `UnauthenticatedError` does (decision 10); the demo "session ended" view replaces the page at once, so the alert is not seen there. Frames are keyed by their place in the list, which never shrinks while the section is mounted.
+
+Task 3.2 says a new `app/settings/page.test.tsx`. That file already exists, with the Connectors tests and a top-level mock of `@/lib/demo-settings` that answers `null`. So the task's tests are added to it, and the mock answers a `vi.hoisted` value that the demo-mode test sets and `afterEach` resets. The demo-mode render also needs `GET /api/me` answered for `DemoProvider`, and `next/navigation` mocked for the header's `DemoBar`.
+
+**Alternatives:** a second page test file (rejected: two files would each mock `@/lib/demo-settings` for the same page); a local error parser in the section (rejected: it would repeat `readErrorBody()`).
+
 ## Risks / Trade-offs
 
 - [Not a snapshot: edits and deletes while the export runs show up in later batches] → Each thought is whole and current as of its batch. `exported_at` says when the export started. A user who wants a fixed copy exports while not editing. Deleting all content or the account, or ending the demo, during an export ends that export as failed (decision 15).

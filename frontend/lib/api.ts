@@ -39,7 +39,8 @@ export type ApiErrorCode =
   | "setup_token_invalid"
   | "setup_incomplete"
   | "spend_cap_reached"
-  | "answer_stopped";
+  | "answer_stopped"
+  | "export_running";
 
 export class ApiError extends Error {
   readonly code: string;
@@ -97,6 +98,8 @@ export class SetupIncompleteError extends ApiError {}
 export class SpendCapReachedError extends ApiError {}
 /** The user stopped the answer. */
 export class AnswerStoppedError extends ApiError {}
+/** An export of the same format is already running for this user. */
+export class ExportRunningError extends ApiError {}
 
 /** Sent on window when a call finds that the demo session has ended. */
 export const DEMO_EXPIRED_EVENT = "ff:demo-session-expired";
@@ -139,13 +142,15 @@ const errorClasses: Record<ApiErrorCode, typeof ApiError> = {
   setup_incomplete: SetupIncompleteError,
   spend_cap_reached: SpendCapReachedError,
   answer_stopped: AnswerStoppedError,
+  export_running: ExportRunningError,
 };
 
 function isKnownCode(code: string): code is ApiErrorCode {
   return Object.hasOwn(errorClasses, code);
 }
 
-function readErrorBody(body: unknown): {
+/** Reads the code, message, and other keys of the shared error format. */
+export function readErrorBody(body: unknown): {
   code?: string;
   message?: string;
   details?: Record<string, unknown>;

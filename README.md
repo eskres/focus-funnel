@@ -21,6 +21,7 @@ You bring your own model provider. Each user saves their own API key for Nebius,
 - **Filing:** a proposal shows as a card you can edit. Confirm saves it as a thought, with the text you wrote as its raw text, and the card links to it. A message with several things to keep shows one card per part, and "Merge into one" joins them. Each thought has a category: one of six fixed kinds, or one you add in **Settings**.
 - **Search:** the search tool finds your filed thoughts by meaning and by words at once, in Postgres with pgvector. The thoughts an answer used show under it as sources, which you can sort newest first and filter by tag. [docs/search.md](docs/search.md) covers the embedding model, tuning, and rebuilding search indexes.
 - **Thoughts:** a source or a saved card opens the thought in a side sheet over the chat. The address names the open thought, so you can copy it, and Back closes the sheet.
+- **Export:** In **Settings**, download all your thoughts as one JSON or Markdown file.
 - **Connectors (off by default):** the chat can use tools from MCP servers, such as a Google Calendar server you run yourself. Reads run at once; anything that changes something shows a card and waits for your approval, unless you set that tool to always allow. [docs/connectors.md](docs/connectors.md) covers the switches, the risks, and the Google Calendar example with `docker-compose.mcp.yml`.
 
 ## Stack

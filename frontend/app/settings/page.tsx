@@ -5,6 +5,7 @@ import { ConnectorsSection } from "@/components/connectors-settings";
 import { DemoBar } from "@/components/demo/demo-bar";
 import { DeleteDataSection } from "@/components/delete-data-settings";
 import { DemoProvider } from "@/components/demo/demo-context";
+import { ExportSection } from "@/components/export-settings";
 import { ModelSettingsSection } from "@/components/model-settings";
 import { ProvidersSettings } from "@/components/providers-settings";
 import { UsageSection } from "@/components/usage-settings";
@@ -35,6 +36,7 @@ export default async function SettingsPage() {
           <CategoriesSection />
           <ConnectorsSection />
           <UsageSection />
+          <ExportSection />
           <DeleteDataSection />
         </main>
       </div>

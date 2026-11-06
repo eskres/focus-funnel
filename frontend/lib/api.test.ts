@@ -144,12 +144,18 @@ describe("createApiError", () => {
     ["thought_changed", "ThoughtChangedError"],
     ["spend_cap_reached", "SpendCapReachedError"],
     ["answer_stopped", "AnswerStoppedError"],
+    ["export_running", "ExportRunningError"],
   ])("turns %s into %s", async (code, className) => {
     const api = await import("./api");
     const ErrorClass = api[className as keyof typeof api] as typeof ApiError;
     const error = api.createApiError(code, "A message.", 409);
     expect(error).toBeInstanceOf(ErrorClass);
     expect(error).toMatchObject({ code, message: "A message.", status: 409 });
+  });
+
+  it("turns export_running into an ExportRunningError", async () => {
+    const { createApiError, ExportRunningError } = await import("./api");
+    expect(createApiError("export_running", "m", 409)).toBeInstanceOf(ExportRunningError);
   });
 
   it("keeps an unknown code as a plain ApiError", async () => {
