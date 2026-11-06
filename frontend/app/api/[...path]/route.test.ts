@@ -267,6 +267,28 @@ describe("API proxy", () => {
     });
   });
 
+  it("forwards a stop of the running answer with the credential and passes the 204 through", async () => {
+    backend = await startBackend((_req, _body, res) => {
+      res.writeHead(204);
+      res.end();
+    });
+    vi.stubEnv("BACKEND_URL", backend.url);
+
+    const response = await POST(
+      authed("http://localhost:3000/api/chat/c1/stop", { method: "POST" }),
+      ctx("chat", "c1", "stop"),
+    );
+
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe("");
+    expect(backend.requests).toHaveLength(1);
+    const [forwarded] = backend.requests;
+    expect(forwarded.method).toBe("POST");
+    expect(forwarded.url).toBe("/api/chat/c1/stop");
+    expect(forwarded.headers.authorization).toBe("Bearer test-access-token");
+    expect(forwarded.headers.cookie).toBeUndefined();
+  });
+
   it("passes backend status codes and empty bodies through", async () => {
     backend = await startBackend((_req, _body, res) => {
       res.writeHead(204);

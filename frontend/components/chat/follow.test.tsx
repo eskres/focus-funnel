@@ -151,7 +151,9 @@ describe("coming back to an answer", () => {
     expect(await screen.findByText("Want to")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Writing");
     expect(input()).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    // Stop takes Send's place while the answer runs (stop-and-spend-cap).
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
     // The stored rounds of the running turn show once, from the replay.
     expect(screen.getAllByTestId("tool-indication")).toHaveLength(2);
     expect(screen.getAllByRole("region", { name: "Proposal to file" })).toHaveLength(1);
@@ -163,6 +165,7 @@ describe("coming back to an answer", () => {
 
     expect(await screen.findByText("Want to keep it?")).toBeInTheDocument();
     await waitFor(() => expect(input()).toBeEnabled());
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.queryByText(/cut short/)).not.toBeInTheDocument();
   });

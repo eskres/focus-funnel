@@ -35,14 +35,18 @@ export type StoredMessage = {
   content: string | null;
   tool_calls: StoredToolCall[] | null;
   tool_call_id: string | null;
-  status: "complete" | "cut" | "failed";
+  /** `stopped`: the user stopped the answer (error code `answer_stopped`). */
+  status: "complete" | "cut" | "failed" | "stopped";
   error_code: string | null;
   compacted: boolean;
   /**
    * `{proposal_id}` on a propose_thought result, `{sources}` on a search,
    * `{action_id}` on a connector call that waits for approval, `{failed}` on
    * a connector call that failed. Each tool message from this server also
-   * holds the `summary` its tool line showed in the stream.
+   * holds the `summary` its tool line showed in the stream. `{stopped}` is a
+   * tool call the user stopped before it finished (no summary), and
+   * `{stopped_tools}` on a stopped answer names the calls the model was still
+   * sending when it stopped, in order.
    */
   details: {
     proposal_id?: string;
@@ -50,6 +54,8 @@ export type StoredMessage = {
     action_id?: string;
     failed?: boolean;
     summary?: string;
+    stopped?: boolean;
+    stopped_tools?: string[];
   } | null;
   created_at: string;
 };

@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fakeApi, json, summary, wireProposal } from "@/test/fake-api";
+import { errorResponse, fakeApi, json, summary, wireProposal } from "@/test/fake-api";
 
 import { ConversationsProvider } from "./conversations-context";
 import { Sidebar } from "./sidebar";
@@ -220,6 +220,31 @@ describe("Sidebar", () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith("/app"));
     expect(calls.some((c) => c.method === "DELETE")).toBe(true);
     await waitFor(() => expect(rowTitles("Recent conversations")).toEqual(["Oat milk"]));
+  });
+
+  it("shows the busy refusal in the dialog, stays open, and keeps the conversation", async () => {
+    const busy = "An answer in this conversation is still running. Try deleting again in a moment.";
+    const { calls } = fakeApi({
+      "GET /api/conversations": json(200, { conversations: [rent, milk], archived: [] }),
+      "DELETE /api/conversations/c1": errorResponse(409, "conversation_busy", busy),
+    });
+    renderSidebar();
+
+    fireEvent.click(within(await openMenu("Rent")).getByRole("menuitem", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(busy);
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect(within(dialog).getByRole("button", { name: "Delete" })).toBeEnabled();
+    expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+    expect(push).not.toHaveBeenCalled();
+    // The dialog hides the page behind it from the accessibility tree.
+    const list = screen.getByRole("list", { name: "Recent conversations", hidden: true });
+    expect(within(list).getAllByRole("link", { hidden: true }).map((link) => link.textContent)).toEqual([
+      "Rent",
+      "Oat milk",
+    ]);
   });
 
   it("changes nothing when a delete is cancelled", async () => {

@@ -15,7 +15,8 @@ import { cn } from "@/lib/utils";
 
 export type ToolIndication = {
   name: string;
-  state: "running" | "done";
+  /** `stopped`: the user stopped the answer before this tool finished. */
+  state: "running" | "done" | "stopped";
   summary?: string;
   /** A connector call that failed: the answer goes on without it. */
   failed?: boolean;
@@ -34,12 +35,15 @@ export type AnswerMessage = {
   actions?: Action[];
   /** The thoughts this answer's searches returned, each once. */
   sources?: Source[];
-  status: "streaming" | "done" | "failed" | "cut";
+  /** `stopped`: the user stopped it; the text, tools, sources, and cards stay. */
+  status: "streaming" | "done" | "failed" | "cut" | "stopped";
   /**
    * The answer ran and ended during its turn (at the spend cap): its rounds
    * are stored, so sending the same text again is a new message, not a resend.
    */
   endedInTurn?: boolean;
+  /** The user pressed Stop and the stop request failed. */
+  stopFailed?: boolean;
   /** Cut short because the server could not be reached to follow it again. */
   unreached?: boolean;
   error?: ApiError;
@@ -74,6 +78,7 @@ export function toolName(name: string): string {
 function toolLabel(tool: ToolIndication): string {
   const name = toolName(tool.name);
   if (tool.state === "running") return runningLabels[tool.name] ?? `Using ${name}…`;
+  if (tool.state === "stopped") return "Stopped before it finished";
   return tool.summary || doneLabels[tool.name] || `Used ${name}`;
 }
 
@@ -205,6 +210,7 @@ function Answer({
         <p
           key={index}
           data-testid="tool-indication"
+          data-state={tool.state}
           data-failed={tool.failed ? "true" : undefined}
           className={cn(
             "rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground",
@@ -243,6 +249,12 @@ function Answer({
         <p role="status" className="text-xs text-muted-foreground">
           Writing…
         </p>
+      )}
+      {answer.status === "stopped" && (
+        <p className="text-xs text-muted-foreground">You stopped this answer.</p>
+      )}
+      {answer.stopFailed && (
+        <p className="text-xs text-destructive">The answer could not be stopped. Try again.</p>
       )}
       {answer.status === "failed" && answer.error && (
         <div className="w-full [&_[data-slot=alert-description]]:text-pretty!">
