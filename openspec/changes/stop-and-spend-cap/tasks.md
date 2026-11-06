@@ -48,4 +48,5 @@ Builds on `background-turns` (planned), `mcp-connectors`, `thought-appending`, a
 
 ## 7. Specs and checks
 
-- [ ] 7.1 Run `openspec validate stop-and-spend-cap --strict`, the full default and `postgres` pytest runs, and the frontend `npm test`, `npx tsc --noEmit`, and `npm run lint`, and check that all pass
+- [x] 7.1 Run `openspec validate stop-and-spend-cap --strict`, the full default and `postgres` pytest runs, and the frontend `npm test`, `npx tsc --noEmit`, and `npm run lint`, and check that all pass
+  - Passed on 2026-11-06 at `0de8113`. `openspec validate stop-and-spend-cap --strict` reports the change valid (exit 0; its one INFO line is the expected note that mcp-connectors has no main spec while the change is stacked). Backend on SQLite: `uv run pytest -q` 1550 passed (309 `postgres` tests deselected). Backend on Postgres 18.2 with pgvector 0.8.1 (container `ffpg`, database `focus_funnel_test3`): `uv run pytest -q -m postgres` 309 passed. Frontend: `npm test` 727 passed in 55 files, `npx next typegen && npx tsc --noEmit` and `npm run lint` exit 0 with no output. Ruff (`--select F,E9`, advisory) reports only the 3 unused imports that already exist outside this change (tests/test_auth_token.py, tests/test_proposal_migration.py, tests/test_user_data.py).
