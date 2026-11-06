@@ -11,8 +11,10 @@ temperature:
 # (about 2,300 tokens) plus an answer.
 reply_max_tokens: 8192
 
-# Model calls in one turn before the answer ends with tool_loop_limit.
-tool_rounds: 3
+# Model calls in one turn before the answer ends with tool_loop_limit. Four
+# leave room for a refused mark, a search, a proposal, and the reply
+# (thought-status design decision 11).
+tool_rounds: 4
 
 # Share of the context length past which the chat suggests /compact.
 compact_suggest_share: 0.7

@@ -23,6 +23,7 @@ from app.thoughts.dates import (
     DEFAULT_ZONE,
     local_day,
     parse_when,
+    status_mark,
     thought_date_text,
     when_of,
 )
@@ -36,6 +37,12 @@ NO_DATED_MATCH = (
     "No filed thoughts are dated in those days. Say so plainly, and do not answer as "
     "if the user had filed something."
 )
+NO_FILTERED_MATCH = (
+    "No filed thoughts match those filters. Say so plainly, and do not answer as if "
+    "the user had filed something."
+)
+# The statuses the search tool offers (thought-status design decision 12).
+SEARCH_STATUSES = ("open",)
 ALREADY_PROPOSED = (
     "Error: a proposal is already shown in this turn, and nothing was proposed now. "
     "Do not call propose_thought again in this turn: one proposal holds every "
@@ -50,10 +57,27 @@ PROPOSAL_SHOWN = (
     "propose_thought again in this turn. Now reply to the user's latest message. "
     "If it held only what you proposed, reply in one short sentence."
 )
+# After a proposal with a mark (thought-status design decision 5).
+PROPOSAL_SHOWN_STATUS = (
+    "The proposal is now shown to the user as cards they can check and confirm. "
+    "Nothing changes until they confirm, so do not say a task is marked done, done, "
+    "closed, or finished, or that anything is saved, noted, added, or recorded: say "
+    "the change is ready for them to confirm. Do not call propose_thought again in "
+    "this turn. Now reply to the user's latest message. If it held only what you "
+    "proposed, reply in one short sentence."
+)
+# The keys a mark may not carry (thought-status design decision 5).
+MARK_EXTRAS = ("add_to", "new", "summary", "when", "when_choices")
 
 
 class ToolArgumentError(ValueError):
     """The model called a tool with arguments that do not fit it."""
+
+
+class ToolRefusal(ToolArgumentError):
+    """A proposal call the server refuses for its marks (thought-status design
+    decision 6). Its message goes back to the model as it is, with no
+    "call the tool again" suffix: some refusals ask it to tell the user."""
 
 
 @dataclass(frozen=True)
@@ -69,10 +93,17 @@ class ProposalPart:
     # and whether the model keeps the part new after a candidate round.
     add_to: str | None = None
     new: bool = False
+    # The ref of a seen thought to mark done (thought-status design decision
+    # 5). A mark has no other field: its title and category come from the
+    # thought when it is resolved.
+    mark: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """The part as stored on a proposal row, not yet saved. An addition's
-        ref is kept as `add_to_ref`, which write_proposal() resolves."""
+        ref is kept as `add_to_ref`, and a mark's as `mark_ref`, which
+        write_proposal() resolves."""
+        if self.mark is not None:
+            return {"mark_ref": self.mark}
         stored: dict[str, Any] = {
             "title": self.title,
             "summary": self.summary,
@@ -171,24 +202,78 @@ def _add_to(value: Any, where: str) -> str | None:
     return normal_ref(value) or value.strip()
 
 
+def _parse_marks(value: Any) -> list[ProposalPart]:
+    """The marks of a call, one per ref, in the order of the call. A mark
+    carries only a ref; one that also carries an addition, a summary, or a
+    date is refused, so nothing it holds is lost without a word."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ToolArgumentError('marks must be a list of objects such as {"ref": "T3"}')
+    marks: list[ProposalPart] = []
+    named: set[str] = set()
+    for index, item in enumerate(value):
+        where = f"marks[{index}]"
+        if not isinstance(item, dict):
+            raise ToolArgumentError(f"{where} must be an object such as {{\"ref\": \"T3\"}}")
+        if any(item.get(key) not in (None, "", False, [], {}) for key in MARK_EXTRAS):
+            raise ToolArgumentError(
+                f"{where}: a mark only names a ref; send an addition as its own entry in thoughts"
+            )
+        ref = item.get("ref")
+        if not isinstance(ref, str) or not ref.strip():
+            raise ToolArgumentError(f"{where}.ref must be a ref such as T3")
+        ref = normal_ref(ref) or ref.strip()
+        # Two marks with one ref hold the same data: the second is dropped.
+        if ref in named:
+            continue
+        named.add(ref)
+        marks.append(ProposalPart(title="", summary="", tags=[], category=None, mark=ref))
+    return marks
+
+
 def parse_proposal(
-    arguments: dict[str, Any], categories: list[str], zone: ZoneInfo | None = None
+    arguments: dict[str, Any],
+    categories: list[str],
+    zone: ZoneInfo | None = None,
+    *,
+    offered: bool = False,
 ) -> list[ProposalPart]:
     """The parts of a propose_thought call, each date stamped with the turn's zone.
 
-    The call's shape is {"thoughts": [...]}. A call with title, summary, and
-    tags at the top, as the tool once took, is read as one part.
+    The call's shape is {"thoughts": [...], "marks": [{"ref": "T3"}]}: the new
+    thoughts and additions, then the marks (thought-status design decision 5).
+    A call with title, summary, and tags at the top, as the tool once took,
+    is read as one part. A missing `thoughts` reads as none.
+
+    `offered` is the offer's asked call before archive and /compact: its
+    `marks` key is ignored whatever its shape, and a call with no thought
+    gives no part (design decision 6).
     """
     zone = zone or ZoneInfo(DEFAULT_ZONE)
+    if offered:
+        arguments = {key: value for key, value in arguments.items() if key != "marks"}
+        if not arguments.get("thoughts") and "title" not in arguments:
+            return []
     if "thoughts" not in arguments and "title" in arguments:
-        return [_parse_part(arguments, "", categories, zone)]
-    items = arguments.get("thoughts")
-    if not isinstance(items, list) or not 1 <= len(items) <= MAX_PARTS:
-        raise ToolArgumentError(f"thoughts must be a list of 1 to {MAX_PARTS} thoughts")
-    parts = [
-        _parse_part(item, f"thoughts[{index}].", categories, zone)
-        for index, item in enumerate(items)
-    ]
+        parts = [_parse_part(arguments, "", categories, zone)]
+    else:
+        items = arguments.get("thoughts")
+        if items is None:
+            items = []
+        if not isinstance(items, list) or len(items) > MAX_PARTS:
+            raise ToolArgumentError(f"thoughts must be a list of up to {MAX_PARTS} thoughts")
+        parts = [
+            _parse_part(item, f"thoughts[{index}].", categories, zone)
+            for index, item in enumerate(items)
+        ]
+    marks = [] if offered else _parse_marks(arguments.get("marks"))
+    if not parts and not marks:
+        raise ToolArgumentError("propose_thought needs at least one entry in thoughts or marks")
+    if len(parts) + len(marks) > MAX_PARTS:
+        raise ToolArgumentError(
+            f"propose_thought takes at most {MAX_PARTS} entries in thoughts and marks together"
+        )
     # Two parts of one proposal never add to the same thought.
     named: set[str] = set()
     for part in parts:
@@ -200,22 +285,44 @@ def parse_proposal(
                 "what they add into one thought"
             )
         named.add(part.add_to)
-    return parts
+    return parts + marks
 
 
 @dataclass(frozen=True)
 class SearchArguments:
-    # None when the search is by the thought's days only.
+    # None when the search lists the thoughts that pass its filters.
     query: str | None
     tags: list[str] | None = None
     since: date | None = None
     # The days the thought itself is dated on, not the day it was filed.
     dated_from: date | None = None
     dated_to: date | None = None
+    # Only thoughts with this status (`open`) or this category, as stored.
+    status: str | None = None
+    category: str | None = None
+
+    @property
+    def dated(self) -> bool:
+        return self.dated_from is not None or self.dated_to is not None
 
     @property
     def by_date_only(self) -> bool:
+        """No query and a filter on the thought's days: a list in date order."""
+        return self.query is None and self.dated
+
+    @property
+    def listed(self) -> bool:
+        """No query: a list of the thoughts that pass the filters."""
         return self.query is None
+
+    @property
+    def summary(self) -> str:
+        """The tool's line in the chat (thought-status design decision 12)."""
+        if self.query is not None:
+            return f"Searched your thoughts for “{self.query}”"
+        status = f" {self.status}" if self.status else ""
+        category = f" in {self.category}" if self.category else ""
+        return f"Listed your{status} thoughts{category}"
 
     @property
     def days_text(self) -> str:
@@ -248,7 +355,9 @@ def _day(arguments: dict[str, Any], name: str) -> date | None:
 
 
 def parse_search(arguments: dict[str, Any]) -> SearchArguments:
-    """The search call's arguments. A query is needed unless dated_from or dated_to is given."""
+    """The search call's arguments. A query is needed unless dated_from,
+    dated_to, status, or category is given. The only status the tool offers
+    is `open`; the category is cleaned as it is stored."""
     query = arguments.get("query")
     if query is not None and not isinstance(query, str):
         raise ToolArgumentError("query must be a string")
@@ -268,9 +377,17 @@ def parse_search(arguments: dict[str, Any]) -> SearchArguments:
             raise ToolArgumentError("since must be a date written YYYY-MM-DD")
     dated_from = _day(arguments, "dated_from")
     dated_to = _day(arguments, "dated_to")
-    if not query and dated_from is None and dated_to is None:
+    status = arguments.get("status")
+    if status is not None and status not in SEARCH_STATUSES:
+        raise ToolArgumentError("status must be open, or left out to find done thoughts too")
+    category = arguments.get("category")
+    if category is not None and not isinstance(category, str):
+        raise ToolArgumentError("category must be a string")
+    category = clean_name(category) if category else None
+    if not query and dated_from is None and dated_to is None and not status and not category:
         raise ToolArgumentError(
-            "query must be a non-empty string, unless dated_from or dated_to is given"
+            "query must be a non-empty string, unless dated_from, dated_to, status, "
+            "or category is given"
         )
     if dated_from is not None and dated_to is not None and dated_to < dated_from:
         raise ToolArgumentError("dated_to must not be before dated_from")
@@ -280,6 +397,8 @@ def parse_search(arguments: dict[str, Any]) -> SearchArguments:
         since=since,
         dated_from=dated_from,
         dated_to=dated_to,
+        status=status,
+        category=category or None,
     )
 
 
@@ -321,6 +440,7 @@ def format_search_result(
     *,
     newest_first: bool = False,
     by_date: bool = False,
+    filtered: bool = False,
     zone: ZoneInfo | None = None,
     refs: Refs | None = None,
 ) -> SearchToolResult:
@@ -331,7 +451,10 @@ def format_search_result(
     next would pass budget_chars. Each entry gives the day it was filed and,
     for a dated thought, its date. `by_date` is a search by the thought's days
     with no query: its entries are in date order (thought-dates design
-    decision 4). The filed day is the user's local day in `zone` (UTC when not
+    decision 4). `filtered` is a search with a status or category filter: its
+    no-match text names those filters. A thought whose status is not `open`
+    gets ` · <status> <day>` after its filed day (thought-status design
+    decision 12). The filed day is the user's local day in `zone` (UTC when not
     given), the same days as the model's today and its `since`. With the
     conversation's `refs`, each entry carries its thought's ref, and a thought
     shown for the first time is numbered after every other (thought-appending
@@ -341,7 +464,8 @@ def format_search_result(
     provider_id = result.embedding_provider or settings.embedding_provider
     note = [words_only_note(result.words_only, provider_id)] if result.words_only else []
     if not result.hits:
-        return SearchToolResult(text="\n".join([NO_DATED_MATCH if by_date else NO_MATCH, *note]))
+        nothing = NO_FILTERED_MATCH if filtered else NO_DATED_MATCH if by_date else NO_MATCH
+        return SearchToolResult(text="\n".join([nothing, *note]))
     entries: list[str] = []
     sources: list[dict[str, Any]] = []
     used = 0
@@ -351,6 +475,7 @@ def format_search_result(
         heading = (
             f"{number}. {ref}{thought.title} · filed "
             f"{local_day(thought.created_at, filed_zone).isoformat()}"
+            f"{status_mark(thought.status, thought.status_changed_at, filed_zone)}"
         )
         dated = thought_date_text(thought)
         if dated:
@@ -420,11 +545,21 @@ async def search_tool_result(
         since=arguments.since,
         dated_from=arguments.dated_from,
         dated_to=arguments.dated_to,
+        status=arguments.status,
+        category=arguments.category,
         zone=zone,
         conversation_id=conversation_id,
         http_client=http_client,
         config=config,
     )
     return format_search_result(
-        result, config, settings, by_date=arguments.by_date_only, zone=zone, refs=refs
+        result,
+        config,
+        settings,
+        # A list with no query and no date filter is newest filed first.
+        newest_first=arguments.listed and not arguments.dated,
+        by_date=arguments.by_date_only,
+        filtered=arguments.status is not None or arguments.category is not None,
+        zone=zone,
+        refs=refs,
     )

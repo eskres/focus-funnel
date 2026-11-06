@@ -4,7 +4,9 @@ conversation has seen (thought-appending design decisions 2 and 15).
 A thought gets a ref the first time the conversation sees it, in this order
 of the stored rows, by position: each tool message's `details.sources`
 (search results) and `details.similar` (check candidates), then each
-proposal's parts by index, with their `add_to`, `similar`, and `thought_id`.
+proposal's parts by index, with their `add_to`, `mark`, `similar`, and
+`thought_id`. A mark only names a thought the conversation has seen, so it
+never gives a new number; it is read so that its thought is loaded.
 A part's `thought_id` is written when the user confirms it, so it counts at
 the part's `seen_position`, stamped at the confirm, and at the proposal's
 position for a part confirmed before that stamp existed.
@@ -58,6 +60,17 @@ class SeenThought:
     starts_at: time | None = None
     ends_on: date | None = None
     ends_at: time | None = None
+    # The thought's status (thought-status), as status_mark() reads it.
+    status: str | None = None
+    status_changed_at: datetime | None = None
+
+
+def status_fields(thought: Any) -> dict[str, Any]:
+    """A thought's status columns, for a SeenThought."""
+    return {
+        "status": getattr(thought, "status", None),
+        "status_changed_at": getattr(thought, "status_changed_at", None),
+    }
 
 
 def date_fields(thought: Any) -> dict[str, Any]:
@@ -120,12 +133,13 @@ def appearances(
             similar = part.get("similar")
             named = (
                 (part.get("add_to"), proposal.position),
+                (part.get("mark"), proposal.position),
                 (similar.get("thought_id") if isinstance(similar, dict) else None, proposal.position),
                 (part.get("thought_id"), _position(part.get("seen_position"), proposal.position)),
             )
             for kind, (value, position) in enumerate(named):
                 thought_id = _thought_id(value)
-                if kind == 2 and seen_before is not None and position >= seen_before:
+                if kind == 3 and seen_before is not None and position >= seen_before:
                     continue
                 if thought_id is not None:
                     found.append(((position, 1, order, index, kind), thought_id))
@@ -183,6 +197,7 @@ class Refs:
                 created_at=thought.created_at,
                 updated_at=thought.updated_at,
                 **date_fields(thought),
+                **status_fields(thought),
             )
         return ref
 
@@ -258,6 +273,8 @@ async def conversation_refs(
                 own(Thought.starts_at).label("starts_at"),
                 own(Thought.ends_on).label("ends_on"),
                 own(Thought.ends_at).label("ends_at"),
+                own(Thought.status).label("status"),
+                own(Thought.status_changed_at).label("status_changed_at"),
             ).where(Thought.id.in_(distinct))
         )
     ).all()
@@ -277,6 +294,7 @@ async def conversation_refs(
             created_at=row.created_at,
             updated_at=row.updated_at,
             **date_fields(row),
+            **status_fields(row),
         )
         for row in rows
         if row.own
@@ -286,12 +304,16 @@ async def conversation_refs(
 
 
 def saved_ids(proposals: Sequence[Proposal]) -> set[uuid.UUID]:
-    """The thoughts the conversation's confirmed parts saved or added to."""
+    """The thoughts the conversation's confirmed parts saved or added to. A
+    confirmed mark filed nothing, so its thought is not one (thought-status
+    design decision 8)."""
     return {
         thought_id
         for proposal in proposals
         for part in proposal.parts or []
-        if isinstance(part, dict) and (thought_id := _thought_id(part.get("thought_id")))
+        if isinstance(part, dict)
+        and not part.get("mark")
+        and (thought_id := _thought_id(part.get("thought_id")))
     }
 
 

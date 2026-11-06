@@ -64,6 +64,8 @@ const expected: SseEvent[] = [
         similar: null,
         added: false,
         undone: false,
+        // Nor a mark: a new thought.
+        mark: null,
       },
     ],
     replacedBy: null,
@@ -335,6 +337,43 @@ describe("toProposal", () => {
       undone: true,
     });
     expect(proposal?.parts[1].target).toEqual({ deleted: true });
+  });
+
+  it("parses a proposal event with a status part, with its mark and target", async () => {
+    const plumber = { ...current, title: "Call the plumber", summary: "", tags: [] };
+    const body =
+      "event: proposal\ndata: " +
+      JSON.stringify({
+        id: "p1",
+        position: 2,
+        parts: [
+          { ...part, title: "Oat milk", thought_id: null },
+          {
+            title: "Call the plumber",
+            summary: "",
+            tags: [],
+            category: "task",
+            thought_id: null,
+            mark: "t9",
+            target: plumber,
+          },
+        ],
+        replaced_by: null,
+        replaces: null,
+      }) +
+      "\n\n";
+    const events = await collect(streamOf(body));
+    expect(events).toHaveLength(1);
+    const event = events[0];
+    if (event.type !== "proposal") throw new Error("not a proposal");
+    expect(event.parts[0].mark).toBeNull();
+    expect(event.parts[1]).toMatchObject({
+      mark: "t9",
+      thoughtId: null,
+      addTo: null,
+      category: "task",
+      target: { title: "Call the plumber", category: "task" },
+    });
   });
 
   it("reads the strong match a new part names", () => {

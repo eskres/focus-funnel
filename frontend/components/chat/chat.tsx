@@ -116,10 +116,10 @@ function fromStored(
         byId.delete(proposal.id);
       }
       const called = toolsByCall.get(message.tool_call_id ?? "");
-      if (called && message.details?.failed) {
-        called.failed = true;
-        if (message.details.summary) called.summary = message.details.summary;
-      }
+      // The summary the stream showed, as the server stored it. An older
+      // message has none, and the line keeps its name's done label.
+      if (called && message.details?.summary) called.summary = message.details.summary;
+      if (called && message.details?.failed) called.failed = true;
       const action = actionsById.get(message.details?.action_id ?? "");
       if (action) {
         answer.actions = [...(answer.actions ?? []), action];

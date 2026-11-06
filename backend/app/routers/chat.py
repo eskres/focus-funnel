@@ -31,10 +31,22 @@ from app.chat.conversations import (
     switch_model,
     use_model,
 )
-from app.chat.loadout import find_loadout_model, get_default_model, get_loadout, temperature_for
+from app.chat.loadout import (
+    find_loadout_model,
+    get_default_model,
+    get_loadout,
+    temperature_for,
+)
 from app.chat.model_call import open_model_call
 from app.chat.model_info import model_info
-from app.chat.prompt import PROPOSE_TOOL, SEARCH_TOOL, build_context, estimate_tokens, forced_tool
+from app.chat.prompt import (
+    PROPOSE_TOOL,
+    SEARCH_TOOL,
+    build_context,
+    estimate_tokens,
+    forced_tool,
+    held_note_of,
+)
 from app.chat.proposal import filing_for, held_parts, held_proposal, refs_for
 from app.chat.sse import log_response, sse_response
 from app.chat.tool_providers import (
@@ -227,6 +239,8 @@ async def chat(
             connectors=bool(connectors),
             actions=await list_actions(session, conversation.id) if settings.mcp_enabled else None,
         )
+        # The held note is the last entry; a written proposal removes it by identity.
+        held_note = held_note_of(context, held)
         filing = await filing_for(session, user, config)
         info = await model_info(
             session, user, conversation.provider_id, conversation.model, settings, http_client
@@ -265,6 +279,7 @@ async def chat(
             settings=settings,
             http_client=http_client,
             zone=zone,
+            held_note=held_note,
         )
         turn = Turn(
             session,

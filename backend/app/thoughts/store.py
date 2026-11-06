@@ -13,7 +13,7 @@ from datetime import date, datetime
 from typing import Any
 
 import httpx2
-from sqlalchemy import delete, func, literal_column, nulls_first, select
+from sqlalchemy import delete, func, literal_column, nulls_first, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -296,8 +296,9 @@ UPCOMING_LIMIT = 200
 async def list_upcoming(
     session: AsyncSession, user: User, from_day: date, limit: int = UPCOMING_LIMIT
 ) -> tuple[list[Any], bool]:
-    """The user's dated thoughts that end, or start when they have no end, on
-    `from_day` or later, in date order, and whether more than `limit` exist.
+    """The user's open dated thoughts that end, or start when they have no end,
+    on `from_day` or later, in date order, and whether more than `limit` exist.
+    A done thought is left out (thought-status design decision 14).
 
     Date order is by start day, a day with no time before one with a time, then
     by start time and filing time (thought-dates design decision 8). `from_day`
@@ -317,6 +318,7 @@ async def list_upcoming(
             )
             .where(
                 Thought.user_id == user.id,
+                Thought.status == "open",
                 Thought.starts_on.is_not(None),
                 func.coalesce(Thought.ends_on, Thought.starts_on) >= from_day,
             )
@@ -332,15 +334,53 @@ async def list_upcoming(
     return list(rows[:limit]), len(rows) > limit
 
 
-async def get_thought(session: AsyncSession, user: User, thought_id: uuid.UUID) -> Thought:
-    """The user's thought, or not_found for a missing one or another user's."""
-    thought = (
-        await session.execute(
-            select(Thought).where(Thought.id == thought_id, Thought.user_id == user.id)
-        )
-    ).scalar_one_or_none()
+async def get_thought(
+    session: AsyncSession, user: User, thought_id: uuid.UUID, *, fresh: bool = False
+) -> Thought:
+    """The user's thought, or not_found for a missing one or another user's.
+
+    fresh reads the row again over an instance the session already holds.
+    """
+    query = select(Thought).where(Thought.id == thought_id, Thought.user_id == user.id)
+    if fresh:
+        query = query.execution_options(populate_existing=True)
+    thought = (await session.execute(query)).scalar_one_or_none()
     if thought is None:
         raise thought_not_found()
+    return thought
+
+
+STATUSES = ("open", "done")
+
+
+async def set_status(
+    session: AsyncSession, user: User, thought_id: uuid.UUID, status: Any
+) -> Thought:
+    """Set the user's thought's status to open or done, without committing.
+
+    Raises not_found for a missing thought or another user's, and
+    validation_error for any other value. The same status changes nothing.
+    Otherwise status_changed_at becomes now and updated_at stays as it was:
+    a Core UPDATE that names updated_at keeps the column's onupdate out
+    (thought-status design decisions 3 and 4). The status guard in its WHERE
+    keeps the first change time when two requests race; with no row
+    matched, the thought is read again, so a deleted one is not_found.
+    Touches no search entry and calls no provider.
+    """
+    thought = await get_thought(session, user, thought_id)
+    if not isinstance(status, str) or status not in STATUSES:
+        raise invalid("status", "must be open or done")
+    if thought.status == status:
+        return thought
+    result = await session.execute(
+        update(Thought)
+        .where(Thought.id == thought.id, Thought.user_id == user.id, Thought.status != status)
+        .values(status=status, status_changed_at=func.now(), updated_at=Thought.updated_at)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount == 0:
+        return await get_thought(session, user, thought_id, fresh=True)
+    await session.refresh(thought)
     return thought
 
 

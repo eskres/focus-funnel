@@ -67,6 +67,7 @@ PART = {
     "deleted": False,
     "add_to": None,
     "based_on": None,
+    "mark": None,
     "target": None,
     "similar": None,
     "added": False,
@@ -244,11 +245,13 @@ def test_the_loop_stops_at_the_round_limit_and_keeps_the_text(client, alice, fak
         text_chunks("Let me look. ")[:-1] + tool_call_chunks("search_thoughts", '{"query": "a"}'),
         tool_call_chunks("search_thoughts", '{"query": "b"}'),
         tool_call_chunks("search_thoughts", '{"query": "c"}'),
+        tool_call_chunks("search_thoughts", '{"query": "d"}'),
     )
 
     response = chat(client, alice, "find everything")
 
-    assert len(fake_llm.chat_requests) == 3
+    # The shipped chat.yaml has tool_rounds 4 (thought-status design decision 11).
+    assert len(fake_llm.chat_requests) == 4
     assert names(response)[-1] == "error"
     assert events_of(response, "error")[0]["error"]["code"] == ErrorCode.TOOL_LOOP_LIMIT
     assert "done" not in names(response)
@@ -776,7 +779,10 @@ def test_a_valid_proposal_is_emitted_and_held_and_nothing_is_saved(
     body = stored(client, alice, conversation_id_of(response))
     assert body["held_proposal_id"] == event["id"]
     assert [m["role"] for m in body["messages"]] == ["user", "assistant", "tool", "assistant"]
-    assert body["messages"][2]["details"] == {"proposal_id": event["id"]}
+    assert body["messages"][2]["details"] == {
+        "proposal_id": event["id"],
+        "summary": "Proposed a thought to file",
+    }
     assert event["replaces"] is None
     assert body["proposals"] == [{k: v for k, v in event.items() if k != "replaces"}]
 

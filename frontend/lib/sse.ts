@@ -3,7 +3,7 @@
 //   event: conversation  data: {"id":"...","title":"..."}    first, for a new conversation
 //   event: tool          data: {"name":"...","phase":"start"|"end","summary":"...","sources":[...],"failed":true}
 //                        (a connector tool is named "<connector>__<tool>"; failed marks a connector failure)
-//   event: proposal      data: {"id":"...","position":2,"parts":[{"title","summary","tags","category","when","when_choices","thought_id","saved_title","deleted","add_to","based_on","target","similar","added","undone"}],"replaced_by":null,"replaces":"..."|null}
+//   event: proposal      data: {"id":"...","position":2,"parts":[{"title","summary","tags","category","when","when_choices","thought_id","saved_title","deleted","add_to","based_on","target","similar","added","undone","mark"}],"replaced_by":null,"replaces":"..."|null}
 //   event: action        data: {"id":"...","position":2,"connector_id":"..."|null,"connector":"calendar","tool":"create_event",
 //                              "title":"..."|null,"arguments":{...},"status":"pending","result":null,"error_code":null}
 //                        (a connector tool call waiting for the user's approval: its card)
@@ -48,6 +48,11 @@ export type ProposalPart = {
   /** Saved as an addition, and that addition undone since. */
   added: boolean;
   undone: boolean;
+  /**
+   * For a status part, the thought it marks done; null for a new thought or
+   * an addition. Its `target` names the thought as it is now.
+   */
+  mark: string | null;
 };
 
 /** A filed thought as an addition card shows it. `updatedAt` is its version, as the server sent it. */
@@ -225,6 +230,8 @@ function toPart(value: unknown): ProposalPart | null {
         similar: toSimilar(value.similar),
         added: value.added === true,
         undone: value.undone === true,
+        // An older server sends no mark: not a status part.
+        mark: typeof value.mark === "string" ? value.mark : null,
       }
     : null;
 }

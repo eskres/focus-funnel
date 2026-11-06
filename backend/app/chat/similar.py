@@ -56,7 +56,10 @@ addition's summary is the whole new summary of that thought, and says what \
 changed. A thought not listed here has no similar filed thought; keep it as \
 it is.
 {parts}"""
-REPEATED_TASK = "A repeated task is usually a new task."
+REPEATED_TASK = "A repeated task is usually a new task, unless the user says they finished it."
+# When the call had marks: the model resends them with the new parts
+# (thought-status design decision 5).
+SEND_MARKS_AGAIN = "Send the marks again in the same call."
 
 
 @dataclass(frozen=True)
@@ -201,25 +204,28 @@ async def check_parts(
     """Check a proposal call's parts.
 
     A part that adds to a seen thought is not checked, and the thoughts such
-    parts name are no other part's candidates. A part with neither add_to nor
-    new gets candidates for layer 2, unless the call comes `again`, after a
-    candidate round. Every new part that is not a task is checked for the
-    strong match of layer 3.
+    parts name are no other part's candidates. A mark is never checked, and
+    the thought it names is no other part's candidate (thought-status design
+    decision 5); a call with only marks makes no query and no embedding
+    call. A part with neither add_to nor new gets candidates for layer 2,
+    unless the call comes `again`, after a candidate round. Every new part
+    that is not a task is checked for the strong match of layer 3.
     """
-    if not await check_runs(session, user):
+    if all(part.mark is not None for part in parts) or not await check_runs(session, user):
         return Check(parts=[PartCheck() for _ in parts], refs=refs)
     targets = {
-        index: refs.resolve(part.add_to)
+        index: refs.resolve(part.add_to if part.mark is None else part.mark)
         for index, part in enumerate(parts)
-        if part.add_to is not None and refs is not None
+        if (part.add_to is not None or part.mark is not None) and refs is not None
     }
     added = {index for index, target in targets.items() if target is not None}
     exclude = {targets[index].id for index in added}
+    marked = {index for index, part in enumerate(parts) if part.mark is not None}
     wanted = [
         (
             index,
-            index not in added and not part.new and not again,
-            index not in added and part.category != TASK,
+            index not in added and index not in marked and not part.new and not again,
+            index not in added and index not in marked and part.category != TASK,
         )
         for index, part in enumerate(parts)
     ]
@@ -260,7 +266,8 @@ def candidates_note(
     A thought new to the conversation is numbered after every other, in the
     order of the list, as the next turn numbers it from the stored rows.
     Each is listed as thought_entry() writes it, filed on its local day in
-    `zone`, with its own date when it has one.
+    `zone`, with its own date when it has one, and ` · done <day>` when it
+    is done. When the call had marks, the text asks for them again.
     """
     similar: list[dict[str, Any]] = []
     listed: set[uuid.UUID] = set()
@@ -286,7 +293,10 @@ def candidates_note(
         if part.category == TASK:
             block += "\n" + REPEATED_TASK
         blocks.append(block)
-    return CANDIDATES_FOUND.format(parts="\n\n".join(blocks)), similar
+    text = CANDIDATES_FOUND.format(parts="\n\n".join(blocks))
+    if any(part.mark is not None for part in parts):
+        text += "\n\n" + SEND_MARKS_AGAIN
+    return text, similar
 
 
 def with_similar(stored: list[dict[str, Any]], check: Check) -> list[dict[str, Any]]:

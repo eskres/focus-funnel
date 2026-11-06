@@ -5,6 +5,7 @@ from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy import (
     DDL,
     JSON,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -48,6 +49,9 @@ class Thought(Base):
     __tablename__ = "thoughts"
     __table_args__ = (
         Index("ix_thoughts_user_id_created_at", "user_id", "created_at"),
+        # The naming convention makes this ck_thoughts_status. A later change
+        # widens it to add `archived` (thought-status design decision 2).
+        CheckConstraint("status IN ('open', 'done')", name="status"),
         Index(
             "ix_thoughts_tags", "tags", postgresql_using="gin", info=POSTGRES_ONLY
         ).ddl_if(dialect="postgresql"),
@@ -85,6 +89,14 @@ class Thought(Base):
     # the conversation deletes the proposal and clears this; the thought stays.
     proposal_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("proposals.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # open or done (thought-status design decisions 1-3). A status change sets
+    # status_changed_at and leaves updated_at alone; see store.set_status().
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="open", default="open"
+    )
+    status_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     # Only the database reads it, so it is not loaded with the row.
     search_tsv: Mapped[str | None] = mapped_column(TsVectorType, nullable=True, deferred=True)
