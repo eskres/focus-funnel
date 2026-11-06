@@ -2,6 +2,7 @@
 // setting (`/api/settings/categories`).
 import { apiFetch } from "@/lib/api";
 import type { When } from "@/lib/dates";
+import { browserTimeZone } from "@/lib/time-zone";
 
 /** The conversation and proposal a thought was saved from, as they are now. */
 export type ThoughtOrigin = {
@@ -46,8 +47,17 @@ export type Thought = {
   status_changed_at?: string | null;
 };
 
+/**
+ * Every status a thought can have, in the order the Library's status filter
+ * offers them (thought-library design decision 7).
+ */
+export const THOUGHT_STATUSES = ["open", "done"] as const;
+
 /** Whether the thought is still to do. */
-export type ThoughtStatus = "open" | "done";
+export type ThoughtStatus = (typeof THOUGHT_STATUSES)[number];
+
+/** How each status reads; a status added without a label fails `tsc`. */
+export const STATUS_LABELS: Record<ThoughtStatus, string> = { open: "Open", done: "Done" };
 
 const thoughtPath = (id: string) => `/api/thoughts/${encodeURIComponent(id)}`;
 
@@ -101,6 +111,49 @@ export type Upcoming = { items: UpcomingItem[]; more: boolean };
  */
 export function getUpcoming(from: string): Promise<Upcoming> {
   return apiFetch<Upcoming>(`/api/thoughts/upcoming?from=${encodeURIComponent(from)}`);
+}
+
+/** A thought as a Library row shows it: only what the row needs. */
+export type ThoughtRow = {
+  id: string;
+  title: string;
+  category: string | null;
+  tags: string[];
+  status: ThoughtStatus;
+  created_at: string;
+  when: When | null;
+};
+
+/** One page of the Library, newest filed first; `next_cursor` is null on the last page. */
+export type ThoughtList = { items: ThoughtRow[]; next_cursor: string | null };
+
+/** The Library's filters; each one left out, or empty, is not sent. */
+export type ThoughtFilters = {
+  category?: string;
+  tag?: string;
+  status?: ThoughtStatus;
+  /** The browser's local days, `YYYY-MM-DD`. */
+  filed_from?: string;
+  filed_to?: string;
+};
+
+const FILTER_NAMES = ["category", "tag", "status", "filed_from", "filed_to"] as const;
+
+/**
+ * A page of the user's thoughts, newest filed first, after `cursor` when it is
+ * given. The query is built with URLSearchParams, so a tag such as `#home` or
+ * `a&b` stays one value; the browser's zone reads the filed days.
+ */
+export function listThoughts(filters: ThoughtFilters, cursor?: string, limit?: number): Promise<ThoughtList> {
+  const query = new URLSearchParams();
+  for (const name of FILTER_NAMES) {
+    const value = filters[name];
+    if (value) query.set(name, value);
+  }
+  query.set("time_zone", browserTimeZone());
+  if (cursor) query.set("cursor", cursor);
+  if (limit !== undefined) query.set("limit", String(limit));
+  return apiFetch<ThoughtList>(`/api/thoughts?${query}`);
 }
 
 /** Deletes the thought for good. */

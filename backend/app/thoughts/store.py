@@ -20,7 +20,15 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.chat.config import get_chat_config
 from app.config import Settings
 from app.errors import ApiError, ErrorCode
-from app.models import Conversation, Proposal, SearchIndex, Thought, ThoughtEmbedding, User
+from app.models import (
+    Conversation,
+    Proposal,
+    SearchIndex,
+    Thought,
+    ThoughtEmbedding,
+    User,
+)
+from app.models.thought import THOUGHT_STATUSES
 from app.thoughts.baseline import measure_after_store
 from app.thoughts.chunking import Piece, pieces
 from app.thoughts.dates import parse_when
@@ -55,6 +63,13 @@ def thought_not_found() -> ApiError:
     return ApiError(404, ErrorCode.NOT_FOUND, "No such thought.")
 
 
+def clean_tag(tag: str) -> str:
+    """One tag as it is stored: inner spaces collapsed, lowercased, a leading `#`
+    dropped, trimmed. No length check: clean_tags() checks stored tags, and a
+    filter tag too long to be stored simply matches nothing."""
+    return " ".join(tag.split()).lower().lstrip("#").strip()
+
+
 def clean_tags(tags: list[str] | None) -> list[str]:
     """Trimmed, lowercased, without a leading `#`, empty, or repeated tags, in their first order.
 
@@ -66,7 +81,7 @@ def clean_tags(tags: list[str] | None) -> list[str]:
         raise invalid("tags", "must be a list of strings")
     cleaned: list[str] = []
     for tag in tags:
-        tag = " ".join(tag.split()).lower().lstrip("#").strip()
+        tag = clean_tag(tag)
         if tag and tag not in cleaned:
             cleaned.append(tag)
     if len(cleaned) > MAX_TAGS:
@@ -350,7 +365,19 @@ async def get_thought(
     return thought
 
 
-STATUSES = ("open", "done")
+def status_choices() -> str:
+    """The statuses joined with commas and a last `or`: today `open or done`."""
+    if len(THOUGHT_STATUSES) == 1:
+        return THOUGHT_STATUSES[0]
+    return ", ".join(THOUGHT_STATUSES[:-1]) + " or " + THOUGHT_STATUSES[-1]
+
+
+def check_status(value: Any) -> str:
+    """The value when it is one of THOUGHT_STATUSES, else validation_error naming
+    `status` (thought-library design decision 7). Anything not text is refused."""
+    if not isinstance(value, str) or value not in THOUGHT_STATUSES:
+        raise invalid("status", f"must be {status_choices()}")
+    return value
 
 
 async def set_status(
@@ -368,8 +395,7 @@ async def set_status(
     Touches no search entry and calls no provider.
     """
     thought = await get_thought(session, user, thought_id)
-    if not isinstance(status, str) or status not in STATUSES:
-        raise invalid("status", "must be open or done")
+    check_status(status)
     if thought.status == status:
         return thought
     result = await session.execute(

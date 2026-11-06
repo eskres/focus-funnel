@@ -126,3 +126,75 @@ def test_key_never_appears_in_logs_on_validation_failure(client, make_token, cap
             "/api/providers/nebius/key", headers=headers, json={"key": 12345, "extra": SECRET}
         )
     assert SECRET not in caplog.text
+
+
+# ------------------------------------------------------------ access log queries
+# thought-library task 1.3: a filter value is the user's own words, so the
+# query string never reaches the access log (design decision 4).
+
+
+ACCESS_ARGS = ("127.0.0.1:50000", "GET", "/", "1.1", 200)
+
+
+def access_formatter() -> logging.Formatter:
+    from uvicorn.config import LOGGING_CONFIG
+    from uvicorn.logging import AccessFormatter
+
+    return AccessFormatter(fmt=LOGGING_CONFIG["formatters"]["access"]["fmt"], use_colors=False)
+
+
+def access_args(path: str) -> tuple:
+    return (ACCESS_ARGS[0], ACCESS_ARGS[1], path, ACCESS_ARGS[3], ACCESS_ARGS[4])
+
+
+def access_line(path: str) -> tuple[str, logging.LogRecord]:
+    """An access record as uvicorn makes it, through the record factory,
+    formatted as uvicorn formats it."""
+    access = logging.getLogger("uvicorn.access")
+    record = access.makeRecord(
+        access.name, logging.INFO, __file__, 0, '%s - "%s %s HTTP/%s" %d', access_args(path), None
+    )
+    return access_formatter().format(record), record
+
+
+def unmasked_line(path: str) -> str:
+    """The same record made without the factory, as uvicorn would log it unmasked."""
+    record = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 0, '%s - "%s %s HTTP/%s" %d', access_args(path), None
+    )
+    return access_formatter().format(record)
+
+
+def test_the_access_log_drops_the_query_string():
+    line, record = access_line("/api/thoughts?tag=therapy&category=health")
+    assert '"GET /api/thoughts HTTP/1.1" 200' in line
+    assert "therapy" not in line
+    assert "health" not in line
+    assert line == unmasked_line("/api/thoughts")
+    assert isinstance(record.args, tuple)
+    assert len(record.args) == 5
+
+
+def test_the_query_is_dropped_with_a_secret_registered():
+    def run():
+        register_secret(SECRET)
+        return access_line("/api/thoughts?tag=therapy&category=health")
+
+    line, record = in_fresh_context(run)
+    assert '"GET /api/thoughts HTTP/1.1" 200' in line
+    assert "therapy" not in line
+    assert "health" not in line
+    assert len(record.args) == 5
+
+
+def test_a_path_with_no_query_is_logged_as_before():
+    line, record = access_line("/api/thoughts/upcoming")
+    assert line == unmasked_line("/api/thoughts/upcoming")
+    assert '"GET /api/thoughts/upcoming HTTP/1.1" 200' in line
+    assert record.args == ("127.0.0.1:50000", "GET", "/api/thoughts/upcoming", "1.1", 200)
+
+
+def test_other_loggers_keep_their_question_marks(caplog):
+    with caplog.at_level(logging.INFO):
+        logger.info("%s %s %s %s %s", "a", "b", "/path?keep=1", "d", "e")
+    assert "/path?keep=1" in caplog.text
