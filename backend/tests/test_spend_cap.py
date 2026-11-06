@@ -295,6 +295,13 @@ def test_a_token_cap_is_saved_and_returned(client, alice):
     assert client.get("/api/usage", headers=alice).json()["cap"] == cap
 
 
+def test_a_whole_token_cap_written_with_decimals_is_saved(client, alice):
+    response = put_cap(client, alice, {"unit": "tokens", "amount": "1500.000"})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["cap"]["amount"] == 1500
+
+
 def test_a_null_cap_clears_it(client, alice, test_database_url):
     put_cap(client, alice, {"unit": "usd", "amount": 5})
 
@@ -314,6 +321,9 @@ def test_a_null_cap_clears_it(client, alice, test_database_url):
         {"unit": "usd", "amount": -1},
         {"unit": "usd", "amount": "1.1234567"},
         {"unit": "tokens", "amount": 0.0000001},
+        # Tokens are whole (design decision 31).
+        {"unit": "tokens", "amount": 0.5},
+        {"unit": "tokens", "amount": "1500.5"},
         {"unit": "eur", "amount": 5},
     ],
 )

@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,6 +69,14 @@ class SpendCap(BaseModel):
 
     unit: Literal["usd", "tokens"]
     amount: Decimal = Field(gt=0, max_digits=18, decimal_places=6)
+
+    @model_validator(mode="after")
+    def _whole_tokens(self) -> "SpendCap":
+        # Tokens are whole: a cap is shown and named as a whole number, so
+        # it must be the number the check compares (design decision 31).
+        if self.unit == "tokens" and self.amount != self.amount.to_integral_value():
+            raise ValueError("A token cap needs a whole number.")
+        return self
 
 
 class SaveSpendCap(BaseModel):

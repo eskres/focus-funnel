@@ -209,6 +209,17 @@ describe("the monthly spend cap", () => {
     expect(capPuts(calls)).toEqual([]);
   });
 
+  it.each(["1500.5", "0.5"])("refuses a token cap of %s before sending", async (value) => {
+    const { calls } = fakeApi({ "GET /api/usage": json(200, report(30, used)) });
+    render(<UsageSection />);
+    fireEvent.change(await screen.findByLabelText("Spend cap unit"), { target: { value: "tokens" } });
+    fireEvent.change(screen.getByLabelText("Spend cap amount"), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "Save cap" }));
+
+    expect(await screen.findByText("A token cap needs a whole number.")).toBeInTheDocument();
+    expect(capPuts(calls)).toEqual([]);
+  });
+
   it("shows the backend's message on a 422 and keeps the input", async () => {
     fakeApi({
       "GET /api/usage": json(200, report(30, used)),

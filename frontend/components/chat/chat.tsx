@@ -863,7 +863,11 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         return;
       }
       setStopping(false);
-      if (answerId !== null) updateAnswer(answerId, (a) => ({ ...a, stopFailed: true }));
+      // An answer that ended while the request was on its way needs no note:
+      // there is nothing left to stop, and no Stop to press again.
+      if (answerId !== null) {
+        updateAnswer(answerId, (a) => (a.status === "streaming" ? { ...a, stopFailed: true } : a));
+      }
     }
   }
 

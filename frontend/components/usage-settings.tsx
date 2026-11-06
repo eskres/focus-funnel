@@ -256,6 +256,11 @@ function SpendCapForm({
         setError("The spend cap needs an amount above zero.");
         return;
       }
+      // Tokens are whole, and a token cap is shown as a whole number.
+      if (unit === "tokens" && !Number.isInteger(value)) {
+        setError("A token cap needs a whole number.");
+        return;
+      }
       next = { unit, amount: value };
     }
     setBusy(true);

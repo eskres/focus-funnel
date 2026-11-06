@@ -224,8 +224,10 @@ async def chat(
         await session.commit()
         if settings.mcp_enabled and not is_new:
             # An approval already running finishes first, so this turn gets
-            # its outcome. Any approval from now on is refused while the
-            # claim is held.
+            # its outcome. An approval that has not moved its card yet loses
+            # that move while the claim is held (`move` requires that no
+            # turn holds it), so none can start before the expiry below
+            # (design decision 30).
             await wait_for_running(session, conversation.id, config.connectors)
 
         await _ensure_model(session, user, conversation)

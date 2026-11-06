@@ -247,10 +247,14 @@ async def test_a_stop_while_the_proposal_is_committed_still_sends_its_card(
     await blocked.reached()
     turn = the_turn()
     conversation_id = str(turn.conversation_id)
+    # The card is stored before it is sent (decision 3): none yet while its
+    # commit is held.
+    assert "proposal" not in [name for name, _ in turn.events]
 
     turn.stop()
     await asyncio.sleep(0.05)
     assert cancel_spy(turn) == 0
+    assert "proposal" not in [name for name, _ in turn.events]
     blocked.release.set()
     left = await asyncio.wait_for(watcher, 5)
     await turns_settled()
@@ -291,9 +295,13 @@ async def test_a_stop_while_an_action_card_is_committed_still_sends_it(
     watcher = await watch_chat(api, "add the dentist", conversation_id)
     await blocked.reached()
     turn = the_turn()
+    # The card is stored before it is sent (decision 3): none yet while its
+    # commit is held.
+    assert "action" not in [name for name, _ in turn.events]
 
     turn.stop()
     assert cancel_spy(turn) == 0
+    assert "action" not in [name for name, _ in turn.events]
     blocked.release.set()
     left = await asyncio.wait_for(watcher, 5)
     await turns_settled()

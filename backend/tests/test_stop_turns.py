@@ -412,6 +412,64 @@ async def test_the_lifespan_exit_waits_for_a_stopping_turn_and_sends_no_second_c
         assert problem not in text
 
 
+async def test_the_lifespan_exit_sends_no_cancel_to_a_turn_stopping_outside_a_region(
+    async_api, cancel_spy, monkeypatch, caplog
+):
+    """A stop during the cap check sends no cancel (the turn is not
+    interruptible there); a shutdown then only waits for it, through the
+    `stop_requested` guard of `RunningTurn.shutdown()` (decision 1)."""
+    from app.main import app, lifespan
+
+    api = async_api
+    await api.ready()
+    await put_cap(api, "100")
+    entered, gate = asyncio.Event(), asyncio.Event()
+    real_cap_state = turn_module.cap_state
+
+    async def blocked(*args, **kwargs):
+        entered.set()
+        await asyncio.wait_for(gate.wait(), 5)
+        return await real_cap_state(*args, **kwargs)
+
+    monkeypatch.setattr(turn_module, "cap_state", blocked)
+    api.fake.queue(
+        tool_round("search_thoughts", '{"query": "milk"}', "call_s", text="Let me look. "),
+        text_chunks("Never asked.") + [usage_chunk()],
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        async with lifespan(app):
+            watcher = await watch_chat(api, "what milk?")
+            await asyncio.wait_for(entered.wait(), 5)
+            turn = the_turn()
+            conversation_id = str(turn.conversation_id)
+            turn.stop()
+            await asyncio.sleep(0.05)
+            assert cancel_spy(turn) == 0
+            assert not turn.ended
+            # The cap check returns a moment after the lifespan exit started.
+            asyncio.get_running_loop().call_later(0.2, gate.set)
+        # The lifespan has returned: it waited for the stopping turn.
+        assert turn.task.done()
+        left = await asyncio.wait_for(watcher, 5)
+
+    assert cancel_spy(turn) == 0
+    assert turn.control.cancel_reason is None
+    assert left.events[-1] == STOPPED
+    assert len(api.fake.chat_requests) == 1
+    messages = await messages_of(api, conversation_id)
+    assert [(m.role, m.status) for m in messages] == [
+        ("user", "complete"),
+        ("assistant", "complete"),
+        ("tool", "complete"),
+        ("assistant", "stopped"),
+    ]
+    assert messages[3].error_code == ErrorCode.ANSWER_STOPPED
+    assert await claim_of(api, conversation_id) is None
+    assert running.running_turns() == []
+    assert "concurrent operations" not in caplog.text
+
+
 async def test_a_second_stop_does_nothing_more(async_api, cancel_spy):
     api = async_api
     await api.ready()

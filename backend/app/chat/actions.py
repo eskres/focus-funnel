@@ -20,9 +20,10 @@ from sqlalchemy import exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.config import ConnectorLimits
+from app.chat.conversations import TURN_CLAIM_TIMEOUT
 from app.errors import ErrorCode
 from app.mcp_client import mark_data
-from app.models import Connector, Message, ToolAction
+from app.models import Connector, Conversation, Message, ToolAction
 
 PENDING = "pending"
 RUNNING = "running"
@@ -157,6 +158,15 @@ async def wait_for_running(
     while True:
         await settle_stale(session, conversation_id, limits)
         await session.commit()
+        # Lock the open rows first: on Postgres this waits for an approval
+        # whose `move` began before the claim and has not committed yet, so
+        # the look below sees it running (stop-and-spend-cap decision 30).
+        # SQLite runs one writer at a time and ignores the lock.
+        await session.execute(
+            select(ToolAction.id)
+            .where(ToolAction.conversation_id == conversation_id, ToolAction.status.in_(OPEN))
+            .with_for_update()
+        )
         running = (
             await session.execute(
                 select(
@@ -224,10 +234,20 @@ async def move(session: AsyncSession, action: ToolAction, status: str) -> bool:
     One conditional update, so of two requests only one wins, on SQLite and
     on Postgres alike. Reloads the row either way. updated_at is set here, so
     `settle_stale` can tell how long an action has been running.
+
+    The same update also requires that no turn holds the conversation's
+    claim, so an approval that checked for a turn before a message claimed
+    the conversation cannot start running during that turn: it loses here
+    and is refused with conversation_busy (stop-and-spend-cap decision 30).
     """
+    claimed = exists().where(
+        Conversation.id == action.conversation_id,
+        Conversation.turn_started_at.is_not(None),
+        Conversation.turn_started_at >= datetime.now(UTC) - TURN_CLAIM_TIMEOUT,
+    )
     result = await session.execute(
         update(ToolAction)
-        .where(ToolAction.id == action.id, ToolAction.status.in_(OPEN))
+        .where(ToolAction.id == action.id, ToolAction.status.in_(OPEN), ~claimed)
         .values(status=status, updated_at=datetime.now(UTC))
         .execution_options(synchronize_session=False)
     )

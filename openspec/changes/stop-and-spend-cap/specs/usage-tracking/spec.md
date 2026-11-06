@@ -31,7 +31,7 @@ The user SHALL be able to set a monthly spend cap in the usage settings, in esti
 
 #### Scenario: Amount not valid
 
-- **WHEN** a user saves a cap of zero, a negative amount, or an unknown unit
+- **WHEN** a user saves a cap of zero, a negative amount, a token amount that is not a whole number, or an unknown unit
 - **THEN** the system responds with HTTP 422 and error code `validation_error`
 - **AND** the saved cap does not change
 

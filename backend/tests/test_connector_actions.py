@@ -25,10 +25,11 @@ from app.chat.prompt import build_context
 from app.chat.tool_providers import holds_connector_data
 from app.config import get_settings
 from app.db import create_engine
-from app.errors import ErrorCode
+from app.errors import ApiError, ErrorCode
 from app.mcp_client import ConnectorError, ToolResult, mark_data
 from app.models import Conversation, ConversationConnector, Message, ToolAction, User
 from app.routers import actions as actions_router
+from app.routers import chat as chat_router
 from app.routers.actions import DecisionIn, decide_action
 from tests.chat_helpers import (
     chat,
@@ -617,6 +618,88 @@ def test_approval_during_a_turn_gives_conversation_busy(
     assert error_code(response) == "conversation_busy"
     assert fake_mcp.connects == []
     assert actions(test_database_url)[0].status == "pending"
+
+
+def test_an_approval_that_checked_before_a_message_claimed_cannot_run_during_its_turn(
+    client, alice, acting, fake_llm, fake_mcp, test_database_url, monkeypatch
+):
+    """stop-and-spend-cap design decision 30: the approval checks for a turn
+    before the message claims the conversation, and reaches its move after
+    the turn's wait for running actions, before the expiry. The move loses
+    to the claim, so the tool never runs during the turn."""
+    action = held_action(client, alice, acting["conversation"], fake_llm)
+    user_id = uuid.UUID(user_id_for(client, alice))
+    approve_checked = threading.Event()
+    chat_past_wait = threading.Event()
+    approve_done = threading.Event()
+    real_turn_running = actions_router._turn_running
+
+    async def turn_running(session, conversation_id):
+        # The real read first, then hold until the chat is past its wait.
+        running = await real_turn_running(session, conversation_id)
+        approve_checked.set()
+        await asyncio.to_thread(chat_past_wait.wait, 10)
+        return running
+
+    monkeypatch.setattr(actions_router, "_turn_running", turn_running)
+    real_model_info = chat_router.model_info
+
+    async def model_info(*args, **kwargs):
+        # The chat has claimed, stored the message, waited, and built its
+        # context; hold it until the approval has tried its move.
+        chat_past_wait.set()
+        await asyncio.to_thread(approve_done.wait, 10)
+        return await real_model_info(*args, **kwargs)
+
+    monkeypatch.setattr(chat_router, "model_info", model_info)
+    outcome = {}
+
+    def approve():
+        async def main():
+            engine = create_engine(test_database_url, poolclass=NullPool)
+            sessions = async_sessionmaker(engine, expire_on_commit=False)
+            try:
+                async with sessions() as session:
+                    user = await session.get(User, user_id)
+                    return await decide_action(
+                        uuid.UUID(acting["conversation"]),
+                        uuid.UUID(action["id"]),
+                        DecisionIn(decision="approve"),
+                        user,
+                        session,
+                        get_chat_config(),
+                        get_settings(),
+                        fake_mcp,
+                    )
+            finally:
+                await engine.dispose()
+
+        try:
+            outcome["answer"] = asyncio.run(main())
+        except ApiError as exc:
+            outcome["error"] = exc
+        finally:
+            approve_done.set()
+
+    thread = threading.Thread(target=approve)
+    thread.start()
+    try:
+        assert approve_checked.wait(10)
+        fake_llm.queue(text_chunks("Sure."))
+        response = chat(client, alice, "did it get added?", acting["conversation"])
+    finally:
+        chat_past_wait.set()
+        thread.join()
+
+    # Its first check saw no turn; the move then lost to the claim.
+    assert "answer" not in outcome
+    assert outcome["error"].code == "conversation_busy"
+    assert fake_mcp.calls == []
+    assert [name for name, _ in parse_events(response.text)][-1] == "done"
+    # The turn's context said the card did not run, and it did not.
+    notes = [m["content"] for m in fake_llm.chat_requests[-1]["messages"] if m["role"] == "system"]
+    assert any("did not approve" in note and CREATE in note for note in notes)
+    assert actions(test_database_url)[0].status == "expired"
 
 
 def unlink(url: str, conversation_id: str) -> None:

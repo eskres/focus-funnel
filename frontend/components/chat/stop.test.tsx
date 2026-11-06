@@ -442,6 +442,33 @@ describe("Stop", () => {
     expect(await screen.findByText(STOPPED)).toBeInTheDocument();
   });
 
+  it("a stop request that fails after the answer ended leaves no note", async () => {
+    const stream = openStream();
+    let fail!: () => void;
+    const failing = new Promise<void>((resolve) => (fail = resolve));
+    await sendInStored(stream, {
+      [STOP]: async () => {
+        await failing;
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    await stream.push(delta("Rent is due."));
+    fireEvent.click(stopButton());
+
+    // The answer ends while the stop request is still on its way.
+    await stream.push(done);
+    await stream.close();
+    await waitFor(() => expect(input()).toBeEnabled());
+    expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      fail();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.queryByText("The answer could not be stopped. Try again.")).not.toBeInTheDocument();
+    expect(screen.getByText("Rent is due.")).toBeInTheDocument();
+  });
+
   it("reloaded: a stopped answer shows the note with its tools, sources, and proposal card", async () => {
     api({
       [DETAIL]: json(
