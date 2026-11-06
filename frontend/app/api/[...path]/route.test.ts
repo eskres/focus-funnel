@@ -187,6 +187,25 @@ describe("API proxy", () => {
     expect(del.headers.authorization).toBe("Bearer test-access-token");
   });
 
+  it("forwards a Library list query exactly as the browser encoded it (thought-library task 2.1)", async () => {
+    backend = await startBackend((_req, _body, res) => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ items: [], next_cursor: null }));
+    });
+    vi.stubEnv("BACKEND_URL", backend.url);
+    const query = "?tag=%23home%20%26%20status%3Ddone&category=a%2Bb%2Fc&cursor=c%2B%2F";
+
+    const response = await GET(authed(`http://localhost:3000/api/thoughts${query}`), ctx("thoughts"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ items: [], next_cursor: null });
+    expect(backend.requests).toHaveLength(1);
+    const [forwarded] = backend.requests;
+    expect(forwarded.method).toBe("GET");
+    expect(forwarded.url).toBe(`/api/thoughts${query}`);
+    expect(forwarded.headers.authorization).toBe("Bearer test-access-token");
+  });
+
   describe("the setup token header", () => {
     const SETUP_TOKEN = "setup-token-0123456789abcdefghij";
 

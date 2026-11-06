@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarIcon, EllipsisIcon, PlusIcon } from "lucide-react";
+import { CalendarIcon, EllipsisIcon, LibraryIcon, PlusIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -12,7 +12,7 @@ import {
   heldProposalFor,
   type HeldOffer,
 } from "@/components/chat/proposal-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -62,6 +62,17 @@ export function Sidebar() {
       >
         <CalendarIcon /> Upcoming
       </Button>
+      {/* A plain link styled as a button, so it is announced as the link it is. */}
+      <Link
+        href="/app/library"
+        aria-current={pathname === "/app/library" ? "page" : undefined}
+        className={buttonVariants({
+          variant: pathname === "/app/library" ? "secondary" : "ghost",
+          className: "justify-start",
+        })}
+      >
+        <LibraryIcon /> Library
+      </Link>
       {loadError && <p className="px-2 text-sm text-destructive">{loadError}</p>}
       {lists && lists.conversations.length === 0 && (
         <p className="px-2 text-sm text-muted-foreground">No conversations yet.</p>

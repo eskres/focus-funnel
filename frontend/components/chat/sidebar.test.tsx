@@ -70,6 +70,23 @@ describe("Sidebar", () => {
     expect(rowTitles("Recent conversations")).toEqual(["Oat milk"]);
   });
 
+  it("links to the Library page beside Upcoming, marked while it is open", async () => {
+    fakeApi({ "GET /api/conversations": json(200, { conversations: [milk], archived: [] }) });
+    pathname = "/app/library";
+    renderSidebar();
+
+    await screen.findByText("Oat milk");
+    const library = screen.getByRole("link", { name: "Library" });
+    expect(library).toHaveAttribute("href", "/app/library");
+    expect(library).toHaveAttribute("aria-current", "page");
+    const nav = screen.getByRole("navigation", { name: "Conversations" });
+    const anchors = Array.from(nav.querySelectorAll("a")).map((a) => a.textContent?.trim());
+    expect(anchors.slice(0, 3)).toEqual(["New conversation", "Upcoming", "Library"]);
+    expect(screen.getByText("Upcoming").closest("a")).not.toHaveAttribute("aria-current");
+    // "library" is a page, not a conversation.
+    expect(rowTitles("Recent conversations")).toEqual(["Oat milk"]);
+  });
+
   it("says there are no conversations yet", async () => {
     fakeApi({ "GET /api/conversations": json(200, { conversations: [], archived: [] }) });
     renderSidebar();
