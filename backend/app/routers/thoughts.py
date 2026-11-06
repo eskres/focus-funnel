@@ -1,13 +1,14 @@
-"""One stored thought, its origin and additions, for the detail view, and
-changing or deleting it, or undoing its last addition."""
+"""The user's thoughts a page at a time, for the Library page; one stored
+thought, its origin and additions, for the detail view; and changing or
+deleting it, or undoing its last addition."""
 
 import uuid
 from datetime import date, datetime
-from typing import Any
+from typing import Annotated, Any
 
 import httpx2
 from fastapi import APIRouter, Depends, Query, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -17,8 +18,10 @@ from app.models import User
 from app.providers import get_provider_http_client
 from app.thoughts.additions import list_additions, undo_addition
 from app.thoughts.categories import check_category
-from app.thoughts.dates import when_of
+from app.thoughts.dates import when_of, zone_from
+from app.thoughts.library import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor, list_thoughts
 from app.thoughts.store import (
+    check_status,
     delete_thought,
     get_thought,
     get_thought_with_origin,
@@ -123,6 +126,87 @@ class UpcomingOut(BaseModel):
     items: list[UpcomingItem]
     # True when more dated thoughts from that day on exist than the list shows.
     more: bool
+
+
+def _empty_as_none(value: Any) -> Any:
+    """An empty query parameter is read as absent (thought-library design decision 4)."""
+    return None if value == "" else value
+
+
+# The bounds sit inside the optional type, so None never meets them.
+Limit = Annotated[
+    Annotated[int, Field(ge=1, le=MAX_LIMIT)] | None, BeforeValidator(_empty_as_none)
+]
+# No zone's offset can overflow a day in this range, nor can _as_end's added day.
+FiledDay = Annotated[
+    Annotated[date, Field(ge=date(1900, 1, 1), le=date(9998, 12, 31))] | None,
+    BeforeValidator(_empty_as_none),
+]
+Text = Annotated[str | None, BeforeValidator(_empty_as_none)]
+
+
+class ThoughtRow(BaseModel):
+    id: uuid.UUID
+    title: str
+    category: str | None
+    tags: list[str]
+    status: str
+    created_at: datetime
+    # The thought's own date, {start, end, time_zone}; null when it has none.
+    when: dict[str, str | None] | None
+
+
+class ThoughtList(BaseModel):
+    items: list[ThoughtRow]
+    # The cursor of the next page, with the same filters; null on the last page.
+    next_cursor: str | None
+
+
+@router.get("", response_model=ThoughtList)
+async def library(
+    limit: Annotated[Limit, Query()] = None,
+    cursor: Annotated[Text, Query()] = None,
+    status: Annotated[Text, Query()] = None,
+    category: Annotated[Text, Query()] = None,
+    tag: Annotated[Text, Query()] = None,
+    filed_from: Annotated[FiledDay, Query()] = None,
+    filed_to: Annotated[FiledDay, Query()] = None,
+    time_zone: Annotated[Text, Query()] = None,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> ThoughtList:
+    """The user's thoughts, newest filed first, a page at a time.
+
+    Filters are ANDed and each is optional: one category, one tag, one status,
+    and filed days in the browser's zone. Needs no provider.
+    """
+    page = await list_thoughts(
+        session,
+        user,
+        limit=limit if limit is not None else DEFAULT_LIMIT,
+        cursor=decode_cursor(cursor) if cursor is not None else None,
+        category=category,
+        tag=tag,
+        status=check_status(status) if status is not None else None,
+        filed_from=filed_from,
+        filed_to=filed_to,
+        zone=zone_from(time_zone),
+    )
+    return ThoughtList(
+        items=[
+            ThoughtRow(
+                id=row.id,
+                title=row.title,
+                category=row.category,
+                tags=list(row.tags or []),
+                status=row.status,
+                created_at=row.created_at,
+                when=when_of(row),
+            )
+            for row in page.items
+        ],
+        next_cursor=page.next_cursor,
+    )
 
 
 # Declared before /{thought_id}, so "upcoming" is never read as an id.

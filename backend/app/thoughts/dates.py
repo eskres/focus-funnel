@@ -11,7 +11,7 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, time
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo, available_timezones
 
 from app.errors import ApiError, ErrorCode
 
@@ -44,13 +44,17 @@ class DateColumns:
 NO_DATE = DateColumns()
 
 
+# Every zone name ZoneInfo knows, read once. A name is looked up only when it
+# is in this set, so a forged name never reaches ZoneInfo's file lookup, which
+# fails in more ways than one exception type covers (ValueError, OSError,
+# RecursionError; thought-library design decision 6).
+ZONE_NAMES = frozenset(available_timezones())
+
+
 def zone_from(name: Any) -> ZoneInfo:
     """The IANA zone with this name, or UTC for a missing or unknown one."""
-    if isinstance(name, str) and name.strip():
-        try:
-            return ZoneInfo(name.strip())
-        except (ZoneInfoNotFoundError, ValueError, TypeError, OSError):
-            pass
+    if isinstance(name, str) and name.strip() in ZONE_NAMES:
+        return ZoneInfo(name.strip())
     return ZoneInfo(DEFAULT_ZONE)
 
 

@@ -37,6 +37,10 @@ VectorType = HALFVEC().with_variant(JSON(), "sqlite")
 # Marks an index that exists only on Postgres, so Alembic's comparison skips
 # it on SQLite (see alembic/env.py).
 POSTGRES_ONLY = {"only_dialect": "postgresql"}
+# The values of ck_thoughts_status below, in one place for the store's check
+# and the library's status filter (thought-library design decision 7). A test
+# keeps the two in step; the constraint is written out as thought-status wrote it.
+THOUGHT_STATUSES = ("open", "done")
 
 
 class Thought(Base):
