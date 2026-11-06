@@ -12,7 +12,7 @@ from app.connectors import prune_operator_rows
 from app.db import get_engine, get_sessionmaker
 from app.demo import cleanup_loop
 from app.errors import register_error_handlers
-from app.log_masking import install_log_masking
+from app.log_masking import configure_app_logging, install_log_masking
 from app.provider_config import get_providers_config
 from app.routers import (
     actions,
@@ -76,6 +76,7 @@ async def lifespan(app: FastAPI):
 
 
 install_log_masking()
+configure_app_logging()
 
 app = FastAPI(title="Focus Funnel API", lifespan=lifespan)
 register_error_handlers(app)

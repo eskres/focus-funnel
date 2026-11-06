@@ -351,6 +351,44 @@ Decision 3 says the `GET` keeps the read `thought-appending` planned for it, "on
 
 **Alternatives:** one statement for thought, origin, and additions in the `GET` (rejected here: it changes `thought-appending`'s read and test for no gain to the export); `thought_view()` taking raw addition rows and calling `addition_view()` itself (rejected: the export builds the additions per thought from one batched query, and the `GET` from its own list; passing built models keeps one mapping for each).
 
+### 19. The fresh-interpreter import check puts the backend folder on `sys.path`
+
+Tasks 2.1, 2.9, and 2.10 run `uv run python -I -c 'import app.thoughts.export'` (and `app.user_data`, `app.main`) in `backend/`. That command fails before and after this change with `ModuleNotFoundError: No module named 'app'`: `app` is not an installed package, and `-I` leaves the working folder off `sys.path`. So the check runs `uv run python -I -c "import sys; sys.path.insert(0, '.'); import app.thoughts.export"` in `backend/`, which keeps the fresh, isolated interpreter and imports only the module named. `tests/test_export_lease.py` runs the three as a pytest check, and `tests/test_app_logging.py` imports `app.main` the same way.
+
+**Alternatives:** plain `uv run python -c …` (rejected: it also works, but drops `-I`, so a stray module in the working folder or an environment variable could hide a cycle); installing the backend as a package (rejected: a packaging change for one check).
+
+### 20. `stop_exports()` sits in `delete_user_by_id()` and `delete_user_content()`
+
+Decision 15 names `delete_user_content()` and `delete_user_data()`. As built, `delete_user_data()` only calls `delete_user_by_id()`, and the demo cleanup loop (`delete_expired_demo_users()`) calls `delete_user_by_id()` directly. So the call goes in `delete_user_by_id()` and `delete_user_content()`, each importing `stop_exports` inside the function with decision 16's comment. That covers `DELETE /api/me`, `DELETE /api/demo/session`, and the cleanup loop through `delete_user_by_id()`, and `DELETE /api/me/content` through `delete_user_content()`. Every caller runs `stop_and_claim()` first, so the order of decision 15 holds: a delete refused with 409, or a visitor the loop skips, stops no export. A test removes the call from `delete_user_by_id()` and sees the account, "End demo", and cleanup cases fail.
+
+**Alternatives:** the call in `delete_user_data()` only (rejected: the cleanup loop would miss it, and an export of an expired visitor would end with its count once the expiry check of decision 12 was the only guard); the call in each route and in the loop (rejected: four call sites for one rule).
+
+### 21. The lease's clock, its owner, and the order of the two refusals
+
+The design names one seam, `utcnow()`. The lease's monotonic clock is a second module function, `monotonic()`, wrapping `time.monotonic` and read through the module, so a test moves it by 61 seconds with `monkeypatch`. A `Lease` also carries its `user_id`, since `release(lease)` takes only the lease. It is a `@dataclass(eq=False)`, so it is compared and hashed by identity. `take_lease()` checks the four-lease limit before the running lease of that format, so with four open exports a fifth of either format gets "Too many of your exports are still open.", as task 2.5 expects, whether or not the newest of the four is still running. The route reads the expiry as `as_utc(user.expires_at)` whenever the user has one, rather than by auth mode: only demo users have an expiry.
+
+**Alternatives:** patching `time.monotonic` itself (rejected: it would move every clock in the process, the event loop's included); checking the format first (rejected: the fifth JSON export would then get the "already running" message while four are open).
+
+### 22. The empty JSON and Markdown files
+
+The JSON writer's opening chunk ends with `"thoughts":[`; the first non-empty batch starts with `\n`, each later one with `,\n`; the closing chunk is `\n],"count":N}` when there were thoughts, else `],"count":0}`, and both end with one `\n`. So an empty store gives the literal `"thoughts":[]`, and every thought still sits on its own line. The Markdown file with no thoughts has the header, `Exported …`, and its rule as usual, then `No thoughts.`, one rule, and `End of export: 0 thoughts.`, treating "No thoughts." like a section. A summary line of only spaces and tabs follows the indent rule as it stands (four spaces become `&#32;` and three spaces), which no test needs.
+
+**Alternatives:** an opening line ending in `[\n` (rejected: the empty file would hold `[\n\n]`, not `[]`).
+
+### 23. The export's additions query labels `undone`
+
+`additions_for()` selects `ThoughtAddition.id`, `thought_id`, `added_at`, `proposal_id`, `undone_at IS NOT NULL` labelled `undone`, and the conversation's `id` and `title` labelled `conversation_id` and `conversation_title`, so each row is a labelled `Row` that `addition_view()` takes as it takes the store's dataclass (decision 18). It orders by `added_at` and `to_position`, both descending, as `list_additions()` does, and groups by thought in Python. `export_thoughts()` drops each batch's rows before it yields, so only one batch is held at a time; task 2.7 measured a traced peak of about 3.8 MB for a 23 MB JSON file of 10,000 thoughts with 2,000-character raw texts.
+
+### 24. A tab-led summary line keeps its reference, though markdown-it would not make it code
+
+Task 2.3's by-hand check renders the two indented summary lines with `markdown-it` 14.1.0 in CommonMark mode. With the reference, both lines give a `<p>` whose text, entities decoded, is the stored line, leading space or tab included, and no `<code>`, as the first line of the quote and after a blank quote line. Written without the reference, the four-space line gives `<pre><code>` as decision 5 says, but the tab line does not: after `> `, the tab reaches only column 4, so it is two columns of indentation, and `markdown-it` gives `<p><b>x</b></p>` with the tab dropped. So for a tab the reference keeps the stored text rather than preventing a code block. The writer keeps the reference: the line then shows exactly as stored, and other renderers that expand the tab differently cannot turn it into code. The task's command `npx --yes -p markdown-it@14.1.0 node -e 'require("markdown-it")…'` cannot `require` the package (`npx` puts its bin folder on `PATH` but sets no `NODE_PATH`), so the same `node -e` script ran after `npm install --no-save markdown-it@14.1.0` in an empty scratch folder.
+
+**Alternatives:** dropping the reference for a tab (rejected: the tab would vanish from the rendered text, and the text would no longer show as stored).
+
+### 25. The running-server log check runs on port 8300 with its settings in the environment
+
+Task 2.10 starts `uvicorn` on port 8765 with the settings in `backend/.env`. In this workspace the app runs on port 8300 and its databases are named `ff_f4_*`, and there is no `backend/.env`. So the check ran `uv run uvicorn app.main:app --port 8300 2> <log>` in `backend/`, with `DATABASE_URL` at a fresh `ff_f4_logcheck` database migrated to the current head (`460c92991076`), `AUTH_MODE=demo`, `SETUP_WIZARD=false`, and a generated `KEY_ENCRYPTION_KEY` in the environment, and no `--log-config`.
+
 ## Risks / Trade-offs
 
 - [Not a snapshot: edits and deletes while the export runs show up in later batches] → Each thought is whole and current as of its batch. `exported_at` says when the export started. A user who wants a fixed copy exports while not editing. Deleting all content or the account, or ending the demo, during an export ends that export as failed (decision 15).

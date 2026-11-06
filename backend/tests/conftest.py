@@ -20,7 +20,7 @@ from app.db import create_engine, get_engine, get_sessionmaker
 from app.models import Base, User
 from app.provider_config import get_providers_config
 
-pytest_plugins = ["tests.chat_helpers", "tests.mcp_helpers", "tests.stop_helpers"]
+pytest_plugins = ["tests.chat_helpers", "tests.mcp_helpers", "tests.stop_helpers", "tests.export_helpers"]
 
 REQUIRED_ENV = {
     "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
@@ -53,6 +53,16 @@ def clear_settings_cache():
     for cached in CACHED:
         cached.cache_clear()
     clear_model_info_cache()
+
+
+@pytest.fixture(autouse=True)
+def clear_export_leases():
+    """No export lease outlives a test (thought-export design decision 7)."""
+    from app.thoughts import export
+
+    export.LIVE.clear()
+    yield
+    export.LIVE.clear()
 
 
 @pytest.fixture(autouse=True)

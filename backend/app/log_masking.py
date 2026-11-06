@@ -79,3 +79,24 @@ def install_log_masking() -> None:
 
     factory.masks_secrets = True  # type: ignore[attr-defined]
     logging.setLogRecordFactory(factory)
+
+
+APP_LOGGER = "app"
+APP_LOG_FORMAT = "%(levelname)s %(name)s: %(message)s"
+
+
+def configure_app_logging() -> None:
+    """Let the backend's own `app.*` loggers write INFO lines to stderr
+    (thought-export design decision 17).
+
+    Sets only the `app` logger: root and library loggers keep their levels,
+    so a library such as httpx logs no request URLs. The handler is added
+    only when the `app` logger has none, so a second call adds nothing.
+    `propagate` stays on, so pytest's caplog still sees the records.
+    """
+    logger = logging.getLogger(APP_LOGGER)
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        handler = logging.StreamHandler()  # stderr
+        handler.setFormatter(logging.Formatter(APP_LOG_FORMAT))
+        logger.addHandler(handler)
