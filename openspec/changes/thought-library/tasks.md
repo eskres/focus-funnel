@@ -33,4 +33,5 @@ Builds on `thought-editing` (built on this branch). Task groups 1 to 3 need `tho
 
 ## 4. Specs and checks
 
-- [ ] 4.1 Run `openspec validate thought-library --strict`, `uv run pytest` and `uv run pytest -m postgres` with `TEST_DATABASE_URL` set in `backend/`, and `npm test`, `npm run lint`, and `npx tsc --noEmit` in `frontend/`, and check that all pass
+- [x] 4.1 Run `openspec validate thought-library --strict`, `uv run pytest` and `uv run pytest -m postgres` with `TEST_DATABASE_URL` set in `backend/`, and `npm test`, `npm run lint`, and `npx tsc --noEmit` in `frontend/`, and check that all pass
+  - Passed on 2026-11-06 at `b704bad`. `openspec validate thought-library --strict` printed "Change 'thought-library' is valid". In `backend/`: `uv run pytest -q` gave 1559 passed, 404 deselected; `TEST_DATABASE_URL=postgresql+asyncpg://...@localhost:55432/focus_funnel_test3 uv run pytest -q -m postgres` gave 404 passed, 1559 deselected (local Postgres 18 + pgvector). In `frontend/`: `npm test` gave 57 files and 798 tests passed; `npm run lint` and `npx next typegen && npx tsc --noEmit` exited 0 with no output.
