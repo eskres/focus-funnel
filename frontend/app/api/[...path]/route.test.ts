@@ -11,9 +11,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { refreshOidcSession } = vi.hoisted(() => ({ refreshOidcSession: vi.fn() }));
 
 vi.mock("@/lib/oidc", () => ({ refreshOidcSession }));
+// The real session read, wrapped so a test can see whether the proxy read the
+// session (the source of getCredential()) at all.
+vi.mock("@/lib/session", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/session")>();
+  return { ...actual, readSession: vi.fn(actual.readSession) };
+});
 
 import { resetRenewals } from "@/lib/auth-mode";
-import { SESSION_COOKIE, sessionCookies, type Session } from "@/lib/session";
+import { readSession, SESSION_COOKIE, sessionCookies, type Session } from "@/lib/session";
 
 import { DELETE, GET, PATCH, POST, PUT } from "./route";
 
@@ -693,5 +699,213 @@ describe("API proxy", () => {
     for (let i = 0; i < parts.length - 1; i++) {
       expect(received[i].at).toBeLessThan(sentAt[i + 1]);
     }
+  });
+
+  describe("the export (thought-export task 4.1)", () => {
+    const EXPORT_URL = "http://localhost:3000/api/me/export?format=json";
+    const DISPOSITION = 'attachment; filename="focus-funnel-thoughts-2026-11-05.json"';
+
+    const exportBackend: Handler = (_req, _body, res) => {
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": DISPOSITION,
+        "Cache-Control": "no-store",
+      });
+      res.end('{"thoughts":[],"count":0}\n');
+    };
+
+    const fromSite = (site: string | null, url = EXPORT_URL, init: RequestInit = {}) => {
+      const headers = new Headers(init.headers);
+      if (site !== null) headers.set("Sec-Fetch-Site", site);
+      return authed(url, { ...init, headers });
+    };
+
+    async function readAll(response: Response) {
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      const received: { text: string; at: number }[] = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received.push({ text: decoder.decode(value), at: performance.now() });
+      }
+      return received;
+    }
+
+    it("forwards a same-origin export with its query and the credential", async () => {
+      backend = await startBackend(exportBackend);
+      vi.stubEnv("BACKEND_URL", backend.url);
+
+      const response = await GET(fromSite("same-origin"), ctx("me", "export"));
+
+      expect(response.status).toBe(200);
+      expect(backend.requests).toHaveLength(1);
+      expect(backend.requests[0].method).toBe("GET");
+      expect(backend.requests[0].url).toBe("/api/me/export?format=json");
+      expect(backend.requests[0].headers.authorization).toBe("Bearer test-access-token");
+      expect(response.headers.get("Content-Disposition")).toBe(DISPOSITION);
+    });
+
+    it.each(["cross-site", "same-site"])(
+      "refuses an export started from another site (%s) without calling the backend",
+      async (site) => {
+        backend = await startBackend(exportBackend);
+        vi.stubEnv("BACKEND_URL", backend.url);
+
+        const response = await GET(fromSite(site), ctx("me", "export"));
+
+        expect(response.status).toBe(403);
+        expect(await response.json()).toEqual({
+          error: { code: "validation_error", message: "Start the export from Settings." },
+        });
+        expect(response.headers.get("Content-Disposition")).toBeNull();
+        expect(backend.requests).toHaveLength(0);
+      },
+    );
+
+    it.each([
+      "http://localhost:3000/api/m%65/export?format=json",
+      "http://localhost:3000/api/me/%65xport?format=json",
+    ])("refuses a cross-site %s by its decoded segments, before reading the session", async (url) => {
+      backend = await startBackend(exportBackend);
+      vi.stubEnv("BACKEND_URL", backend.url);
+
+      const response = await GET(fromSite("cross-site", url), ctx("me", "export"));
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({
+        error: { code: "validation_error", message: "Start the export from Settings." },
+      });
+      expect(backend.requests).toHaveLength(0);
+      expect(vi.mocked(readSession)).not.toHaveBeenCalled();
+    });
+
+    it.each([["none"], [null]])(
+      "forwards an export the user started (Sec-Fetch-Site %s)",
+      async (site) => {
+        backend = await startBackend(exportBackend);
+        vi.stubEnv("BACKEND_URL", backend.url);
+
+        const response = await GET(fromSite(site), ctx("me", "export"));
+
+        expect(response.status).toBe(200);
+        expect(backend.requests).toHaveLength(1);
+        expect(backend.requests[0].url).toBe("/api/me/export?format=json");
+        expect(vi.mocked(readSession)).toHaveBeenCalled();
+      },
+    );
+
+    it("streams the file in parts with its name, no-store, and no credential", async () => {
+      const parts = ['{"thoughts":[\n', '{"id":"a"},\n', '{"id":"b"}\n],"count":2}\n'];
+      const sentAt: number[] = [];
+      let receivedAuthorization = "";
+      backend = await startBackend(async (req, _body, res) => {
+        receivedAuthorization = String(req.headers.authorization);
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Disposition": DISPOSITION,
+          "Cache-Control": "no-store",
+          // A backend header that echoes the credential must not reach the browser.
+          Authorization: receivedAuthorization,
+          "X-Echo": receivedAuthorization,
+        });
+        for (const part of parts) {
+          sentAt.push(performance.now());
+          res.write(part);
+          await sleep(150);
+        }
+        res.end();
+      });
+      vi.stubEnv("BACKEND_URL", backend.url);
+
+      const response = await GET(fromSite("same-origin"), ctx("me", "export"));
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Disposition")).toBe(DISPOSITION);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(response.headers.get("authorization")).toBeNull();
+      const bearer = receivedAuthorization.replace(/^Bearer /, "");
+      expect(bearer).toBe("test-access-token");
+      for (const [, value] of response.headers) expect(value).not.toContain(bearer);
+
+      const received = await readAll(response);
+      expect(received.map((chunk) => chunk.text)).toEqual(parts);
+      for (let i = 0; i < parts.length - 1; i++) {
+        expect(received[i].at).toBeLessThan(sentAt[i + 1]);
+      }
+      expect(received.map((chunk) => chunk.text).join("")).not.toContain(bearer);
+    });
+
+    it("keeps no-cache for another route's answer without no-store", async () => {
+      backend = await startBackend((_req, _body, res) => {
+        res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "private, max-age=60" });
+        res.end("{}");
+      });
+      vi.stubEnv("BACKEND_URL", backend.url);
+
+      const withHeader = await GET(authed("http://localhost:3000/api/me"), ctx("me"));
+      expect(withHeader.headers.get("Cache-Control")).toBe("no-cache");
+
+      await backend.close();
+      backend = await startBackend(okBackend);
+      vi.stubEnv("BACKEND_URL", backend.url);
+      const without = await GET(authed("http://localhost:3000/api/thoughts"), ctx("thoughts"));
+      expect(without.headers.get("Cache-Control")).toBe("no-cache");
+    });
+
+    it("fails the client's body when the backend's connection breaks mid-file", async () => {
+      backend = await startBackend((_req, _body, res) => {
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Disposition": DISPOSITION,
+          "Cache-Control": "no-store",
+        });
+        res.write('{"thoughts":[\n');
+        setTimeout(() => res.socket?.destroy(), 100);
+      });
+      vi.stubEnv("BACKEND_URL", backend.url);
+
+      const response = await GET(fromSite("same-origin"), ctx("me", "export"));
+      expect(response.status).toBe(200);
+
+      await expect(readAll(response)).rejects.toThrow();
+    });
+
+    it("closes the backend's answer when the browser cancels the download", async () => {
+      const parts = ['{"thoughts":[\n', '{"id":"a"},\n', '{"id":"b"}\n],"count":2}\n'];
+      let wroteLast = false;
+      let resolveClosed!: () => void;
+      const closed = new Promise<void>((resolve) => (resolveClosed = resolve));
+      backend = await startBackend(async (_req, _body, res) => {
+        res.on("close", () => resolveClosed());
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Disposition": DISPOSITION,
+          "Cache-Control": "no-store",
+        });
+        for (const [i, part] of parts.entries()) {
+          if (res.destroyed) return;
+          res.write(part);
+          if (i === parts.length - 1) wroteLast = true;
+          await sleep(150);
+        }
+        res.end();
+      });
+      vi.stubEnv("BACKEND_URL", backend.url);
+
+      const controller = new AbortController();
+      const response = await GET(
+        fromSite("same-origin", EXPORT_URL, { signal: controller.signal }),
+        ctx("me", "export"),
+      );
+      const reader = response.body!.getReader();
+      const first = await reader.read();
+      expect(new TextDecoder().decode(first.value)).toBe(parts[0]);
+
+      controller.abort();
+      await closed;
+      expect(wroteLast).toBe(false);
+      await reader.cancel().catch(() => undefined);
+    });
   });
 });

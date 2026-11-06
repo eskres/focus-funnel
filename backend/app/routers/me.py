@@ -1,15 +1,18 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.config import Settings, get_settings
-from app.db import get_session
+from app.db import get_session, get_sessionmaker
+from app.demo import as_utc
 from app.models import User
 from app.ownership import not_found
+from app.thoughts import export
 from app.user_data import (
     delete_user_content,
     delete_user_data,
@@ -90,3 +93,32 @@ async def delete_my_usage(
         raise not_found()
     await delete_user_usage(session, user)
     return Response(status_code=204)
+
+
+@router.get("/me/export")
+async def export_my_thoughts(
+    format: Literal["json", "markdown"] = Query(),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """All the user's thoughts as one JSON or Markdown file, streamed
+    (thought-export design decisions 1 to 8). Demo mode is offered too.
+
+    Everything that can refuse comes before the first byte: the login, the
+    format, and the one-export-per-format lease, taken last.
+    """
+    user_id = user.id
+    # The demo session's end, aware, so the lease can compare it with
+    # demo.now() on SQLite too (design decision 12).
+    expires_at = as_utc(user.expires_at) if user.expires_at is not None else None
+    # The request's session would otherwise stay open, idle in a
+    # transaction, until the stream ends; the export reads through its own.
+    await session.close()
+    exported_at = export.utcnow()
+    lease = export.take_lease(user_id, format, expires_at)
+    try:
+        batches = export.export_thoughts(get_sessionmaker(), user_id, lease)
+        return export.ExportResponse(lease, batches, exported_at)
+    except BaseException:
+        export.release(lease)
+        raise

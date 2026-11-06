@@ -21,6 +21,7 @@ from app.thoughts.categories import check_category
 from app.thoughts.dates import when_of, zone_from
 from app.thoughts.library import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor, list_thoughts
 from app.thoughts.store import (
+    ThoughtOrigin,
     check_status,
     delete_thought,
     get_thought,
@@ -93,11 +94,22 @@ class ThoughtPatch(BaseModel):
     status: Any = None
 
 
-async def thought_answer(session: AsyncSession, user: User, thought_id: uuid.UUID) -> ThoughtOut:
-    """The user's thought with its origin. Another user's, and one that does
-    not exist, are both not_found."""
-    thought, origin = await get_thought_with_origin(session, user, thought_id)
-    additions = await list_additions(session, user, thought.id)
+def addition_view(row: Any) -> AdditionOut:
+    """One addition as the API and the export show it. It reads the fields by
+    attribute, so a dataclass and a labelled Row both work."""
+    return AdditionOut(
+        id=row.id,
+        added_at=row.added_at,
+        undone=row.undone,
+        conversation_id=row.conversation_id,
+        conversation_title=row.conversation_title,
+        proposal_id=row.proposal_id,
+    )
+
+
+def thought_view(thought: Any, origin: ThoughtOrigin | None, additions: list[AdditionOut]) -> ThoughtOut:
+    """A stored thought with its origin and additions, as GET /api/thoughts/{id}
+    answers it and the export writes it (thought-export design decision 3)."""
     return ThoughtOut(
         id=thought.id,
         title=thought.title,
@@ -111,8 +123,16 @@ async def thought_answer(session: AsyncSession, user: User, thought_id: uuid.UUI
         status=thought.status,
         status_changed_at=thought.status_changed_at,
         origin=OriginOut(**vars(origin)) if origin else None,
-        additions=[AdditionOut(**vars(addition)) for addition in additions],
+        additions=additions,
     )
+
+
+async def thought_answer(session: AsyncSession, user: User, thought_id: uuid.UUID) -> ThoughtOut:
+    """The user's thought with its origin. Another user's, and one that does
+    not exist, are both not_found."""
+    thought, origin = await get_thought_with_origin(session, user, thought_id)
+    additions = await list_additions(session, user, thought.id)
+    return thought_view(thought, origin, [addition_view(addition) for addition in additions])
 
 
 class UpcomingItem(BaseModel):

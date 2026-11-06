@@ -36,7 +36,17 @@ async def delete_user_data(session: AsyncSession, user: User) -> None:
 
 
 async def delete_user_by_id(session: AsyncSession, user_id: uuid.UUID) -> None:
-    """`delete_user_data` for a user known only by id."""
+    """`delete_user_data` for a user known only by id.
+
+    The user's exports stop first, so none ends looking complete
+    (thought-export design decision 15). Every caller has stopped the user's
+    answers and claimed their conversations before this, so a delete
+    refused with 409 stops no export.
+    """
+    # Imported here: app.demo imports this module, and the export reads app.demo's clock.
+    from app.thoughts.export import stop_exports
+
+    stop_exports(user_id)
     await session.execute(delete(User).where(User.id == user_id))
     await session.commit()
 
@@ -49,7 +59,14 @@ async def delete_user_content(session: AsyncSession, user: User) -> None:
     records stay, with their conversation link cleared. The account, provider
     keys, model settings, added categories, and connectors stay too: they are
     settings.
+
+    The user's exports stop first, after the caller's stop and claim
+    (thought-export design decision 15).
     """
+    # Imported here: app.demo imports this module, and the export reads app.demo's clock.
+    from app.thoughts.export import stop_exports
+
+    stop_exports(user.id)
     await session.execute(delete(Thought).where(Thought.user_id == user.id))
     await session.execute(delete(SearchIndex).where(SearchIndex.user_id == user.id))
     await session.execute(delete(Conversation).where(Conversation.user_id == user.id))

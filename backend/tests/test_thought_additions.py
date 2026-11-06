@@ -816,3 +816,63 @@ def test_the_similar_hint_adds_a_part_with_date_choices_without_a_pick(
     after = thought(client, alice, lock["id"])
     assert after["when"] == lock["when"]
     assert len(after["additions"]) == 1
+
+
+# --- thought-export 1.1: one shape for a thought ---
+
+DETAIL_KEYS = {
+    "id",
+    "title",
+    "summary",
+    "tags",
+    "category",
+    "raw_text",
+    "status",
+    "status_changed_at",
+    "when",
+    "created_at",
+    "updated_at",
+    "origin",
+    "additions",
+}
+# What GET /api/thoughts/{id} ran before thought_view() and addition_view()
+# were taken out of it: the user's upsert and lookup, the thought with its
+# origin, and its additions. Measured on the code before that change.
+DETAIL_STATEMENTS = 4
+
+
+def test_the_detail_answer_has_exactly_the_thought_keys(client, alice, lock, proposed):
+    assert add(client, alice, **proposed).status_code == 200
+
+    body = thought(client, alice, lock["id"])
+
+    assert set(body) == DETAIL_KEYS
+    assert body["origin"] is not None
+    assert set(body["origin"]) == {
+        "conversation_id",
+        "conversation_title",
+        "archived",
+        "proposal_id",
+        "proposed_at",
+    }
+    [addition] = body["additions"]
+    assert set(addition) == {
+        "id",
+        "added_at",
+        "undone",
+        "conversation_id",
+        "conversation_title",
+        "proposal_id",
+    }
+
+
+def test_the_detail_answer_runs_as_many_statements_as_before(client, alice, lock, proposed):
+    assert add(client, alice, **proposed).status_code == 200
+    thought(client, alice, lock["id"])  # warm up
+
+    with counted_queries() as statements:
+        thought(client, alice, lock["id"])
+
+    assert len(statements) == DETAIL_STATEMENTS, statements
+    assert sum("FROM thoughts" in s for s in statements) == 1
+    assert sum("FROM thought_additions" in s for s in statements) == 1

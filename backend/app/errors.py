@@ -60,6 +60,9 @@ class ErrorCode:
     ACTION_RUNNING = "action_running"
     SETUP_TOKEN_INVALID = "setup_token_invalid"
     SETUP_INCOMPLETE = "setup_incomplete"
+    # One export per user and format at a time, and at most four open
+    # (thought-export design decision 7).
+    EXPORT_RUNNING = "export_running"
 
 
 class ApiError(Exception):
@@ -251,6 +254,25 @@ def setup_token_invalid() -> ApiError:
 
 def setup_incomplete(message: str) -> ApiError:
     return ApiError(409, ErrorCode.SETUP_INCOMPLETE, message)
+
+
+def export_running() -> ApiError:
+    """An export of this format by the user is still running (thought-export
+    design decision 7)."""
+    return ApiError(
+        409,
+        ErrorCode.EXPORT_RUNNING,
+        "An export in this format is already running. Try again when it has finished.",
+    )
+
+
+def too_many_exports() -> ApiError:
+    """The user already has the most exports open at once."""
+    return ApiError(
+        409,
+        ErrorCode.EXPORT_RUNNING,
+        "Too many of your exports are still open. Try again when one has finished.",
+    )
 
 
 def demo_session_expired() -> ApiError:
