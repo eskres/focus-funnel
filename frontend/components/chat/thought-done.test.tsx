@@ -142,6 +142,51 @@ describe("the Done box in the thought sheet", () => {
     expect(patches).toEqual([{ method: "PATCH", path: "/api/thoughts/t1", body: { status: "done" } }]);
   });
 
+  it("turns Edit, Delete, and Undo off while its PATCH runs, so no other change runs beside it", async () => {
+    const patch = deferred();
+    const withAddition = {
+      ...OPEN,
+      additions: [
+        {
+          id: "a1",
+          added_at: "2026-09-22T08:00:00Z",
+          undone: false,
+          conversation_id: "c2",
+          conversation_title: "Leak",
+          proposal_id: "p2",
+        },
+      ],
+    };
+    const { calls } = api({
+      "GET /api/thoughts/t1": json(200, withAddition),
+      "PATCH /api/thoughts/t1": () => patch.promise,
+    });
+    const dialog = await openSheet();
+    const box = within(dialog).getByRole("checkbox", { name: "Done" });
+    const actions = ["Edit", "Delete", "Undo last addition"].map((name) =>
+      within(dialog).getByRole("button", { name }),
+    );
+
+    fireEvent.click(box);
+
+    await waitFor(() => expect(box).toBeDisabled());
+    for (const action of actions) {
+      expect(action).toBeDisabled();
+      fireEvent.click(action);
+    }
+    expect(within(dialog).queryByRole("region", { name: "Edit thought" })).not.toBeInTheDocument();
+    // No delete or undo dialog beside the sheet.
+    expect(screen.getAllByRole("dialog")).toEqual([dialog]);
+
+    patch.resolve(json(200, { ...DONE, additions: withAddition.additions }));
+
+    await waitFor(() => expect(box).toBeEnabled());
+    for (const action of actions) expect(action).toBeEnabled();
+    expect(calls.filter((call) => call.method !== "GET")).toEqual([
+      { method: "PATCH", path: "/api/thoughts/t1", body: { status: "done" } },
+    ]);
+  });
+
   it("turned off, sends status open and shows no done date", async () => {
     const { calls } = api({
       "GET /api/thoughts/t1": json(200, DONE),

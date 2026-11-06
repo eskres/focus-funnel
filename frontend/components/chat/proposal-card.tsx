@@ -283,11 +283,14 @@ function useSavedThought(card: Card, proposalId: string) {
   return state;
 }
 
+/** The confirm's 404 message for a status part whose thought is gone (design decision 7). */
+const THOUGHT_GONE = "This thought no longer exists.";
+
 /**
  * A card that marks a filed thought done: no fields, one button. It names the
  * thought as it is now, or by the title stored in the part once it is gone.
- * Only a 404 says the thought no longer exists; any other failure keeps the
- * button, since the thought may well exist.
+ * Only the confirm's "no longer exists" 404 says the thought is gone; any
+ * other failure keeps the button, since the thought may well exist.
  */
 function StatusCard({
   conversationId,
@@ -318,7 +321,9 @@ function StatusCard({
       setNow((current) => ({ ...current, title: current.title || title, deleted: false }));
       onSaved(card.parts, outcome.thought_id);
     } catch (err) {
-      if (err instanceof NotFoundError) setGone(true);
+      // Only the confirm's own answer for a missing thought: a missing
+      // conversation or proposal is a 404 too, and says nothing about the thought.
+      if (err instanceof NotFoundError && err.message === THOUGHT_GONE) setGone(true);
       else setError(err instanceof Error ? err.message : "Could not mark the thought done.");
     } finally {
       setBusy(false);
@@ -330,16 +335,18 @@ function StatusCard({
   const shownTitle = now.title || title;
 
   if (thoughtId && now.deleted) {
+    // The title stored in the part, never a later rename the open chat heard
+    // about: the same title a reload shows (design decision 10).
     return (
       <div
         role="group"
-        aria-label={`Deleted: ${shownTitle}`}
+        aria-label={`Deleted: ${card.title}`}
         className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed p-3 text-sm"
       >
         <span role="status" className="text-muted-foreground">
           Deleted:
         </span>
-        <span className="text-muted-foreground">{shownTitle}</span>
+        <span className="text-muted-foreground">{card.title}</span>
       </div>
     );
   }
