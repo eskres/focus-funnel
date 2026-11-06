@@ -1,7 +1,9 @@
 """Shared API error format: {"error": {"code": ..., "message": ...}}."""
 
 import logging
-from typing import Any
+from datetime import date
+from decimal import Decimal
+from typing import Any, Protocol
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -29,6 +31,9 @@ class ErrorCode:
     MODEL_UNAVAILABLE = "model_unavailable"
     CONTEXT_FULL = "context_full"
     CONVERSATION_BUSY = "conversation_busy"
+    # The month's usage reached the user's spend cap: a refused message, or
+    # the `error` event of a turn that crossed it between rounds.
+    SPEND_CAP_REACHED = "spend_cap_reached"
     # Only ever sent as an `error` event inside a chat stream.
     OUTPUT_LIMIT_REACHED = "output_limit_reached"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
@@ -129,6 +134,48 @@ def conversation_busy() -> ApiError:
         409,
         ErrorCode.CONVERSATION_BUSY,
         "This conversation is still answering another message. Wait for it to finish.",
+    )
+
+
+class CapFigures(Protocol):
+    """What the spend cap refusal names (`app.chat.usage.CapState`)."""
+
+    unit: str
+    amount: Decimal
+    used: Decimal
+    resets_on: date
+
+
+_MONTHS = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)  # fmt: skip
+
+
+def format_cap_amount(unit: str, amount: Decimal) -> str:
+    """"$5.00" or "2,000,000 tokens", as the usage settings show a threshold:
+    dollars with at least 2 and at most 6 decimals, tokens as a whole number."""
+    if unit == "tokens":
+        return f"{int(amount):,} token{'' if amount == 1 else 's'}"
+    text = f"{amount.quantize(Decimal('0.000001')):,f}".rstrip("0")
+    whole, _, cents = text.partition(".")
+    return f"${whole}.{cents.ljust(2, '0')}"
+
+
+def spend_cap_reached(state: CapFigures) -> ApiError:
+    """The month's usage reached the cap (design decision 9). The message
+    names the cap and the month so far in its unit, never dollars for a
+    token cap, and the day it resets, in UTC."""
+    so_far = format_cap_amount(state.unit, state.used)
+    if state.unit == "usd":
+        so_far += ", estimated"
+    resets = state.resets_on
+    return ApiError(
+        409,
+        ErrorCode.SPEND_CAP_REACHED,
+        f"Your monthly spend cap of {format_cap_amount(state.unit, state.amount)} is reached "
+        f"(this month so far: {so_far}). Raise or remove it in Settings to keep chatting. "
+        f"It resets on {resets.day} {_MONTHS[resets.month - 1]} (UTC).",
     )
 
 

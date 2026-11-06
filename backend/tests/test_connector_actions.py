@@ -733,18 +733,21 @@ def test_a_failed_action_expires_at_the_next_turn_and_the_model_hears_it_failed(
 def test_a_later_user_message_expires_an_action_no_turn_expired(
     client, alice, acting, fake_llm, fake_mcp, test_database_url
 ):
-    # A turn that ran while connectors were off expired nothing.
+    # A turn that ran while connectors were off expired nothing. It stored
+    # an answer after the later message: the conversation moved on
+    # (stop-and-spend-cap design decision 9; a lone refused message does not).
     action = held_action(client, alice, acting["conversation"], fake_llm)
 
     async def add_message(session):
-        session.add(
-            Message(
-                conversation_id=uuid.UUID(acting["conversation"]),
-                position=action["position"] + 5,
-                role="user",
-                content="later",
+        for offset, role, content in ((5, "user", "later"), (6, "assistant", "Sure.")):
+            session.add(
+                Message(
+                    conversation_id=uuid.UUID(acting["conversation"]),
+                    position=action["position"] + offset,
+                    role=role,
+                    content=content,
+                )
             )
-        )
         await session.commit()
 
     run_db(test_database_url, add_message)

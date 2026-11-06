@@ -46,7 +46,7 @@ from app.chat.tool_providers import (
     holds_connector_data,
     tool_label,
 )
-from app.chat.usage import record_usage, usage_warning
+from app.chat.usage import cap_state, record_usage, usage_warning
 from app.chat.tools import (
     ALREADY_PROPOSED,
     PROPOSAL_SHOWN,
@@ -58,7 +58,13 @@ from app.chat.tools import (
     search_tool_result,
 )
 from app.config import Settings, get_settings
-from app.errors import ApiError, ErrorCode, output_limit_reached, tool_loop_limit
+from app.errors import (
+    ApiError,
+    ErrorCode,
+    output_limit_reached,
+    spend_cap_reached,
+    tool_loop_limit,
+)
 from app.models import Conversation, Message, UsageEvent, User
 from app.ownership import not_found
 from app.provider_config import StreamUsage
@@ -416,6 +422,8 @@ class Turn:
                 assert self._first_chunks is not None, "open() first"
                 chunks = self._first_chunks
             else:
+                assert last_answer is not None
+                await self._check_cap(last_answer)
                 chunks = await self.call.stream(self.context, **self._options(round_number))
 
             state = RoundState()
@@ -458,6 +466,19 @@ class Turn:
             await self.session.commit()
             self._end_stored = True
         raise tool_loop_limit()
+
+    async def _check_cap(self, last_answer: Message) -> None:
+        """End the turn before its next model call when the month reached the
+        cap, as saved now: a cap set or lowered while the turn runs counts
+        (design decision 10). The last round's answer, whose tool calls all
+        have their results, keeps the code, so a reload shows the end."""
+        state = await cap_state(self.session, self.user.id)
+        if state is None or not state.reached:
+            return
+        last_answer.error_code = ErrorCode.SPEND_CAP_REACHED
+        await self.session.commit()
+        self._end_stored = True
+        raise spend_cap_reached(state)
 
     async def _note_usage(self, state: RoundState) -> AsyncIterator[Event]:
         """Store and send the round's prompt tokens for the meter, record the

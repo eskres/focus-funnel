@@ -826,10 +826,11 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         { message, conversationId, choice: sentChoice },
         controller.signal,
         (id) => {
-          // The message was stored and refused (too_many_tools, context_full…):
-          // its turn started on the server, which expired the waiting cards.
+          // The message was stored and refused (too_many_tools, context_full,
+          // spend_cap_reached…). A refusal before the first model call leaves
+          // the waiting cards approvable; one from the provider expired them,
+          // and approving such a card answers action_expired, which marks it.
           adopt(id);
-          expireOpenActions();
         },
       );
       // Set when the stream ends with `done` or `error`.

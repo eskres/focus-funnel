@@ -541,6 +541,7 @@ def build_context(
     refs: Mapping[str, str] | None = None,
     connectors: bool = False,
     actions: list[ToolAction] | None = None,
+    actions_expire: bool = False,
 ) -> list[dict[str, Any]]:
     """The system prompt, the latest summary if any, every message not
     compacted, the seen-thoughts note if any, then the held-proposal note if
@@ -552,7 +553,9 @@ def build_context(
     A finished action's outcome (approved and what it returned, declined, or
     expired) goes in as a note after the last tool message of its tool-call
     group, because the tool results of one call group must follow it
-    directly. An action whose tool message is compacted gets no note.
+    directly. An action whose tool message is compacted gets no note. With
+    `actions_expire`, a pending or failed action reads as expired: the turn
+    this context is for expires them before its first model call.
     """
     context: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt(today, connectors)}
@@ -567,7 +570,7 @@ def build_context(
         )
     notes: dict[int, list[str]] = {}
     for action in actions or []:
-        note = outcome_note(action)
+        note = outcome_note(action, expiring=actions_expire)
         if note is not None:
             notes.setdefault(action.position, []).append(note)
     waiting: list[dict[str, Any]] = []

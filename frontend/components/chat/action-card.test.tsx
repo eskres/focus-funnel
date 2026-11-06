@@ -327,7 +327,7 @@ describe("ActionCard", () => {
     expect(within(card).queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("marks a waiting card expired when the next message is stored but refused", async () => {
+  it("keeps a waiting card open when the next message is stored but refused", async () => {
     api({
       "POST /api/chat": () =>
         errorResponse(422, "too_many_tools", "Turn some connector tools off: the limit is 20.", {
@@ -339,9 +339,10 @@ describe("ActionCard", () => {
     send("and now?");
 
     await screen.findByText("Turn some connector tools off: the limit is 20.");
-    // The server stored the message and expired the card with it.
-    expect(within(card).getByRole("status")).toHaveTextContent("Expired");
-    expect(within(card).queryByRole("button")).not.toBeInTheDocument();
+    // The server stored the message but sent nothing to the model, so the
+    // card can still be approved (stop-and-spend-cap design decision 9).
+    expect(within(card).getByRole("status")).toHaveTextContent("Waiting for your approval.");
+    expect(within(card).getByRole("button", { name: "Approve" })).toBeEnabled();
   });
 
   it("keeps a waiting card open when the next message is refused before it is stored", async () => {
