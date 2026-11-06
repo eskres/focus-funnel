@@ -1,11 +1,12 @@
-"""Usage records: one row per model call, and the monthly warning.
+"""Usage records: one row per model call, the monthly warning, and the spend cap.
 
 A record holds the provider, the model, the tokens, and the estimated cost.
 It never holds message text.
 """
 
 import uuid
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -17,6 +18,7 @@ from app.models import UsageEvent, UserSettings
 from app.provider_models import ModelPrices
 
 UsageKind = Literal["chat", "compact", "proposal", "test", "embed"]
+CapUnit = Literal["usd", "tokens"]
 
 
 def estimate_cost(
@@ -34,6 +36,13 @@ def utc_now() -> datetime:
 
 def month_start(moment: datetime) -> datetime:
     return moment.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def next_month_start(moment: datetime) -> date:
+    """The first day of the month after `moment`'s, in UTC: 1 January after December."""
+    if moment.month == 12:
+        return date(moment.year + 1, 1, 1)
+    return date(moment.year, moment.month + 1, 1)
 
 
 async def record_usage(
@@ -135,3 +144,59 @@ async def usage_warning(session: AsyncSession, user_id: uuid.UUID) -> dict[str, 
         "month_cost_usd": float(cost),
         "month_tokens": tokens,
     }
+
+
+@dataclass(frozen=True)
+class CapState:
+    """The user's monthly spend cap and where this month stands against it."""
+
+    unit: CapUnit
+    amount: Decimal
+    # The month's sum in the cap's unit: estimated dollars or tokens.
+    used: Decimal
+    reached: bool
+    resets_on: date
+
+    def payload(self) -> dict[str, Any]:
+        return {
+            "unit": self.unit,
+            "amount": int(self.amount) if self.unit == "tokens" else float(self.amount),
+            "reached": self.reached,
+            "resets_on": self.resets_on,
+        }
+
+
+async def cap_state(
+    session: AsyncSession, user_id: uuid.UUID, moment: datetime | None = None
+) -> CapState | None:
+    """The cap and the month's sum in its unit, or None when the user has no cap.
+
+    The cap is read with a column select on every call, never through a
+    `UserSettings` instance: the session may already hold that row, loaded
+    before a cap was saved from another session, and a column select does not
+    go through the identity map. A dollar cap sums the estimated costs, where
+    unknown costs add nothing; a token cap sums the known tokens. Every kind
+    of usage row counts. The cap is reached when the sum is equal to or above
+    it.
+    """
+    row = (
+        await session.execute(
+            select(UserSettings.cap_unit, UserSettings.cap_amount).where(
+                UserSettings.user_id == user_id
+            )
+        )
+    ).one_or_none()
+    if row is None or row.cap_unit is None or row.cap_amount is None:
+        return None
+    moment = moment or utc_now()
+    cost, tokens = await month_totals(session, user_id, moment)
+    unit: CapUnit = "usd" if row.cap_unit == "usd" else "tokens"
+    amount = Decimal(str(row.cap_amount))
+    used = cost if unit == "usd" else Decimal(tokens)
+    return CapState(
+        unit=unit,
+        amount=amount,
+        used=used,
+        reached=used >= amount,
+        resets_on=next_month_start(moment),
+    )

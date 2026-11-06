@@ -1,19 +1,29 @@
-"""GET /api/usage: the user's estimated spend per day, per model, and this month."""
+"""GET /api/usage: the user's estimated spend per day, per model, and this month.
+
+PUT /api/usage/cap: the user's monthly spend cap.
+"""
 
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.chat.loadout import get_user_settings
-from app.chat.usage import month_start, threshold_payload, utc_now, warning_reached
+from app.chat.usage import (
+    cap_state,
+    month_start,
+    threshold_payload,
+    utc_now,
+    warning_reached,
+)
 from app.config import Settings, get_settings
 from app.db import get_session
-from app.models import ProviderKey, UsageEvent, User
+from app.models import ProviderKey, UsageEvent, User, UserSettings
 from app.providers import resolve_provider
 
 router = APIRouter(prefix="/api/usage")
@@ -46,6 +56,30 @@ class WarningState(BaseModel):
     reached: bool
 
 
+class CapState(BaseModel):
+    unit: Literal["usd", "tokens"]
+    amount: float
+    reached: bool
+    # The first day of the next month in UTC, when the month's sum starts again.
+    resets_on: date
+
+
+class SpendCap(BaseModel):
+    """A monthly spend cap, in estimated dollars or in tokens."""
+
+    unit: Literal["usd", "tokens"]
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=6)
+
+
+class SaveSpendCap(BaseModel):
+    # Required: null removes the cap.
+    cap: SpendCap | None
+
+
+class SpendCapResponse(BaseModel):
+    cap: CapState | None
+
+
 class ProviderConsole(BaseModel):
     provider_id: str
     label: str
@@ -57,6 +91,7 @@ class UsageReport(BaseModel):
     by_model: list[ModelUsage]
     month: MonthUsage
     warning: WarningState | None
+    cap: CapState | None
     consoles: list[ProviderConsole]
 
 
@@ -140,13 +175,41 @@ async def read_usage(
             reached=warning_reached(user_settings, month.cost, month.tokens),
         )
 
+    cap = await cap_state(session, user.id, now)
+
     return UsageReport(
         days=[DayUsage(date=day, **total.totals()) for day, total in per_day.items()],
         by_model=by_model,
         month=MonthUsage(start=this_month.date(), **month.totals()),
         warning=warning,
+        cap=CapState(**cap.payload()) if cap is not None else None,
         consoles=await _consoles(session, user, settings),
     )
+
+
+@router.put("/cap", response_model=SpendCapResponse)
+async def save_cap(
+    body: SaveSpendCap,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> SpendCapResponse:
+    """Save or remove the caller's monthly spend cap, and nothing else.
+
+    It touches only the two cap columns. A user with no `user_settings` row
+    gets one with every other column null; removing a cap that was never set
+    creates nothing.
+    """
+    user_settings = await get_user_settings(session, user)
+    if user_settings is None:
+        if body.cap is None:
+            return SpendCapResponse(cap=None)
+        user_settings = UserSettings(user_id=user.id)
+        session.add(user_settings)
+    user_settings.cap_unit = body.cap.unit if body.cap is not None else None
+    user_settings.cap_amount = body.cap.amount if body.cap is not None else None
+    await session.commit()
+    cap = await cap_state(session, user.id)
+    return SpendCapResponse(cap=CapState(**cap.payload()) if cap is not None else None)
 
 
 async def _consoles(session: AsyncSession, user: User, settings: Settings) -> list[ProviderConsole]:

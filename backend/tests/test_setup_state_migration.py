@@ -33,7 +33,7 @@ def alembic_ok(db_url: str, *args: str) -> str:
 
 
 def test_this_revision_is_below_the_single_head():
-    # Later revisions exist (the head test is in test_thought_status_migration.py),
+    # Later revisions exist (the head test is in test_spend_cap_migration.py),
     # so these tests name their revisions rather than "head" where it matters.
     out = alembic_ok("sqlite+aiosqlite:///:memory:", "heads")
     heads = [line.split()[0] for line in out.splitlines() if line.strip()]
