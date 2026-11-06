@@ -403,6 +403,18 @@ The proxy refuses the export by its decoded segments whatever the method, not on
 
 **Alternatives:** a `GET`-only check (rejected: no gain, and a later `HEAD` or `POST` on the path would pass it); a substring test on `cache-control` (rejected: `no-store` inside another token would match); stubbing firebase environment variables for the page test (rejected: the page needs only the parsed config, and the mock keeps the test off the env parsing).
 
+### 28. An escaped character in a bare web address shows its backslash in autolinking viewers
+
+Task 5.1's substitute run showed that decision 5's escaping and the spec's "the address shows as written" disagree in viewers that turn bare addresses into links. The summary `Buy oat milk. see https://example.com/a?x=1_y` is written as `> Buy oat milk. see https://example.com/a?x=1\_y`. CommonMark viewers (`markdown-it` 14.1.0 in its default mode, and `cmark-gfm` without the autolink extension) show `https://example.com/a?x=1_y` with no link. GitHub's own `cmark-gfm` (the `cmarkgfm` 2024.11.20 binding, GFM with autolinks) and `markdown-it` with `linkify` both make a link whose text is `https://example.com/a?x=1\_y`, backslash shown, and whose target is `https://example.com/a?x=1%5C_y`. The same happens to `\&` in `?a=1&b=2`. Nothing is loaded from `example.com` in any of them, so the "loads nothing" half of the requirement holds, and an address with none of the escaped characters (such as the spec's `https://evil.example/a`) shows as written.
+
+The writer is not changed here. Leaving characters unescaped inside an address would let CommonMark viewers, which do not autolink, read them as markup: `[x](…)` or `![x](…)` inside one address would become a link or a remote image there. Choosing which characters may stay unescaped inside an address, and how to find an address the way GFM does, is a change to decision 5 and to the spec's "A bare web address" scenario. It needs the owner's decision, so task 5.1 stays open on this point.
+
+**Alternatives:** not escaping `_` and `&` inside a GFM-style address (not done here: it changes decision 5, and `&lt;` would then show as `<` in CommonMark viewers); escaping the address's `:` (rejected in decision 5).
+
+### 29. A delete ends a slow download once the bytes already sent have drained
+
+In task 5.2's substitute run, a delete during a `curl --limit-rate 100k` export ended the export at once: the backend logged `outcome=failed error=ExportAborted` and closed the response without its last chunk. `curl` printed `exit=18`, with no `"count"` in the file, but 123 seconds after the delete, not at once. The backend had already sent about 7,600 thoughts (about 20 MB), and those bytes sat in the loopback sockets between the backend, the Node proxy, and `curl` until `curl` read them at 100 KB/s. The backend's RSS (about 180 MB) and the Node server's RSS (about 820 MB in `next dev`) stayed flat within 4 MB the whole time, so the bytes were in the kernel's socket buffers, not in either process. Nothing is changed for this: the download still fails, and at real speeds the buffers drain in seconds. The task's "soon after" is met only once they drain.
+
 ## Risks / Trade-offs
 
 - [Not a snapshot: edits and deletes while the export runs show up in later batches] → Each thought is whole and current as of its batch. `exported_at` says when the export started. A user who wants a fixed copy exports while not editing. Deleting all content or the account, or ending the demo, during an export ends that export as failed (decision 15).
