@@ -181,6 +181,24 @@ describe("a status card", () => {
     expect(card).not.toHaveTextContent("Marked done:");
   });
 
+  it("keeps the button and says why on a 404 for a missing conversation", async () => {
+    // The conversation was deleted in another tab: the thought may well exist.
+    api({
+      "POST /api/chat": proposing(MARK),
+      [CONFIRM]: errorResponse(404, "not_found", "Not found."),
+    });
+    await openChat();
+    await proposed();
+
+    const card = screen.getByRole("group", { name: "Mark done: Call the plumber" });
+    fireEvent.click(within(card).getByRole("button", { name: "Mark done" }));
+
+    expect(await within(card).findByRole("alert")).toHaveTextContent("Not found.");
+    await waitFor(() => expect(within(card).getByRole("button", { name: "Mark done" })).toBeEnabled());
+    expect(screen.queryByText("Marked done:")).not.toBeInTheDocument();
+    expect(screen.queryByText("This thought no longer exists.")).not.toBeInTheDocument();
+  });
+
   it("says the thought no longer exists when its target says deleted", async () => {
     api({ "POST /api/chat": proposing({ ...MARK, target: { deleted: true } }) });
     await openChat();
@@ -240,6 +258,23 @@ describe("a status card", () => {
     expect(within(card).queryByRole("link")).not.toBeInTheDocument();
     expect(screen.queryByText("Marked done:")).not.toBeInTheDocument();
     expect(card).not.toHaveTextContent("null");
+  });
+
+  it("keeps the title it was proposed with when the thought is renamed and then deleted", async () => {
+    api({ "POST /api/chat": proposing(MARK), [CONFIRM]: marked() });
+    await openChat();
+    await proposed();
+    fireEvent.click(screen.getByRole("button", { name: "Mark done" }));
+    await screen.findByRole("group", { name: "Marked done: Call the plumber" });
+
+    announce({ id: "t9", title: "Call plumber re: boiler" });
+    await screen.findByRole("group", { name: "Marked done: Call plumber re: boiler" });
+    announce({ id: "t9", deleted: true });
+
+    // The same title a reload shows, from the part.
+    const card = await screen.findByRole("group", { name: "Deleted: Call the plumber" });
+    expect(card.textContent?.replace("Deleted:", "").trim()).toBe("Call the plumber");
+    expect(screen.queryByText("Call plumber re: boiler")).not.toBeInTheDocument();
   });
 
   it("comes back as Deleted: with no link when its thought was deleted after the mark", async () => {

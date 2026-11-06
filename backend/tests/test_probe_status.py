@@ -110,8 +110,9 @@ def _ref(text: str, title: str, newest: bool = False) -> str | None:
 class StatusModel:
     """Answers each status case as the steering asks. `wrong` names the
     mistakes to make: `oldest` marks the first of several open matches,
-    `claim` says the thought was marked done, `add_to` answers a candidate
-    round for the plumber with an addition."""
+    `claim` says the thought was marked done, `claim_elsewhere` says so in
+    every reply after a mark but the reply-before-confirm case's, `add_to`
+    answers a candidate round for the plumber with an addition."""
 
     def __init__(self, wrong: frozenset[str] = frozenset()):
         self.wrong = wrong
@@ -145,7 +146,16 @@ class StatusModel:
         if last is not None and "is not a thought this conversation has seen" in last:
             return probe_prompt.SEARCH_TOOL, {"query": "plumber", "status": "open"}, None
         if last is not None and last.startswith("The proposal is now shown"):
-            reply = "I've marked it done." if "claim" in self.wrong else "It is ready for you to confirm."
+            # The reply-before-confirm case: one user message, the plumber
+            # seen, and the proposal its only call.
+            before_confirm = (
+                said == "i called the plumber"
+                and len(results) == 1
+                and sum(m["role"] == "user" for m in messages) == 1
+                and "Thoughts this conversation has seen" in system
+            )
+            claim = "claim" in self.wrong or ("claim_elsewhere" in self.wrong and not before_confirm)
+            reply = "I've marked it done." if claim else "It is ready for you to confirm."
             return None, None, reply
         if last is not None:  # a search result
             if "?" in said or last.startswith("No filed thoughts"):
@@ -303,6 +313,21 @@ def test_a_reply_that_says_it_was_marked_done_fails():
 
     assert not passed
     assert any(line.startswith("  - run 1 called-plumber: I've marked it done.") for line in lines)
+
+
+def test_claims_after_a_mark_fail_the_probe_even_when_every_case_passes():
+    # Only the 5% limit on replies that say a thought was marked done can
+    # fail this run: the reply-before-confirm case gets a right reply.
+    lines, passed = run_probe(StatusModel(wrong=frozenset({"claim_elsewhere"})))
+
+    data = yaml.safe_load((probe_prompt.DATA / "status.yaml").read_text())
+    for case in data["cases"]:
+        assert share_of(lines, case["id"]).endswith("2 of 2 (100%)")
+    [claims] = [line for line in lines if line.startswith("- Replies after a mark that say")]
+    said, after_mark = (int(n) for n in re.findall(r"(\d+) of (\d+)", claims)[0])
+    assert said > 0.05 * after_mark
+    assert not any(" reply-before-confirm: " in line for line in lines if line.startswith("  - run "))
+    assert not passed
 
 
 def test_a_forced_push_answered_with_add_to_fails():

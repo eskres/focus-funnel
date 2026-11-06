@@ -291,15 +291,17 @@ function ThoughtBody({
         </section>
       ) : (
         <>
+          {/* Off while the Done box saves, so no other change runs beside it
+              and its late answer never replaces a newer copy of the thought. */}
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={edit}>
+            <Button size="sm" variant="outline" onClick={edit} disabled={marking !== null}>
               Edit
             </Button>
-            <Button size="sm" variant="outline" onClick={() => setDeleting(true)}>
+            <Button size="sm" variant="outline" onClick={() => setDeleting(true)} disabled={marking !== null}>
               Delete
             </Button>
             {lastAddition && (
-              <Button size="sm" variant="outline" onClick={() => setUndoing(true)}>
+              <Button size="sm" variant="outline" onClick={() => setUndoing(true)} disabled={marking !== null}>
                 Undo last addition
               </Button>
             )}
