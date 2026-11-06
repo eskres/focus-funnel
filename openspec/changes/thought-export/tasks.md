@@ -54,4 +54,5 @@ Builds after `thought-dates`, `thought-status`, and `thought-appending` (the `wh
 
 ## 6. Specs and checks
 
-- [ ] 6.1 Run `openspec validate thought-export --strict`, `uv run pytest` and `uv run pytest -m postgres` with `TEST_DATABASE_URL` set in `backend/`, and `npm test`, `npm run lint`, and `npx tsc --noEmit` in `frontend/`, and check that all pass
+- [x] 6.1 Run `openspec validate thought-export --strict`, `uv run pytest` and `uv run pytest -m postgres` with `TEST_DATABASE_URL` set in `backend/`, and `npm test`, `npm run lint`, and `npx tsc --noEmit` in `frontend/`, and check that all pass
+  - Passed on 2026-11-06 at `7aa3ca2`. `openspec validate thought-export --strict`: valid. Backend on SQLite: 1631 passed (443 `postgres` tests deselected). Backend `-m postgres` with `TEST_DATABASE_URL` on Postgres 18.2 with pgvector 0.8.1: 443 passed. Frontend: `npm test` 863 passed in 60 files, `npm run lint` and `npx tsc --noEmit` (after `npx next typegen`) exit 0. A second full run of the same checks gave the same counts.
