@@ -258,6 +258,38 @@ The moved expiry runs after `build_context()`, which writes each finished action
 
 **Alternatives:** expire the cards on a stored refusal with a provider error code (rejected: the codes overlap, see above); reload the conversation's actions after every stored refusal (rejected: one more request for a case the approve answer already settles).
 
+### 21. Build note: where Stop lives in the built `background-turns` code
+
+`app/chat/running.py` gains `TurnControl` (`interruptible`, `stop_requested`, `cancel_reason`), which `Turn` owns and `running.start(..., control=turn.control)` shares with the registry entry; the argument is optional, so the registry tests that drive `start()` with a script still work. `RunningTurn` gains `control`, `cancel_sent`, `stop()`, and `shutdown()` as decision 1 describes. The module-level `shutdown()` stays the lifespan's entry point: it calls each turn's `shutdown()` and then `asyncio.wait` on the tasks and the settle steps. The bound is `running.STOP_WAIT_SECONDS` (5 seconds), read at call time, so a test can lower it; `stop_turns()` uses the same bound, and `app/main.py` no longer has its own `TURN_SHUTDOWN_TIMEOUT`.
+
+Decision 1 says `run` appends the terminal event before its `finally` releases the claim. The built `background-turns` does the opposite: `_settle` runs the route's settle step (which releases the claim), removes the registry entry, and only then ends the log. The build keeps that order. It is what lets a message sent right after the `answer_stopped` event be answered instead of refused as busy (task 3.4 checks this).
+
+The route's `events()` wrapper closes the providers in the turn's own task, inside `anyio.CancelScope(shield=True)` (decision 12). The stop route loads the conversation owner-scoped, closes its session, and calls `RunningTurn.stop()` only when the entry's user id is the caller's.
+
+**Alternatives:** a reference from `RunningTurn` to `Turn` (rejected: the registry would import the turn and its database code for three flags); move the terminal event before the settle step (rejected: see above).
+
+### 22. Build note: how the turn knows where a stop landed
+
+A check that finds `stop_requested` raises an internal `StopRequested`, which `Turn.events()` catches before its generic `except Exception`, so it never reaches `_store_failed`. A `CancelledError` whose `cancel_reason` is `stop` calls `asyncio.current_task().uncancel()` first, so the stopped store's awaits and the anyio cancel scopes after it are not cut, then takes the same path; any other cancel keeps the `answer_interrupted` path. Both paths store the stopped answer and raise `answer_stopped()`, which `_run` turns into the terminal event, and set `_end_stored`.
+
+The turn keeps a `StopPoint` of plain values: `stream`, `round` (the check before a later round's call), or `tool`, with the round's call ids and names, the index of the call being run, and `in_flight` while a connector call that may reach its server is awaited. The stopped store reads it, and the round's `RoundState`, before its rollback. The guarded stream (`_guarded`) and `_interruptible()` hold the check, the flag, and the await together. A cancel while a later round's call is being opened counts as a stop in the stream, as decision 3 says: its row is recorded with the estimated prompt tokens and the completion tokens of what arrived (none). "The context sent" is `estimate_tokens(self.context, self.tools)`, which is what the request carries, and "text received" is the round's text plus the arguments of its tool calls (not their names).
+
+**Alternatives:** record nothing for a cancel during the opening of a round (rejected: the request may have reached the provider, and decision 3 counts it as in the stream); estimate the prompt without the tool definitions (rejected: they are sent and billed).
+
+### 23. Build note: closing the stream, the info, and the positions
+
+`ModelCall.stream()`'s `chunks()` closes the provider response in a `finally`, and a stop found by a check calls `aclose()` on the round's chunks, so the response ends in both paths (a cancel already closes it through the SDK stream's own `finally`). `Turn` takes `info=` from the route; `record_usage` gains a keyword `info` whose default is a module sentinel, so a passed `None` (the list could not be read) records an unknown cost without calling `call.info()`, and callers that pass nothing (`/compact`, the offer, the model test) still fetch it. `next_position()` takes the conversation id; `Turn` keeps `conversation_id` from `__init__`. The `ToolProvider` protocol gains `reaches_server(name, turn)`: `BuiltinTools` answers false, `ConnectorTools` answers true for every call that needs no approval.
+
+### 24. Build note: the deletes claim in their own transaction
+
+`claim_user_turns(session, user_id)` in `app/chat/conversations.py` runs decision 13's update and count, and rolls back and raises `turns_busy()` when the count is not 0. `stop_and_claim()` in `app/user_data.py` commits the request's read transaction, awaits `running.stop_turns(user_id)`, then claims. The delete helpers already delete and then commit, so called after the claim they delete and commit in the claim's transaction; they need no split. The demo cleanup reads the expired users' ids, skips a visitor whose claim fails, and deletes by id (`delete_user_by_id`): the rollback of a failed claim expires every loaded `User`. `DELETE /api/conversations/{id}` commits its read, stops that conversation's turn, and claims with `busy=conversation_delete_busy`.
+
+### 25. Build note: what the Stop tests observe
+
+A task's `cancel` cannot be replaced on an `asyncio.Task` instance, so the tests count cancels with a task factory that creates a `Task` subclass counting its `cancel()` calls (`tests/stop_helpers.py`). `AsyncSession.commit` is patched to wait while the session holds the rows a test names. The fake provider records each streamed body and whether it was closed, and can hold its model list. The incremental-usage checks copy the provider fixture with Nebius's `stream_usage` changed, so `valid.yaml` keeps its two presets.
+
+The MCP SDK used here gives the client no session id, so closing a connector session sends no HTTP `DELETE`. Task 3.2's "the fake server sees the session end" is therefore checked as: the client session the turn opened ran its `aclose()` in the turn (its background task is gone) and the test server holds no open connection from it. The test server gained a hold for `create_event`, the method of each request, and its count of open connections.
+
 ## Risks / Trade-offs
 
 - [Two conversations crossing the cap together] → Each turn checks before its next round, so the overshoot is at most one round per running conversation. Accepted: a strict cap would need a lock on every model call.

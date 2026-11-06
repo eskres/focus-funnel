@@ -3,6 +3,7 @@
 import logging
 import uuid
 
+import anyio
 import httpx2
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import StreamingResponse
@@ -313,6 +314,8 @@ async def chat(
             else None,
             # A read followed by an act needs more rounds (decision 9).
             tool_rounds=config.connectors.tool_rounds if connectors else None,
+            # Read once here: no step of the turn fetches the model list.
+            info=info,
         )
         try:
             if settings.mcp_enabled and not is_new:
@@ -347,8 +350,10 @@ async def chat(
                 yield event
         finally:
             # In the turn's own background task, however the turn ends: no
-            # connector session outlives it (decision 9).
-            await turn.aclose()
+            # connector session outlives it (decision 9). Shielded, so a
+            # shutdown cancel that lands while it closes cannot skip it.
+            with anyio.CancelScope(shield=True):
+                await turn.aclose()
 
     async def settle() -> None:
         try:
@@ -372,8 +377,33 @@ async def chat(
         finally:
             await session.close()
 
-    turn_entry = running.start(conversation_id, user.id, after_position, events(), settle)
+    turn_entry = running.start(
+        conversation_id, user.id, after_position, events(), settle, control=turn.control
+    )
     return log_response(running.follow(turn_entry))
+
+
+@router.post("/{conversation_id}/stop", status_code=204)
+async def stop_turn(
+    conversation_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Stop the conversation's running answer (stop-and-spend-cap design
+    decision 1).
+
+    Answers 204 at once whenever the caller owns the conversation: the stop
+    was sent, it was already stopping, it is past its last check, or nothing
+    runs. The stream's terminal event says how the answer ended. Another
+    user's conversation and an unknown id are both not found. This route
+    never reads provider keys.
+    """
+    await get_conversation(session, user, conversation_id)
+    await session.close()
+    turn = running.get(conversation_id)
+    if turn is not None and turn.user_id == user.id:
+        turn.stop()
+    return Response(status_code=204)
 
 
 @router.get("/{conversation_id}/stream", response_model=None)

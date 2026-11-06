@@ -10,7 +10,12 @@ from app.config import Settings, get_settings
 from app.db import get_session
 from app.models import User
 from app.ownership import not_found
-from app.user_data import delete_user_content, delete_user_data, delete_user_usage
+from app.user_data import (
+    delete_user_content,
+    delete_user_data,
+    delete_user_usage,
+    stop_and_claim,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -50,6 +55,9 @@ async def delete_my_account(
     """
     if settings.auth_mode == "demo":
         raise not_found()
+    # Running answers stop first and store their usage; one that still runs
+    # makes this answer 409 and delete nothing (design decision 13).
+    await stop_and_claim(session, user.id)
     await delete_user_data(session, user)
     return Response(status_code=204)
 
@@ -66,6 +74,7 @@ async def delete_my_content(
     """
     if settings.auth_mode == "demo":
         raise not_found()
+    await stop_and_claim(session, user.id)
     await delete_user_content(session, user)
     return Response(status_code=204)
 

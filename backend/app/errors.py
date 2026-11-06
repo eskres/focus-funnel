@@ -39,6 +39,8 @@ class ErrorCode:
     TOOL_LOOP_LIMIT = "tool_loop_limit"
     # Also stored on an answer the server stopped (shutdown or restart).
     ANSWER_INTERRUPTED = "answer_interrupted"
+    # The user pressed Stop: stored on the stopped answer too.
+    ANSWER_STOPPED = "answer_stopped"
     NOT_ALLOWED = "not_allowed"
     DEMO_SESSION_EXPIRED = "demo_session_expired"
     DEMO_FULL = "demo_full"
@@ -137,6 +139,24 @@ def conversation_busy() -> ApiError:
     )
 
 
+def conversation_delete_busy() -> ApiError:
+    """A conversation's delete while its answer still runs after the stop
+    (design decision 13)."""
+    return ApiError(
+        409,
+        ErrorCode.CONVERSATION_BUSY,
+        "An answer in this conversation is still running. Try deleting again in a moment.",
+    )
+
+
+def turns_busy() -> ApiError:
+    """A delete of the user's content, account, or demo session while one of
+    their answers still runs or is still being opened (design decision 13)."""
+    return ApiError(
+        409, ErrorCode.CONVERSATION_BUSY, "An answer is still running. Try again in a moment."
+    )
+
+
 class CapFigures(Protocol):
     """What the spend cap refusal names (`app.chat.usage.CapState`)."""
 
@@ -204,6 +224,10 @@ def answer_interrupted() -> ApiError:
         ErrorCode.ANSWER_INTERRUPTED,
         "This answer did not finish. Send the message again to retry.",
     )
+
+
+def answer_stopped() -> ApiError:
+    return ApiError(200, ErrorCode.ANSWER_STOPPED, "You stopped this answer.")
 
 
 def not_allowed() -> ApiError:

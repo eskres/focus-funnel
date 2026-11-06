@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.model_call import ModelCall
 from app.models import UsageEvent, UserSettings
-from app.provider_models import ModelPrices
+from app.provider_models import ModelItem, ModelPrices
 
 UsageKind = Literal["chat", "compact", "proposal", "test", "embed"]
 CapUnit = Literal["usd", "tokens"]
@@ -45,6 +45,10 @@ def next_month_start(moment: datetime) -> date:
     return date(moment.year, moment.month + 1, 1)
 
 
+# Not given: record_usage reads the model's prices with `call.info()`.
+_UNSET: Any = object()
+
+
 async def record_usage(
     session: AsyncSession,
     call: ModelCall,
@@ -52,18 +56,23 @@ async def record_usage(
     prompt_tokens: int | None,
     completion_tokens: int | None,
     conversation_id: uuid.UUID | None = None,
+    *,
+    info: ModelItem | None = _UNSET,
 ) -> UsageEvent | None:
     """Store one call's usage and commit it.
 
     A call with no reported tokens is not recorded, except on a provider that
     never reports them: its calls are recorded with the tokens and the cost
-    unknown.
+    unknown. A chat turn passes the model's `info` its route already read, so
+    no step of a turn fetches the model list (design decision 4); `None`
+    there means the list could not be read and the cost is unknown.
     """
     if call.user_id is None:
         return None
     if prompt_tokens is None and call.reports_usage:
         return None
-    info = await call.info()
+    if info is _UNSET:
+        info = await call.info()
     event = UsageEvent(
         user_id=call.user_id,
         conversation_id=conversation_id,

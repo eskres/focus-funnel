@@ -7,7 +7,7 @@ are ordinary error responses. Everything after that arrives as events.
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -25,6 +25,8 @@ from app.chat.prompt import (
     PROPOSE_TOOL,
     SEARCH_TOOL,
     drop_held_note,
+    estimate_text_tokens,
+    estimate_tokens,
     forced_tool,
     held_note_of,
     tool_arguments,
@@ -37,6 +39,7 @@ from app.chat.proposal import (
     resolve_marks,
     write_proposal,
 )
+from app.chat.running import TurnControl
 from app.chat.similar import candidates_note, check_parts, with_similar
 from app.chat.sse import Event
 from app.chat.tool_providers import (
@@ -61,6 +64,7 @@ from app.config import Settings, get_settings
 from app.errors import (
     ApiError,
     ErrorCode,
+    answer_stopped,
     output_limit_reached,
     spend_cap_reached,
     tool_loop_limit,
@@ -68,9 +72,41 @@ from app.errors import (
 from app.models import Conversation, Message, UsageEvent, User
 from app.ownership import not_found
 from app.provider_config import StreamUsage
+from app.provider_models import ModelItem
 from app.thoughts.dates import DEFAULT_ZONE
 
 logger = logging.getLogger(__name__)
+
+# The tool message of a call a stop kept from starting (design decision 3).
+NOT_RUN = "Not run: the user stopped the answer before this tool finished."
+
+
+def may_have_run(name: str) -> str:
+    """The tool message of a connector call a stop cut off while it ran: it
+    may have reached its server (design decision 12)."""
+    return f"Stopped while {name} was running. It may have run; check before running it again."
+
+
+class StopRequested(Exception):
+    """A check found the stop the user asked for (design decision 3). Turn
+    turns it into the stopped answer; it never leaves `Turn.events`."""
+
+
+@dataclass
+class StopPoint:
+    """Where the turn is, in plain values the stopped store reads after its
+    rollback: never an ORM instance (design decision 3).
+
+    `stream`: reading a round's stream, or opening a later round's call.
+    `round`: the check before a later round's call. `tool`: a tool call of
+    the round, `calls[index]`; `in_flight` while a connector call that may
+    reach its server runs.
+    """
+
+    kind: str = "stream"
+    calls: list[tuple[str, str]] = field(default_factory=list)
+    index: int = 0
+    in_flight: bool = False
 
 
 @dataclass
@@ -186,6 +222,11 @@ class BuiltinTools:
     def needs_approval(self, name: str, turn: TurnToolState) -> bool:
         return False
 
+    def reaches_server(self, name: str, turn: TurnToolState) -> bool:
+        # Database queries and at most one embedding call with its own
+        # timeout: always run to the end, never cut by a stop.
+        return False
+
     def action_target(self, name: str) -> ActionTarget:
         raise NotImplementedError("the built-in tools never need approval")
 
@@ -271,7 +312,7 @@ class BuiltinTools:
             self.session,
             self.conversation,
             with_similar(stored, check),
-            await next_position(self.session, self.conversation),
+            await next_position(self.session, self.conversation.id),
             push=self.command == "push",
             refs=refs,
         )
@@ -316,11 +357,18 @@ class Turn:
         providers: list[ToolProvider],
         forced_tool: dict[str, Any] | None = None,
         tool_rounds: int | None = None,
+        info: ModelItem | None = None,
     ):
         self.session = session
         self.user = user
         self.conversation = conversation
+        # Kept as a plain value: a rollback expires `conversation`.
+        self.conversation_id = conversation.id
         self.call = call
+        # The model's context length and prices, as the route read them for
+        # check_room: no step of the turn fetches the model list (design
+        # decision 4). None when the list could not be read.
+        self.info = info
         self.config = config
         self.context = context
         # The built-in tools first, then one provider per connector that is on.
@@ -342,6 +390,13 @@ class Turn:
         self.interrupted = False
         # Set once the turn's reason for ending is stored (the tool round limit).
         self._end_stored = False
+        # Shared with the turn's registry entry, which sets stop_requested
+        # and sends the cancel (design decisions 1 and 3).
+        self.control = TurnControl()
+        # Where a stop would land, for the stopped store.
+        self._at = StopPoint()
+        # The chunks of the round being read, closed when a check stops it.
+        self._chunks: AsyncIterator[Any] | None = None
 
     async def aclose(self) -> None:
         """Close what the providers opened (connector sessions). Every
@@ -369,8 +424,8 @@ class Turn:
 
     async def _store(self, **fields: Any) -> Message:
         message = Message(
-            conversation_id=self.conversation.id,
-            position=await next_position(self.session, self.conversation),
+            conversation_id=self.conversation_id,
+            position=await next_position(self.session, self.conversation_id),
             **fields,
         )
         self.session.add(message)
@@ -381,14 +436,154 @@ class Turn:
         try:
             async for event in self._rounds():
                 yield event
+        except StopRequested:
+            # A check found the stop: nothing was cut part way.
+            await self._end_stopped()
+            raise answer_stopped() from None
         except asyncio.CancelledError:
-            # Nothing is stored here: an await now could be cancelled again.
-            # The settle step, which runs shielded, calls store_interrupted.
-            self.interrupted = True
-            raise
+            if self.control.cancel_reason != "stop":
+                # Shutdown. Nothing is stored here: an await now could be
+                # cancelled again. The settle step, which runs shielded,
+                # calls store_interrupted.
+                self.interrupted = True
+                raise
+            # The stop's cancel, sent only inside a region and only once
+            # (design decision 1): the turn goes on to store what it has.
+            task = asyncio.current_task()
+            if task is not None:
+                task.uncancel()
+            await self._end_stopped()
+            raise answer_stopped() from None
         except Exception as exc:
             await self._store_failed(exc)
             raise
+
+    # --- Stop (design decisions 1, 3, 4, and 12) ---
+
+    def _check_stop(self) -> None:
+        """The synchronous stop check, before every region and tool call."""
+        if self.control.stop_requested:
+            raise StopRequested
+
+    async def _interruptible(self, open_await: Callable[[], Awaitable[Any]]) -> Any:
+        """Await `open_await()` as a region a stop may cancel.
+
+        The check comes right before the flag is set, with no await between
+        them: a stop that landed earlier is seen here, and one that lands
+        later finds the flag set and cancels the task. The flag is cleared
+        as soon as the await returns, so a cancel never lands in a store.
+        """
+        self._check_stop()
+        self.control.interruptible = True
+        try:
+            return await open_await()
+        finally:
+            self.control.interruptible = False
+
+    async def _guarded(self, chunks: AsyncIterator[Any]) -> AsyncIterator[Any]:
+        """The model stream with every wait for the next chunk a region; each
+        chunk is handed on with the flag cleared."""
+        while True:
+            try:
+                chunk = await self._interruptible(lambda: anext(chunks))
+            except StopAsyncIteration:
+                return
+            yield chunk
+
+    async def _end_stopped(self) -> None:
+        """Close the stream a check stopped, then store the stopped answer."""
+        chunks, self._chunks = self._chunks, None
+        if chunks is not None:
+            try:
+                # Ends the provider's response, so it sends no more.
+                await chunks.aclose()  # type: ignore[attr-defined]
+            except Exception:
+                logger.exception("Could not close a stopped model stream")
+        try:
+            await self._store_stopped()
+        except Exception:
+            logger.exception("Could not store a stopped answer")
+            await self.session.rollback()
+        self._end_stored = True
+
+    async def _store_stopped(self) -> None:
+        """Store what a stopped turn leaves, from where the stop landed.
+
+        Runs in the turn's own task, never shielded: nothing cancels it a
+        second time. The values it needs are read before the rollback, which
+        drops anything a cancelled connector call added and expires every
+        loaded object; the conversation is then loaded again.
+        """
+        at = self._at
+        state = self._in_flight if at.kind == "stream" else None
+        conversation_id = self.conversation_id
+        await self.session.rollback()
+        await self.session.refresh(self.conversation)
+        if state is not None:
+            # The round in flight has no usage row yet (decision 4).
+            await self._record_stopped_usage(state)
+        position = await next_position(self.session, conversation_id)
+        if at.kind == "tool":
+            # Every tool call gets a result, as the next request needs.
+            for offset, (call_id, name) in enumerate(at.calls[at.index :]):
+                cut = offset == 0 and at.in_flight
+                self.session.add(
+                    Message(
+                        conversation_id=conversation_id,
+                        position=position,
+                        role="tool",
+                        tool_call_id=call_id,
+                        content=may_have_run(name) if cut else NOT_RUN,
+                        details={"stopped": True},
+                    )
+                )
+                position += 1
+        # Calls the model was still sending when the stream stopped are not
+        # stored as calls; their names keep the chat's tool lines.
+        cut_off = (
+            [call["name"] for _, call in sorted(state.calls.items()) if call["name"]]
+            if state is not None
+            else []
+        )
+        self.session.add(
+            Message(
+                conversation_id=conversation_id,
+                position=position,
+                role="assistant",
+                content=(state.answer or None) if state is not None else None,
+                status="stopped",
+                error_code=ErrorCode.ANSWER_STOPPED,
+                details={"stopped_tools": cut_off} if cut_off else None,
+            )
+        )
+        await self.session.commit()
+
+    async def _record_stopped_usage(self, state: RoundState) -> None:
+        """Record a stopped round from what the provider reported so far,
+        else from estimates (design decision 4). A provider that reports no
+        usage keeps the tokens unknown."""
+        received = estimate_text_tokens(
+            state.answer + "".join(call["arguments"] for _, call in sorted(state.calls.items()))
+        )
+        prompt: int | None
+        completion: int | None
+        if not self.call.reports_usage:
+            prompt = completion = None
+        elif state.prompt_tokens is not None:
+            prompt = state.prompt_tokens
+            completion = max(state.completion_tokens or 0, received)
+        else:
+            prompt = estimate_tokens(self.context, self.tools)
+            completion = received
+        await record_usage(
+            self.session,
+            self.call,
+            "chat",
+            prompt,
+            completion,
+            self.conversation_id,
+            info=self.info,
+        )
 
     async def store_interrupted(self) -> None:
         """Store a cancelled turn's answer as failed with `answer_interrupted`.
@@ -401,8 +596,7 @@ class Turn:
         """
         if not self.interrupted:
             return
-        # Read before the rollback, which expires every loaded object.
-        conversation_id = self.conversation.id
+        conversation_id = self.conversation_id
         # The cancel may have hit a write part way.
         await self.session.rollback()
         last = await last_message(self.session, conversation_id)
@@ -418,20 +612,32 @@ class Turn:
         last_answer: Message | None = None
         for round_number in range(self.tool_rounds):
             self.tool_state.last_round = round_number == self.tool_rounds - 1
+            state = RoundState()
             if round_number == 0:
                 assert self._first_chunks is not None, "open() first"
                 chunks = self._first_chunks
+                self._at = StopPoint("stream")
+                self._in_flight = state
             else:
                 assert last_answer is not None
+                # The cap first: its query awaits, and a stop that lands
+                # during it is still seen by the check after it.
                 await self._check_cap(last_answer)
-                chunks = await self.call.stream(self.context, **self._options(round_number))
+                self._at = StopPoint("round")
+                self._check_stop()
+                self._at = StopPoint("stream")
+                self._in_flight = state
+                options = self._options(round_number)
+                chunks = await self._interruptible(
+                    lambda: self.call.stream(self.context, **options)
+                )
 
-            state = RoundState()
-            self._in_flight = state
+            self._chunks = chunks
             async for event in read_round(
-                chunks, state, self.call.provider.capabilities.stream_usage
+                self._guarded(chunks), state, self.call.provider.capabilities.stream_usage
             ):
                 yield event
+            self._chunks = None
             async for event in self._note_usage(state):
                 yield event
 
@@ -457,7 +663,10 @@ class Turn:
             self.context.append(
                 {"role": "assistant", "content": state.answer, "tool_calls": calls}
             )
-            for tool_call in calls:
+            named = [(call["id"], call["function"]["name"]) for call in calls]
+            for index, tool_call in enumerate(calls):
+                self._at = StopPoint("tool", named, index)
+                self._check_stop()
                 async for event in self._run_tool(tool_call, last_answer.position):
                     yield event
 
@@ -485,7 +694,7 @@ class Turn:
         usage, and send the usage warning when it is due."""
         if state.prompt_tokens is not None:
             self.conversation.last_prompt_tokens = state.prompt_tokens
-            info = await self.call.info()
+            info = self.info
             usage: dict[str, Any] = {
                 "prompt_tokens": state.prompt_tokens,
                 "completion_tokens": state.completion_tokens or 0,
@@ -507,7 +716,7 @@ class Turn:
         usage is then recorded without it, as a deleted conversation's
         records are kept, and the turn ends: there is nothing left to answer.
         """
-        conversation_id = self.conversation.id
+        conversation_id = self.conversation_id
         try:
             return await record_usage(
                 self.session,
@@ -516,6 +725,7 @@ class Turn:
                 state.prompt_tokens,
                 state.completion_tokens,
                 conversation_id,
+                info=self.info,
             )
         except Exception:
             await self.session.rollback()
@@ -525,12 +735,17 @@ class Turn:
             if exists is not None:
                 raise
         await record_usage(
-            self.session, self.call, "chat", state.prompt_tokens, state.completion_tokens
+            self.session,
+            self.call,
+            "chat",
+            state.prompt_tokens,
+            state.completion_tokens,
+            info=self.info,
         )
         raise not_found()
 
     async def _suggest_compact(self) -> AsyncIterator[Event]:
-        info = await self.call.info()
+        info = self.info
         notice = compact_suggestion(
             self._tokens_before,
             self.conversation.last_prompt_tokens,
@@ -552,8 +767,7 @@ class Turn:
         if self._end_stored:
             return
         try:
-            # Read before the rollback, which expires every loaded object.
-            conversation_id = self.conversation.id
+            conversation_id = self.conversation_id
             # The error may have hit a write part way.
             await self.session.rollback()
             last = await last_message(self.session, conversation_id)
@@ -588,11 +802,11 @@ class Turn:
         message, whose position it takes."""
         target = provider.action_target(name)
         action = new_action(
-            self.conversation.id,
+            self.conversation_id,
             self.user.id,
             target,
             arguments,
-            await next_position(self.session, self.conversation),
+            await next_position(self.session, self.conversation_id),
         )
         self.session.add(action)
         return ToolOutcome(
@@ -609,6 +823,16 @@ class Turn:
             provider = self._provider_for(name)
             if provider.needs_approval(name, self.tool_state):
                 outcome = await self._hold(provider, name, arguments)
+            elif provider.reaches_server(name, self.tool_state):
+                # A connector call that may reach its server: a region a
+                # stop cancels, after which the call may have run (design
+                # decision 12).
+                self._check_stop()
+                self._at.in_flight = True
+                outcome = await self._interruptible(
+                    lambda: provider.call(name, arguments, self.tool_state)
+                )
+                self._at.in_flight = False
             else:
                 outcome = await provider.call(name, arguments, self.tool_state)
         except ToolRefusal as exc:
@@ -629,10 +853,11 @@ class Turn:
                 summary="The tool call was not valid",
             )
 
-        for event in outcome.events:
-            yield event
         # The chat's line is stored too, so a reload shows the same
-        # (thought-status design decision 5).
+        # (thought-status design decision 5). The commit also holds what the
+        # provider added (a proposal, a pending action), before its card is
+        # sent: a card the chat shows is always stored, and a stop during
+        # the call or the commit still lets the card out (design decision 3).
         await self._store(
             role="tool",
             tool_call_id=tool_call["id"],
@@ -642,6 +867,8 @@ class Turn:
         self.context.append(
             {"role": "tool", "tool_call_id": tool_call["id"], "content": outcome.result}
         )
+        for event in outcome.events:
+            yield event
         end: dict[str, Any] = {"name": name, "phase": "end", "summary": outcome.summary}
         if outcome.failed:
             end["failed"] = True

@@ -19,6 +19,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import Literal
 
 import anyio
 
@@ -28,6 +29,29 @@ from app.errors import answer_interrupted
 logger = logging.getLogger(__name__)
 
 Settle = Callable[[], Awaitable[None]]
+
+CancelReason = Literal["stop", "shutdown"]
+
+# How long shutdown and `stop_turns` wait for turns to end. Read at call
+# time, so a test can lower it.
+STOP_WAIT_SECONDS = 5.0
+
+
+@dataclass
+class TurnControl:
+    """What a running turn and its registry entry share (stop-and-spend-cap
+    design decisions 1 and 3).
+
+    The turn sets `interruptible` only while it awaits the next chunk of the
+    model stream, opens a later round's call, or awaits a connector call that
+    may reach its server, and checks `stop_requested` right before it sets
+    the flag, with no await in between. `cancel_reason` is the reason of the
+    one cancel the entry sent, so the turn knows a stop from a shutdown.
+    """
+
+    interruptible: bool = False
+    stop_requested: bool = False
+    cancel_reason: CancelReason | None = None
 
 
 @dataclass(eq=False)
@@ -41,8 +65,41 @@ class RunningTurn:
     events: list[Event] = field(default_factory=list)
     ended: bool = False
     task: asyncio.Task | None = None
+    # Shared with the turn: its stop flags and the reason of the cancel.
+    control: TurnControl = field(default_factory=TurnControl)
+    # A turn's task is cancelled at most once, by a stop or by shutdown.
+    cancel_sent: bool = False
     # Set and replaced on every change, so a waiting subscriber wakes once.
     _changed: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def stop(self) -> None:
+        """Ask the turn to stop. Never waits.
+
+        The first call sets `stop_requested`; a later one does nothing more.
+        The task is cancelled only while the turn is interruptible: anywhere
+        else it sees the flag at its next check and ends there. The flag is
+        read and the cancel sent in this one step, which no turn step can
+        interleave with.
+        """
+        if self.ended or self.control.stop_requested:
+            return
+        self.control.stop_requested = True
+        if self.control.interruptible and not self.cancel_sent:
+            self._cancel("stop")
+
+    def shutdown(self) -> None:
+        """Cancel the turn for a server shutdown, unless it was already
+        cancelled or is stopping: a turn that is stopping is only awaited."""
+        if self.ended or self.cancel_sent or self.control.stop_requested:
+            return
+        self._cancel("shutdown")
+
+    def _cancel(self, reason: CancelReason) -> None:
+        if self.task is None:
+            return
+        self.cancel_sent = True
+        self.control.cancel_reason = reason
+        self.task.cancel()
 
     def append(self, event: Event) -> None:
         self.events.append(event)
@@ -94,13 +151,17 @@ def start(
     after_position: int,
     events: AsyncIterator[Event],
     settle: Settle,
+    control: TurnControl | None = None,
 ) -> RunningTurn:
     """Run a turn's events in the background and return its registry entry.
 
     `settle` closes the model call, commits, releases the claim, and closes
-    the session. It runs once the events end, however they end.
+    the session. It runs once the events end, however they end. `control`
+    is the turn's own (`Turn.control`), so a stop reaches it.
     """
     turn = RunningTurn(conversation_id, user_id, after_position)
+    if control is not None:
+        turn.control = control
     _running[conversation_id] = turn
     turn.task = asyncio.create_task(_run(turn, events, settle))
     return turn
@@ -112,10 +173,12 @@ async def _run(turn: RunningTurn, events: AsyncIterator[Event], settle: Settle) 
         async for event in events:
             turn.append(event)
     except asyncio.CancelledError:
-        # Only shutdown cancels a turn: its followers learn it did not finish.
+        # A cancel the turn did not turn into a stop (shutdown): its
+        # followers learn it did not finish.
         terminal = terminal_event(answer_interrupted())
         raise
     except Exception as exc:
+        # A stopped turn ends here too, with `answer_stopped`.
         terminal = terminal_event(exc)
     finally:
         await shielded(_settle(turn, settle, terminal))
@@ -155,19 +218,44 @@ async def follow(turn: RunningTurn) -> AsyncIterator[Event]:
         await changed.wait()
 
 
-async def shutdown(timeout: float) -> None:
-    """Cancel every running turn and wait, at most `timeout` seconds, for each
-    to store its interrupted answer and release its claim.
+async def shutdown(timeout: float | None = None) -> None:
+    """Cancel every running turn and wait, at most `timeout` seconds
+    (`STOP_WAIT_SECONDS` by default), for each to store its answer and
+    release its claim.
 
-    A turn left after the wait is left to the startup sweep of the next start.
+    A turn that is stopping, or was cancelled already, is not cancelled
+    again (`RunningTurn.shutdown`): it is only awaited. A turn left after the
+    wait is left to the startup sweep of the next start.
     """
     # Let a turn started just now take its first step: a task cancelled
     # before it starts never runs its `finally`.
     await asyncio.sleep(0)
-    tasks = [turn.task for turn in _running.values() if turn.task is not None]
-    for task in tasks:
-        task.cancel()
-    pending = set(tasks) | _settling
+    turns = list(_running.values())
+    for turn in turns:
+        turn.shutdown()
+    pending = {turn.task for turn in turns if turn.task is not None} | _settling
     if pending:
         # `wait`, not `wait_for`: a turn that runs over is not cancelled again.
-        await asyncio.wait(pending, timeout=timeout)
+        await asyncio.wait(pending, timeout=STOP_WAIT_SECONDS if timeout is None else timeout)
+
+
+async def stop_turns(user_id: uuid.UUID, conversation_id: uuid.UUID | None = None) -> None:
+    """Stop the user's running turns (or the one of that conversation), and
+    wait, at most `STOP_WAIT_SECONDS`, for them to end (design decision 13).
+
+    Each turn ends through its stopped store, which commits its answer and
+    the round's usage while the conversation still exists. The wait sends no
+    cancel of its own: a turn still running after it is left running, and the
+    caller's claim then finds it busy.
+    """
+    turns = [
+        turn
+        for turn in _running.values()
+        if turn.user_id == user_id
+        and (conversation_id is None or turn.conversation_id == conversation_id)
+    ]
+    for turn in turns:
+        turn.stop()
+    tasks = {turn.task for turn in turns if turn.task is not None and not turn.task.done()}
+    if tasks:
+        await asyncio.wait(tasks, timeout=STOP_WAIT_SECONDS)
