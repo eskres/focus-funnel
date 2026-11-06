@@ -343,6 +343,14 @@ Tests that read the end line still call `caplog.set_level(logging.INFO, logger="
 
 **Alternatives:** the end line at WARNING (rejected: a complete export is no warning, and the cleanup line would stay hidden); `--log-config` in the Dockerfile (rejected: the compose files, `uv run uvicorn` in development, and the tests start the app in different ways, and the code is the one place they share); `logging.basicConfig(level=logging.INFO)` (rejected: it turns on INFO for every library, such as `httpx`, which logs each request's URL, provider calls included).
 
+### 18. The `GET` keeps its two reads; `thought_view()` takes the additions already built
+
+Decision 3 says the `GET` keeps the read `thought-appending` planned for it, "one join, like `origin`". As built, `thought-appending` reads them in two statements on the request's session: `get_thought_with_origin()` (the thought, its proposal's time, and its conversation, in one outer join) and then `list_additions()`. This change keeps exactly that read, so the `GET` runs the same statements as before (four, with the user's upsert and lookup; a test pins that number and one statement each on `thoughts` and `thought_additions`), and it adds no new READ COMMITTED gap: the gap between the two reads was already there. Folding them into one statement is not this change's job, and would change `thought-appending`'s code and its query-count test.
+
+`thought_view(thought, origin, additions)` takes `origin` as the store's `ThoughtOrigin` (or None) and `additions` as a list of the router's addition model, already built by `addition_view(row)`. `addition_view()` reads `id`, `added_at`, `undone`, `conversation_id`, `conversation_title`, and `proposal_id` by attribute, so it takes `thought-appending`'s `AdditionOut` dataclass and a labelled `Row` from the export's batched query alike. The task 1.1 tests sit at the end of `tests/test_thought_additions.py`, which has the fixtures for a thought with an origin and an addition; a small unit test of the two functions is in `tests/test_thought_view.py`.
+
+**Alternatives:** one statement for thought, origin, and additions in the `GET` (rejected here: it changes `thought-appending`'s read and test for no gain to the export); `thought_view()` taking raw addition rows and calling `addition_view()` itself (rejected: the export builds the additions per thought from one batched query, and the `GET` from its own list; passing built models keeps one mapping for each).
+
 ## Risks / Trade-offs
 
 - [Not a snapshot: edits and deletes while the export runs show up in later batches] → Each thought is whole and current as of its batch. `exported_at` says when the export started. A user who wants a fixed copy exports while not editing. Deleting all content or the account, or ending the demo, during an export ends that export as failed (decision 15).
