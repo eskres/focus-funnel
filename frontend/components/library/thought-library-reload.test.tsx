@@ -574,6 +574,9 @@ describe("the Library reload", () => {
 
     more.release(page(rows(51, 50), "c2"));
     await settle();
+    // The older Show more answer is dropped: nothing is added while the reload runs.
+    expect(rowButtons()).toHaveLength(50);
+    expect(screen.queryByRole("button", { name: "Thought 51" })).not.toBeInTheDocument();
     reload.release(page(rows(1, 50), "c1"));
     await waitFor(() => expect(showMoreButton()).toBeEnabled());
 

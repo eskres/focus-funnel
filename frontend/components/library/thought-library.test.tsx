@@ -251,6 +251,23 @@ describe("the Library list", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("repeats a failed filtered first load with the same filters on Try again", async () => {
+    listed()
+      .mockResolvedValueOnce(page(rows(1, 5)))
+      .mockRejectedValueOnce(failure("internal_error", "Something went wrong.", 500))
+      .mockResolvedValueOnce(page([row(1, { status: "done" })]));
+    await openPage();
+    choose("Status", "done");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => expect(titles()).toEqual(["Thought 1"]));
+    expect(listCalls()).toEqual([[{}], [{ status: "done" }], [{ status: "done" }]]);
+    expect(field("Status")).toHaveValue("done");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   for (const button of ["Try again", "Show more"]) {
     it(`keeps the rows when Show more fails, and ${button} sends the same request`, async () => {
       listed()
@@ -273,8 +290,11 @@ describe("the Library list", () => {
       fireEvent.click(screen.getByRole("button", { name: button }));
 
       await waitFor(() => expect(rowButtons()).toHaveLength(100));
+      await settle();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-      expect(listCalls().slice(-2)).toEqual([
+      expect(listCalls()).toEqual([
+        [{}],
+        [{ status: "open" }],
         [{ status: "open" }, "c1"],
         [{ status: "open" }, "c1"],
       ]);
@@ -398,6 +418,23 @@ describe("the Library filters", () => {
     expect(showMoreButton()).toBeEnabled();
   });
 
+  it("drops a Show more answer for an older filter that arrives after the change", async () => {
+    fakeLibrary([...rows(1, 3, { category: "task" }), ...rows(4, 60)]);
+    listed().mockResolvedValueOnce(page(rows(4, 50), "c1"));
+    await openPage();
+    const more = holdList();
+    fireEvent.click(showMoreButton()!);
+
+    choose("Category", "task");
+    await waitFor(() => expect(titles()).toEqual(["Thought 1", "Thought 2", "Thought 3"]));
+    more.release(page(rows(54, 10), "c2"));
+    await settle();
+
+    expect(titles()).toEqual(["Thought 1", "Thought 2", "Thought 3"]);
+    expect(showMoreButton()).not.toBeInTheDocument();
+    expect(field("Category")).toHaveValue("task");
+  });
+
   it("drops an answer for an older filter that arrives after the change", async () => {
     listed().mockResolvedValueOnce(page(rows(1, 5)));
     await openPage();
@@ -470,6 +507,21 @@ describe("the Library filters", () => {
     await waitFor(() => expect(listed()).toHaveBeenCalledTimes(2));
     await settle();
     expect(listCalls()).toEqual([[{}], [{ filed_from: "2026-11-01" }]]);
+  });
+
+  it.each([
+    ["Filed from", "9999-01-01"],
+    ["Filed to", "9999-12-31"],
+    ["Filed to", "1899-12-31"],
+  ])("does not apply %s = %s, outside the days the server takes", async (label, value) => {
+    fakeLibrary(TASKS);
+    await openPage();
+
+    choose(label, value);
+    await settle();
+
+    expect(listCalls()).toEqual([[{}]]);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("lists again with no filed_from when the field is emptied, and not when it was empty", async () => {
