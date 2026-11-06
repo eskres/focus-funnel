@@ -486,3 +486,25 @@ def test_a_proposal_with_every_part_saved_is_not_marked_replaced(
     assert event["replaces"] is None
     replaced = {p["id"]: p["replaced_by"] for p in stored(client, alice, conversation_id)["proposals"]}
     assert replaced[old_id] is None
+
+
+def test_the_proposal_event_comes_before_its_tool_end_and_is_stored_by_then(
+    client, alice, fake_llm, test_database_url
+):
+    """The proposal and its tool message are committed before the card is
+    sent (stop-and-spend-cap design decision 3); the event order stays
+    `proposal`, then the tool's end."""
+    ready_user(client, alice)
+    fake_llm.queue(
+        tool_call_chunks("propose_thought", json.dumps({"thoughts": [PROPOSAL]})),
+        text_chunks("Filed it."),
+    )
+
+    response = chat(client, alice, "/push I need oat milk")
+
+    events = parse_events(response.text)
+    tools = [(name, data.get("phase")) for name, data in events if name in ("proposal", "tool")]
+    assert tools == [("tool", "start"), ("proposal", None), ("tool", "end")]
+    [event] = proposal_events(response)
+    conversation_id = events[0][1]["id"]
+    assert [str(p.id) for p in proposals(test_database_url, conversation_id)] == [event["id"]]

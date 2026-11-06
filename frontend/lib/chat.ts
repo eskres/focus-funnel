@@ -1,7 +1,7 @@
 // Sends a chat message to `POST /api/chat` and streams the answer back.
 // The browser uses `fetch` and a stream reader rather than `EventSource`,
 // because `EventSource` cannot send a request body.
-import { BackendUnreachableError, toApiError } from "@/lib/api";
+import { BackendUnreachableError, apiFetch, toApiError } from "@/lib/api";
 import { parseSse, type SseEvent } from "@/lib/sse";
 import { browserTimeZone } from "@/lib/time-zone";
 
@@ -44,12 +44,14 @@ export type ChatRequest = {
  * starts. If the message was stored anyway, `onStored` gets the conversation
  * id first. Once the stream has started, an `error` event is yielded instead.
  * A failure while reading the stream is thrown as it is, so the caller can
- * tell a cut-off answer from a refused request.
+ * tell a cut-off answer from a refused request. `onOpen` is called once the
+ * server has answered with the stream, before its first event.
  */
 export async function* streamChat(
   request: ChatRequest,
   signal?: AbortSignal,
   onStored?: (conversationId: string) => void,
+  onOpen?: () => void,
 ): AsyncGenerator<SseEvent, void, undefined> {
   // The browser's zone, so the model's "today" is the user's local day.
   const body: Record<string, unknown> = { message: request.message, time_zone: browserTimeZone() };
@@ -86,6 +88,7 @@ export async function* streamChat(
     if (stored) onStored?.(stored);
     throw await toApiError(response);
   }
+  onOpen?.();
   if (!response.body) return;
   yield* parseSse(response.body);
 }
@@ -98,11 +101,13 @@ export async function* streamChat(
  *
  * Throws an `ApiError` subclass when the request is refused, for example
  * `NotFoundError` for a conversation that is not the user's. Aborting `signal`
- * stops following; the answer itself keeps running on the server.
+ * stops following; the answer itself keeps running on the server. `onOpen`
+ * is called once the running answer's stream has opened.
  */
 export async function* followTurn(
   conversationId: string,
   signal?: AbortSignal,
+  onOpen?: () => void,
 ): AsyncGenerator<SseEvent, void, undefined> {
   let response: Response;
   try {
@@ -120,6 +125,20 @@ export async function* followTurn(
   }
   if (response.status === 204) return;
   if (!response.ok) throw await toApiError(response);
+  onOpen?.();
   if (!response.body) return;
   yield* parseSse(response.body);
+}
+
+/**
+ * Asks the server to stop the conversation's running answer
+ * (`POST /api/chat/{id}/stop`). The server answers 204 at once, whether or
+ * not an answer was running; the answer's own stream then ends with its
+ * terminal event. Throws an `ApiError` subclass when refused, for example
+ * `NotFoundError` for a conversation that is not the user's.
+ */
+export async function stopTurn(conversationId: string): Promise<void> {
+  await apiFetch<void>(`/api/chat/${encodeURIComponent(conversationId)}/stop`, {
+    method: "POST",
+  });
 }

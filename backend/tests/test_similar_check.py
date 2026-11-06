@@ -612,7 +612,7 @@ def test_a_card_confirmed_while_the_turn_runs_does_not_renumber_its_candidates(
         if not confirmed:
             # As confirm_proposal leaves it: the part names the thought, seen now.
             proposal = await session.get(Proposal, uuid.UUID(older))
-            seen = await next_position(session, conversation)
+            seen = await next_position(session, conversation.id)
             proposal.parts = [
                 {**proposal.parts[0], "thought_id": ids["dentist"], "seen_position": seen}
             ]

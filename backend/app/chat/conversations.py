@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, or_, select, update
@@ -10,7 +11,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from app.chat.config import ChatConfig
 from app.chat.loadout import find_loadout_model
-from app.errors import ApiError, ErrorCode, conversation_busy
+from app.errors import ApiError, ErrorCode, conversation_busy, turns_busy
 from app.models import ChatModel, Conversation, Message, User
 from app.ownership import get_owned_or_404
 
@@ -110,10 +111,12 @@ async def list_messages(session: AsyncSession, conversation: Conversation) -> li
     )
 
 
-async def next_position(session: AsyncSession, conversation: Conversation) -> int:
+async def next_position(session: AsyncSession, conversation_id: uuid.UUID) -> int:
+    """The position after the conversation's last message. Takes the id, not
+    the `Conversation`, so a turn can call it after a rollback expired it."""
     highest = (
         await session.execute(
-            select(func.max(Message.position)).where(Message.conversation_id == conversation.id)
+            select(func.max(Message.position)).where(Message.conversation_id == conversation_id)
         )
     ).scalar_one()
     return 0 if highest is None else highest + 1
@@ -124,10 +127,16 @@ async def next_position(session: AsyncSession, conversation: Conversation) -> in
 TURN_CLAIM_TIMEOUT = timedelta(minutes=15)
 
 
-async def claim_turn(session: AsyncSession, conversation: Conversation) -> None:
-    """Mark a turn as running, or raise conversation_busy if one already is.
+async def claim_turn(
+    session: AsyncSession,
+    conversation: Conversation,
+    busy: Callable[[], ApiError] = conversation_busy,
+) -> None:
+    """Mark a turn as running, or raise `busy()` (conversation_busy) if one
+    already is.
 
-    One atomic update, so two requests cannot both win.
+    One atomic update, so two requests cannot both win. A delete passes its
+    own busy error (design decision 13).
     """
     started = now()
     result = await session.execute(
@@ -144,13 +153,50 @@ async def claim_turn(session: AsyncSession, conversation: Conversation) -> None:
     )
     if result.rowcount != 1:
         await session.rollback()
-        raise conversation_busy()
+        raise busy()
     await session.commit()
     # Set as already stored: a plain assignment would make the next flush
     # write the claim again and hold that write open (a row lock, or SQLite's
     # database lock) until the session commits, which a /compact draft does
     # only when it ends.
     set_committed_value(conversation, "turn_started_at", started)
+
+
+async def claim_user_turns(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Claim every conversation of the user in the open transaction, or roll
+    back and raise turns_busy when one is still claimed (design decision 13).
+
+    A bulk delete calls it after `stop_turns`, then deletes in the same
+    transaction, so the claims never outlive it. The count after the update
+    also sees a message that holds a claim but is not running yet, and a
+    conversation another tab created and claimed in between.
+    """
+    stamp = now()
+    await session.execute(
+        update(Conversation)
+        .where(
+            Conversation.user_id == user_id,
+            or_(
+                Conversation.turn_started_at.is_(None),
+                Conversation.turn_started_at < stamp - TURN_CLAIM_TIMEOUT,
+            ),
+        )
+        .values(turn_started_at=stamp)
+        .execution_options(synchronize_session=False)
+    )
+    busy = (
+        await session.execute(
+            select(func.count())
+            .select_from(Conversation)
+            .where(
+                Conversation.user_id == user_id,
+                Conversation.turn_started_at.is_distinct_from(stamp),
+            )
+        )
+    ).scalar_one()
+    if busy:
+        await session.rollback()
+        raise turns_busy()
 
 
 async def release_turn(session: AsyncSession, conversation_id: uuid.UUID) -> None:

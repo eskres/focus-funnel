@@ -523,22 +523,35 @@ async def test_a_compact_claim_is_not_a_running_turn(async_api):
 
 
 async def test_deleting_a_conversation_while_its_turn_runs_keeps_the_usage(async_api):
+    """The delete stops the turn first (stop-and-spend-cap design decision
+    13): the stopped round is recorded with estimated tokens while the
+    conversation exists, and the delete then keeps the row without it."""
+    from app.chat.prompt import estimate_text_tokens
+
     api = async_api
     await api.ready()
     conversation_id, hold = await held_turn(api)
     turn = running.get(uuid.UUID(conversation_id))
 
     deleted = await api.http.delete(f"/api/conversations/{conversation_id}", headers=api.headers)
+    # Answered once the turn has ended, not before.
     assert deleted.status_code == 204
+    assert turn.ended
     hold.release.set()
     await turns_settled()
 
     # The call that was running is recorded, without its conversation, and
     # the turn makes no further call.
     [row] = await usage_rows(api)
-    assert (row.kind, row.conversation_id, row.prompt_tokens) == ("chat", None, 100)
+    assert (row.kind, row.conversation_id) == ("chat", None)
+    assert row.prompt_tokens > 0
+    assert row.completion_tokens == estimate_text_tokens("Hello ")
+    assert row.cost_usd is not None
     assert len(api.fake.chat_requests) == 1
-    assert turn.events[-1] == ("error", {"error": {"code": ErrorCode.NOT_FOUND, "message": "Not found."}})
+    assert turn.events[-1] == (
+        "error",
+        {"error": {"code": ErrorCode.ANSWER_STOPPED, "message": "You stopped this answer."}},
+    )
     assert await messages_of(api, conversation_id) == []
 
 

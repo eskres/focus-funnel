@@ -43,7 +43,7 @@ from app.chat.refs import (
 )
 from app.chat.similar import Check, candidates_note, check_parts, with_similar
 from app.chat.tools import ProposalPart, ToolArgumentError, ToolRefusal, parse_proposal
-from app.chat.usage import completion_usage, record_usage
+from app.chat.usage import cap_state, completion_usage, record_usage
 from app.config import Settings
 from app.errors import model_not_set
 from app.models import Conversation, Message, Proposal, Thought, User
@@ -564,6 +564,11 @@ async def offer_proposal(
     # Nothing said since the last saved proposal: nothing new to file.
     start = discussion_start(proposals)
     if not any(m.role == "user" and not m.compacted and m.position >= start for m in messages):
+        return None
+    # At the spend cap no model is asked, and the action goes ahead with no
+    # offer (stop-and-spend-cap design decision 9).
+    cap = await cap_state(session, user.id)
+    if cap is not None and cap.reached:
         return None
 
     if conversation.model is None:

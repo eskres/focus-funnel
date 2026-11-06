@@ -33,10 +33,6 @@ from app.setup.state import open_setup
 from app.thoughts import check_vector_extension
 from app.thoughts.embeddings import check_embedding_provider
 
-# How long shutdown waits for cancelled chat turns to store their answers.
-TURN_SHUTDOWN_TIMEOUT = 5.0
-
-
 async def prune_operator_connectors(config: ConnectorConfig) -> None:
     """Remove every user's rows for operator connectors no longer configured,
     so conversations drop them at once (openspec mcp-connectors decision 4)."""
@@ -66,8 +62,10 @@ async def lifespan(app: FastAPI):
     if settings.auth_mode == "demo":
         cleanup = asyncio.create_task(cleanup_loop(get_sessionmaker))
     yield
-    # Running turns store what they have as interrupted and free their claims.
-    await running.shutdown(TURN_SHUTDOWN_TIMEOUT)
+    # Running turns store what they have as interrupted and free their
+    # claims; a turn that is stopping is only awaited. The wait is bounded by
+    # running.STOP_WAIT_SECONDS.
+    await running.shutdown()
     if cleanup is not None:
         cleanup.cancel()
         with suppress(asyncio.CancelledError):

@@ -148,6 +148,11 @@ def usage_chunk(prompt_tokens: int = 100, completion_tokens: int = 20) -> dict:
 class _SseStream(httpx2.AsyncByteStream):
     def __init__(self, items: list):
         self._items = items
+        # Set when the response is closed: read to its end, or cut early.
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
 
     async def __aiter__(self):
         for item in self._items:
@@ -189,7 +194,11 @@ class FakeLLM(FakeProvider):
         self.replies = list(replies or [])
         self.models = models if models is not None else MODEL_LIST
         self.chat_requests: list[dict] = []
+        # The streamed replies' bodies, in order, to see whether each was closed.
+        self.streams: list[_SseStream] = []
         self.model_list_calls = 0
+        # While set, /models answers only once the event is set.
+        self.models_gate: asyncio.Event | None = None
         # /embeddings answers with this embedder unless a reply is queued.
         self.embedder = concept_embedder()
         self.embed_replies: list[Reply] = []
@@ -202,6 +211,8 @@ class FakeLLM(FakeProvider):
     def _route(self, request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith("/models"):
             self.model_list_calls += 1
+            if self.models_gate is not None:
+                return self._gated_models(self.models_gate)
             return httpx2.Response(200, json=self.models)
         if request.url.path.endswith("/embeddings"):
             return self._embed(request)
@@ -216,11 +227,21 @@ class FakeLLM(FakeProvider):
             if isinstance(reply, httpx2.Response):
                 return reply
             if isinstance(reply, list):
+                stream = _SseStream(reply)
+                self.streams.append(stream)
                 return httpx2.Response(
-                    200, headers={"content-type": "text/event-stream"}, stream=_SseStream(reply)
+                    200, headers={"content-type": "text/event-stream"}, stream=stream
                 )
             return httpx2.Response(200, json=reply)
         return httpx2.Response(404, json={"error": {"message": "no route"}})
+
+    async def _gated_models(self, gate: asyncio.Event) -> httpx2.Response:
+        await gate.wait()
+        return httpx2.Response(200, json=self.models)
+
+    def embedding(self, request: httpx2.Request) -> httpx2.Response:
+        """The default /embeddings answer, for a reply that wraps it."""
+        return self._embed_default(request)
 
     def _embed(self, request: httpx2.Request) -> httpx2.Response:
         body = json.loads(request.content)
@@ -230,6 +251,10 @@ class FakeLLM(FakeProvider):
             if callable(reply) and not isinstance(reply, httpx2.Response):
                 return reply(request)
             return reply
+        return self._embed_default(request)
+
+    def _embed_default(self, request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
         texts = body["input"] if isinstance(body["input"], list) else [body["input"]]
         tokens = sum(len(words(text)) for text in texts)
         return httpx2.Response(

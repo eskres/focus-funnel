@@ -18,6 +18,8 @@ const SETUP_TOKEN_HEADER = "x-setup-token";
 
 // Response headers passed back to the browser. Everything else (Set-Cookie,
 // WWW-Authenticate, Server, hop-by-hop and encoding headers) is dropped.
+// `x-conversation-id` names the conversation a refused message was stored in
+// (the caller's own id), so the chat can send to it again.
 const FORWARDED_RESPONSE_HEADERS = [
   "content-disposition",
   "content-language",
@@ -25,6 +27,7 @@ const FORWARDED_RESPONSE_HEADERS = [
   "etag",
   "last-modified",
   "retry-after",
+  "x-conversation-id",
 ];
 
 type ProxyContext = RouteContext<"/api/[...path]">;

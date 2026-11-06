@@ -12,7 +12,7 @@ from app.db import get_session
 from app.demo import now, start_session
 from app.models import User
 from app.ownership import not_found
-from app.user_data import delete_user_data
+from app.user_data import delete_user_data, stop_and_claim
 
 
 def require_demo_mode(settings: Settings = Depends(get_settings)) -> None:
@@ -43,6 +43,9 @@ async def end_demo_session(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
+    # The visitor's running answers stop first, so no request is made with
+    # their key once the session has ended (design decision 13).
+    await stop_and_claim(session, user.id)
     await delete_user_data(session, user)
     return Response(status_code=204)
 

@@ -17,10 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth import Authenticator, Identity, unauthenticated
 from app.config import Settings
-from app.errors import demo_full, demo_session_expired
+from app.errors import ApiError, demo_full, demo_session_expired
 from app.models import User
 from app.models.user import DEMO_ISSUER
-from app.user_data import delete_user_data
+from app.user_data import delete_user_by_id, stop_and_claim
 
 logger = logging.getLogger(__name__)
 
@@ -88,14 +88,29 @@ class DemoAuthenticator(Authenticator):
 
 
 async def delete_expired_demo_users(session: AsyncSession) -> int:
-    expired = (
-        await session.execute(
-            select(User).where(User.issuer == DEMO_ISSUER, User.expires_at <= now())
-        )
-    ).scalars().all()
-    for user in expired:
-        await delete_user_data(session, user)
-    return len(expired)
+    """Delete every expired visitor; returns how many were deleted.
+
+    A visitor's running answers stop first. One whose answer still holds a
+    claim after the wait is skipped and deleted on a later pass (design
+    decision 13).
+    """
+    expired = list(
+        (
+            await session.execute(
+                select(User.id).where(User.issuer == DEMO_ISSUER, User.expires_at <= now())
+            )
+        ).scalars()
+    )
+    deleted = 0
+    for user_id in expired:
+        try:
+            await stop_and_claim(session, user_id)
+        except ApiError:
+            logger.info("Skipped an expired demo session whose answer is still running")
+            continue
+        await delete_user_by_id(session, user_id)
+        deleted += 1
+    return deleted
 
 
 async def cleanup_loop(

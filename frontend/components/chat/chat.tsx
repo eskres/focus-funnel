@@ -39,6 +39,7 @@ import {
   followTurn,
   isCompactCommand,
   isDeleteCommand,
+  stopTurn,
   streamChat,
   type ModelChoice,
 } from "@/lib/chat";
@@ -65,6 +66,11 @@ import {
 } from "@/lib/models";
 import { redirectToLogin } from "@/lib/redirect-to-login";
 import type { Action, CompactModel, Proposal, SseEvent } from "@/lib/sse";
+
+// What a stored answer that ended at the spend cap says. It names no amount:
+// the stored message holds only the code, and the cap may have changed since.
+const SPEND_CAP_ANSWER =
+  "Your monthly spend cap was reached during this answer. Raise or remove it in Settings to keep chatting.";
 
 // How many times one answer is followed again after its stream breaks,
 // before the chat says it was cut short.
@@ -120,6 +126,8 @@ function fromStored(
       // message has none, and the line keeps its name's done label.
       if (called && message.details?.summary) called.summary = message.details.summary;
       if (called && message.details?.failed) called.failed = true;
+      // The user stopped the answer before this call finished.
+      if (called && message.details?.stopped) called.state = "stopped";
       const action = actionsById.get(message.details?.action_id ?? "");
       if (action) {
         answer.actions = [...(answer.actions ?? []), action];
@@ -160,7 +168,20 @@ function fromStored(
     }
     answer.text += message.content ?? "";
     answerAt.push({ position: message.position, answer });
-    if (message.status !== "complete" || message.error_code) {
+    if (message.status === "stopped") {
+      // The user stopped it: not a failure. The calls the model was still
+      // sending keep the tool lines the live chat showed.
+      answer.status = "stopped";
+      for (const name of message.details?.stopped_tools ?? []) {
+        answer.tools.push({ name, state: "stopped" });
+      }
+    } else if (message.error_code === "spend_cap_reached") {
+      // The turn ran and stopped at the cap: its rounds stay, so the same
+      // text sent again is a new message.
+      answer.status = "failed";
+      answer.endedInTurn = true;
+      answer.error = createApiError(message.error_code, SPEND_CAP_ANSWER, 200);
+    } else if (message.status !== "complete" || message.error_code) {
       answer.status = message.status === "cut" && !message.error_code ? "cut" : "failed";
       answer.error = createApiError(
         message.error_code ?? "internal_error",
@@ -256,6 +277,12 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
   const [loading, setLoading] = useState(Boolean(initialId));
   const [loadError, setLoadError] = useState<string | null>(null);
   const [answering, setAnswering] = useState(false);
+  // A chat turn is being sent or followed (not /compact): Stop is offered.
+  const [chatTurn, setChatTurn] = useState(false);
+  // The turn's stream has opened, so the server has it and can stop it.
+  const [streamOpen, setStreamOpen] = useState(false);
+  // From pressing Stop until the answer's stream ends.
+  const [stopping, setStopping] = useState(false);
   const [settings, setSettings] = useState<ModelSettings | null>(null);
   // The model the conversation stores, and the one shown in the picker.
   const [own, setOwn] = useState<ModelChoice | null>(null);
@@ -274,6 +301,8 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
   const providerModels = useRef(new Map<string, Promise<ProviderModel[]>>());
   const nextId = useRef(1);
   const abortRef = useRef<AbortController | null>(null);
+  // The answer the chat is reading events into, for a failed stop's note.
+  const liveAnswer = useRef<number | null>(null);
   // The conversation's id as soon as it is known, for code that runs on after
   // a `conversation` event changed it.
   const currentId = useRef<string | undefined>(initialId);
@@ -427,7 +456,12 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
     // Sending the same text after an unanswered message resends it, as the
     // server does, rather than showing it twice.
     const last = messages.at(-1);
-    const unfinished = last?.role === "assistant" && (last.status === "failed" || last.status === "cut");
+    // An answer that ended during its turn (at the spend cap) was answered: its
+    // rounds are stored, so the same text is a new message.
+    const unfinished =
+      last?.role === "assistant" &&
+      !last.endedInTurn &&
+      (last.status === "failed" || last.status === "cut");
     if (unfinished && last.prompt === text) {
       await retry(last);
       return;
@@ -460,7 +494,9 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
       actions: undefined,
       sources: undefined,
       error: undefined,
+      endedInTurn: undefined,
       unreached: undefined,
+      stopFailed: undefined,
       status: "streaming",
     }));
     await runAnswer(answer.id, answer.prompt);
@@ -494,7 +530,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         } else if (event.type === "compact_models") {
           outcome = { step: "choose", models: event.models, contextLength: event.contextLength };
         } else if (event.type === "error") {
-          outcome = { step: "failed", message: event.message };
+          outcome = { step: "failed", message: event.message, code: event.code };
         }
       }
       if (sentChoice) {
@@ -507,10 +543,10 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         redirectToLogin(conversationId ? `/app/${conversationId}` : "/app");
         return;
       }
-      outcome = {
-        step: "failed",
-        message: error instanceof ApiError ? error.message : "The summary could not be written.",
-      };
+      outcome =
+        error instanceof ApiError
+          ? { step: "failed", message: error.message, code: error.code }
+          : { step: "failed", message: "The summary could not be written." };
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       if (!controller.signal.aborted) setAnswering(false);
@@ -654,14 +690,31 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         if (event.kind === "usage_warning") setUsageWarning(readWarning(event.data));
         return false;
       case "error":
+        // Whatever ended the answer, a stop is no longer pending.
+        setStopping(false);
+        if (event.code === "answer_stopped") {
+          // Not a failure: the text, tools, and cards so far stay.
+          updateAnswer(answerId, (a) => ({
+            ...a,
+            status: "stopped",
+            error: undefined,
+            stopFailed: undefined,
+            tools: a.tools.map((t) => (t.state === "running" ? { ...t, state: "stopped" } : t)),
+          }));
+          return true;
+        }
         updateAnswer(answerId, (a) => ({
           ...a,
           status: "failed",
+          stopFailed: undefined,
           error: createApiError(event.code, event.message, 200),
+          // A turn that ended at the spend cap between rounds stored what it did.
+          ...(event.code === "spend_cap_reached" ? { endedInTurn: true } : {}),
         }));
         return true;
       case "done":
-        updateAnswer(answerId, (a) => ({ ...a, status: "done" }));
+        setStopping(false);
+        updateAnswer(answerId, (a) => ({ ...a, status: "done", stopFailed: undefined }));
         return true;
       default:
         return false;
@@ -680,6 +733,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
   ): Promise<boolean> {
     let finished = false;
     let first = replay;
+    liveAnswer.current = answerId;
     for await (const event of events) {
       if (first) {
         first = false;
@@ -691,6 +745,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
           actions: undefined,
           sources: undefined,
           error: undefined,
+          endedInTurn: undefined,
         }));
       }
       if (applyEvent(answerId, event)) finished = true;
@@ -739,7 +794,8 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
       answerId = showConversation(conversation, answerId ?? undefined);
       conversation = undefined;
       try {
-        if (await readAnswer(answerId!, followTurn(id, signal), true)) return;
+        const opened = () => setStreamOpen(true);
+        if (await readAnswer(answerId!, followTurn(id, signal, opened), true)) return;
       } catch (error) {
         if (signal.aborted) return;
         if (error instanceof UnauthenticatedError) {
@@ -760,7 +816,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
 
   /** Shows a conversation the chat just loaded and follows its running answer. */
   async function follow(id: string, loaded: ConversationDetail) {
-    setAnswering(true);
+    startChatTurn();
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -768,8 +824,49 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       if (!controller.signal.aborted) {
-        setAnswering(false);
+        endChatTurn();
         void refresh();
+      }
+    }
+  }
+
+  /** A chat turn starts being sent or followed: Stop shows, disabled until its stream opens. */
+  function startChatTurn() {
+    setAnswering(true);
+    setChatTurn(true);
+    setStreamOpen(false);
+    setStopping(false);
+  }
+
+  function endChatTurn() {
+    setAnswering(false);
+    setChatTurn(false);
+    setStreamOpen(false);
+    setStopping(false);
+  }
+
+  /**
+   * Asks the server to stop the running answer. The stream stays open: its
+   * terminal event ends the answer and clears "Stopping…", whichever it is.
+   */
+  async function stop() {
+    const id = currentId.current;
+    if (!id || stopping) return;
+    const answerId = liveAnswer.current;
+    setStopping(true);
+    if (answerId !== null) updateAnswer(answerId, (a) => ({ ...a, stopFailed: undefined }));
+    try {
+      await stopTurn(id);
+    } catch (error) {
+      if (error instanceof UnauthenticatedError) {
+        redirectToLogin(`/app/${id}`);
+        return;
+      }
+      setStopping(false);
+      // An answer that ended while the request was on its way needs no note:
+      // there is nothing left to stop, and no Stop to press again.
+      if (answerId !== null) {
+        updateAnswer(answerId, (a) => (a.status === "streaming" ? { ...a, stopFailed: true } : a));
       }
     }
   }
@@ -816,7 +913,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
   }
 
   async function runAnswer(answerId: number, message: string) {
-    setAnswering(true);
+    startChatTurn();
     const controller = new AbortController();
     abortRef.current = controller;
     const sentChoice = choiceChanged || !conversationId ? (choice ?? undefined) : undefined;
@@ -826,11 +923,13 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
         { message, conversationId, choice: sentChoice },
         controller.signal,
         (id) => {
-          // The message was stored and refused (too_many_tools, context_full…):
-          // its turn started on the server, which expired the waiting cards.
+          // The message was stored and refused (too_many_tools, context_full,
+          // spend_cap_reached…). A refusal before the first model call leaves
+          // the waiting cards approvable; one from the provider expired them,
+          // and approving such a card answers action_expired, which marks it.
           adopt(id);
-          expireOpenActions();
         },
+        () => setStreamOpen(true),
       );
       // Set when the stream ends with `done` or `error`.
       const finished = await readAnswer(answerId, startingTurn(events));
@@ -855,7 +954,7 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       if (!controller.signal.aborted) {
-        setAnswering(false);
+        endChatTurn();
         void refresh();
       }
     }
@@ -917,7 +1016,13 @@ export function Chat({ conversationId: initialId }: { conversationId?: string })
               )}
             </div>
           )}
-          <Composer disabled={answering || loading || Boolean(loadError)} onSend={send}>
+          <Composer
+            disabled={answering || loading || Boolean(loadError)}
+            onSend={send}
+            onStop={chatTurn ? stop : undefined}
+            canStop={streamOpen && Boolean(conversationId)}
+            stopping={stopping}
+          >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 <ModelPicker

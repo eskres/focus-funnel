@@ -111,6 +111,52 @@ describe("Your data", () => {
     expect(within(dialog).getByRole("button", { name: "Delete account" })).toBeEnabled();
   });
 
+  describe("the spend cap", () => {
+    const CAP = "If you set a monthly spend cap, it counts from zero again for this month.";
+
+    it("is named only in the usage-history confirmation", () => {
+      fakeApi({});
+      render(<DeleteDataSection />);
+
+      const usage = openDialog("Delete usage history");
+      expect(within(usage).getByText(/counts from zero again/)).toHaveTextContent(
+        `${CAP} This cannot be undone.`,
+      );
+      fireEvent.click(within(usage).getByRole("button", { name: "Cancel" }));
+
+      for (const label of ["Delete content", "Delete account"]) {
+        const dialog = openDialog(label);
+        expect(within(dialog).queryByText(/spend cap/)).toBeNull();
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      }
+    });
+  });
+
+  describe("while an answer is still running", () => {
+    const BUSY = "An answer is still running. Try again in a moment.";
+
+    it.each([
+      ["Delete content", "DELETE /api/me/content"],
+      ["Delete account", "DELETE /api/me"],
+    ])("%s shows the busy message and stays open", async (label, route) => {
+      const api = fakeApi({ [route]: errorResponse(409, "conversation_busy", BUSY) });
+      render(<DeleteDataSection />);
+
+      const dialog = openDialog(label);
+      fireEvent.click(within(dialog).getByRole("button", { name: label }));
+
+      expect(await within(dialog).findByText(BUSY)).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: label })).toBeEnabled();
+      expect(within(dialog).queryByRole("button", { name: "Deleted" })).toBeNull();
+      // Long enough for the tick and the close or logout that would follow a delete.
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      expect(screen.getByRole("dialog")).toBe(dialog);
+      expect(within(dialog).queryByRole("button", { name: "Deleted" })).toBeNull();
+      expect(logOut).not.toHaveBeenCalled();
+      expect(api.calls.map((call) => `${call.method} ${call.path}`)).toEqual([route]);
+    });
+  });
+
   it("is not offered in demo mode", async () => {
     const api = fakeApi({
       "GET /api/me": json(200, { id: "u1", mode: "demo", expires_at: "2026-09-25T12:00:00Z" }),

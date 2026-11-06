@@ -56,7 +56,7 @@ const ACTIONS: Action[] = [
     description: "The record of your model calls and their estimated cost.",
     question: "Delete your usage history?",
     deleted:
-      "The record of every model call and its estimated cost is deleted for good. Your content, account, API keys, and models stay.",
+      "The record of every model call and its estimated cost is deleted for good. Your content, account, API keys, and models stay. If you set a monthly spend cap, it counts from zero again for this month.",
     confirm: "Delete usage history",
     run: deleteMyUsage,
     after: () => window.dispatchEvent(new Event(USAGE_DELETED)),

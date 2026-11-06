@@ -8,11 +8,23 @@ import { Textarea } from "@/components/ui/textarea";
 export function Composer({
   disabled,
   onSend,
+  onStop,
+  canStop = true,
+  stopping = false,
   children,
 }: {
   /** True while an answer is arriving. */
   disabled: boolean;
   onSend: (text: string) => void;
+  /**
+   * Stops the answer that is arriving. Given while the chat sends or follows
+   * an answer: the disabled composer then shows Stop in place of Send.
+   */
+  onStop?: () => void;
+  /** False until the answer can be stopped: its stream started and its conversation is known. */
+  canStop?: boolean;
+  /** True from pressing Stop until the answer ends. */
+  stopping?: boolean;
   /** Shown under the input, for example the model picker. */
   children?: ReactNode;
 }) {
@@ -57,9 +69,21 @@ export function Composer({
             }
           }}
         />
-        <Button type="submit" disabled={disabled}>
-          Send
-        </Button>
+        {disabled && onStop ? (
+          // A plain button, so Enter in the input never stops the answer.
+          <Button
+            type="button"
+            variant="outline"
+            disabled={stopping || !canStop}
+            onClick={() => onStop()}
+          >
+            {stopping ? "Stopping…" : "Stop"}
+          </Button>
+        ) : (
+          <Button type="submit" disabled={disabled}>
+            Send
+          </Button>
+        )}
       </div>
       {children}
     </form>

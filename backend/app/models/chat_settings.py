@@ -25,7 +25,7 @@ class ChatModel(Base):
 
 
 class UserSettings(Base):
-    """Chat settings for one user: temperature and the usage warning."""
+    """Chat settings for one user: temperature, the usage warning, and the spend cap."""
 
     __tablename__ = "user_settings"
 
@@ -37,3 +37,6 @@ class UserSettings(Base):
     warning_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     # "YYYY-MM" of the last month a usage warning was sent.
     warning_notified_month: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    # The monthly spend cap: "usd" or "tokens", and its amount. Null means no cap.
+    cap_unit: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    cap_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)

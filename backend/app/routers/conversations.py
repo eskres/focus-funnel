@@ -49,7 +49,7 @@ from app.chat.tool_providers import (
 from app.config import Settings, get_settings
 from app.connector_config import get_connector_config
 from app.db import get_session
-from app.errors import ApiError, ErrorCode, too_many_tools
+from app.errors import ApiError, ErrorCode, conversation_delete_busy, too_many_tools
 from app.mcp_client import get_mcp_connect
 from app.models import Conversation, ConversationConnector, Proposal, User
 from app.ownership import not_found
@@ -561,8 +561,18 @@ async def delete_conversation(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    """Delete a conversation and its messages for good. Usage records stay."""
+    """Delete a conversation and its messages for good. Usage records stay.
+
+    Its running answer stops first and stores its usage while the
+    conversation exists; the claim then keeps a send from starting another
+    one before the delete. An answer still running after the wait makes this
+    answer 409 and delete nothing (design decision 13).
+    """
     conversation = await get_conversation(session, user, conversation_id)
+    # No connection waits idle in a transaction while the answer stops.
+    await session.commit()
+    await running.stop_turns(user.id, conversation.id)
+    await claim_turn(session, conversation, busy=conversation_delete_busy)
     await session.execute(delete(Conversation).where(Conversation.id == conversation.id))
     await session.commit()
     return Response(status_code=204)
@@ -708,7 +718,7 @@ async def confirm_proposal(
         thought_id = str(outcome.thought.id)
     # The conversation sees the thought now, after every stored row, so its
     # ref comes after every ref given so far (thought-appending decision 15).
-    seen_position = await next_position(session, conversation)
+    seen_position = await next_position(session, conversation.id)
     # A new list, so the JSON column is written.
     proposal.parts = [
         {**part, "thought_id": thought_id, "seen_position": seen_position}

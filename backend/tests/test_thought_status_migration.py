@@ -37,12 +37,14 @@ status = sa.table(
 )
 
 
-def test_the_single_head_is_this_revision():
+def test_this_revision_is_below_the_single_head():
+    # Later revisions exist (the head test is in test_spend_cap_migration.py),
+    # so these tests downgrade to PREVIOUS, not "-1".
     out = alembic_ok("sqlite+aiosqlite:///:memory:", "heads")
     heads = [line.split()[0] for line in out.splitlines() if line.strip()]
-    assert heads == [REVISION], out
-    out = alembic_ok("sqlite+aiosqlite:///:memory:", "history", "-r", f"{PREVIOUS}:{REVISION}")
-    assert f"{PREVIOUS} -> {REVISION} (head)" in out
+    assert len(heads) == 1, out
+    out = alembic_ok("sqlite+aiosqlite:///:memory:", "history", "-r", f"{REVISION}:{heads[0]}")
+    assert f"{PREVIOUS} -> {REVISION}" in out
 
 
 def test_the_model_names_the_check_constraint():
@@ -67,7 +69,7 @@ def run(db_url: str, work):
 
 
 def check_round_trip(db_url: str):
-    for step in (("upgrade", "head"), ("check",), ("downgrade", "-1"), ("upgrade", "head"), ("check",)):
+    for step in (("upgrade", "head"), ("check",), ("downgrade", PREVIOUS), ("upgrade", "head"), ("check",)):
         alembic_ok(db_url, *step)
 
 

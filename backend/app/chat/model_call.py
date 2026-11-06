@@ -123,9 +123,14 @@ class ModelCall:
             )
 
         async def chunks() -> AsyncIterator[Any]:
-            with self.mapping_errors(with_tools=with_tools):
-                async for chunk in response:
-                    yield chunk
+            try:
+                with self.mapping_errors(with_tools=with_tools):
+                    async for chunk in response:
+                        yield chunk
+            finally:
+                # Also when the reader stops early (a Stop between chunks),
+                # so the provider's connection ends with it.
+                await response.close()
 
         return chunks()
 

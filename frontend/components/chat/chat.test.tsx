@@ -144,12 +144,15 @@ describe("Chat", () => {
       send("hello");
 
       await waitFor(() => expect(screen.getByLabelText("Message")).toBeDisabled());
-      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+      // Stop takes Send's place while the answer arrives (stop-and-spend-cap).
+      expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
 
       await stream.push(delta("Hi") + done);
       await stream.close();
 
       await waitFor(() => expect(screen.getByLabelText("Message")).toBeEnabled());
+      expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
     });
 
     it("shows that the model is thinking before the first text, then the text", async () => {
@@ -612,6 +615,28 @@ describe("Chat", () => {
         true,
       );
       expect(chatBodies(calls)).toEqual([]);
+    });
+
+    it("shows the busy refusal in the dialog and keeps the conversation", async () => {
+      const busy = "An answer in this conversation is still running. Try deleting again in a moment.";
+      const { calls } = fakeApi({
+        "GET /api/settings/models": json(200, withDefault),
+        "GET /api/conversations/c1": json(200, conversation()),
+        "DELETE /api/conversations/c1": errorResponse(409, "conversation_busy", busy),
+      });
+      render(<Chat conversationId="c1" />);
+      await screen.findByText("Tell me more.");
+
+      send("/delete");
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(busy);
+      expect(screen.getByRole("dialog")).toBe(dialog);
+      expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+      expect(push).not.toHaveBeenCalled();
+      expect(screen.getByText("Tell me more.")).toBeInTheDocument();
+      expect(window.location.pathname).toBe("/app");
     });
 
     it("changes nothing when cancelled", async () => {

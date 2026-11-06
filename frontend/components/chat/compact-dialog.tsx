@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { formatTokens } from "@/components/chat/context-meter";
+import { SpendCapAlert } from "@/components/chat/spend-cap-alert";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,7 +22,7 @@ export type CompactState =
   | { step: "writing" }
   | { step: "draft"; summary: string; throughPosition: number; model: string }
   | { step: "choose"; models: CompactModel[]; contextLength: number | null }
-  | { step: "failed"; message: string };
+  | { step: "failed"; message: string; code?: string };
 
 /**
  * The /compact dialog. The draft is editable, and nothing changes until the
@@ -61,7 +62,12 @@ export function CompactDialog({
                 A summary replaces the older messages for the model. You can edit it first.
               </DialogDescription>
             </DialogHeader>
-            {state?.step === "failed" ? (
+            {state?.step === "failed" && state.code === "spend_cap_reached" ? (
+              <div className="flex flex-col gap-2">
+                <SpendCapAlert message={state.message} />
+                <p className="text-sm text-muted-foreground">Nothing in the conversation changed.</p>
+              </div>
+            ) : state?.step === "failed" ? (
               <Alert variant="destructive">
                 <AlertDescription>{state.message} Nothing in the conversation changed.</AlertDescription>
               </Alert>

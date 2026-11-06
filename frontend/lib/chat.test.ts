@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { delta, done, errorResponse, fakeApi, streamOf, toolEvent } from "@/test/fake-api";
 
-import { BackendUnreachableError, NotFoundError, ModelNotSetError } from "./api";
-import { COMMANDS, followTurn, isDeleteCommand, streamChat } from "./chat";
+import { BackendUnreachableError, NotFoundError, ModelNotSetError, SpendCapReachedError } from "./api";
+import { COMMANDS, followTurn, isDeleteCommand, stopTurn, streamChat } from "./chat";
 import { browserTimeZone } from "./time-zone";
 
 afterEach(() => {
@@ -69,6 +69,21 @@ describe("streamChat", () => {
     expect(stored).toHaveBeenCalledWith("c9");
     expect(error).toBeInstanceOf(ModelNotSetError);
   });
+
+  it("reports the new conversation a message refused at the spend cap was stored in", async () => {
+    const message = "Your monthly spend cap of $5.00 is reached.";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => errorResponse(409, "spend_cap_reached", message, { "X-Conversation-Id": "c1" })),
+    );
+    const stored = vi.fn();
+
+    const error = await drain(streamChat({ message: "hi" }, undefined, stored)).catch((e) => e);
+
+    expect(stored).toHaveBeenCalledWith("c1");
+    expect(error).toBeInstanceOf(SpendCapReachedError);
+    expect(error).toMatchObject({ message, status: 409 });
+  });
 });
 
 describe("followTurn", () => {
@@ -130,6 +145,60 @@ describe("followTurn", () => {
 
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(init.signal).toBe(controller.signal);
+  });
+});
+
+describe("onOpen", () => {
+  it("is called once the chat stream has opened, before its first event", async () => {
+    fakeApi({ "POST /api/chat": streamOf(delta("Hi"), done) });
+    const seen: string[] = [];
+
+    for await (const event of streamChat({ message: "hi" }, undefined, undefined, () => seen.push("open"))) {
+      seen.push(event.type);
+    }
+
+    expect(seen).toEqual(["open", "delta", "done"]);
+  });
+
+  it("is not called for a refused message", async () => {
+    fakeApi({ "POST /api/chat": errorResponse(409, "conversation_busy", "Busy.") });
+    const onOpen = vi.fn();
+
+    await drain(streamChat({ message: "hi" }, undefined, undefined, onOpen)).catch(() => undefined);
+
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("is called once a followed answer's stream has opened, and not on 204", async () => {
+    fakeApi({
+      "GET /api/chat/c1/stream": [streamOf(done), new Response(null, { status: 204 })],
+    });
+    const onOpen = vi.fn();
+
+    await drain(followTurn("c1", undefined, onOpen));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+
+    await drain(followTurn("c1", undefined, onOpen));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("stopTurn", () => {
+  it("posts the stop and resolves on 204", async () => {
+    const { calls } = fakeApi({ "POST /api/chat/c1/stop": new Response(null, { status: 204 }) });
+
+    await expect(stopTurn("c1")).resolves.toBeUndefined();
+
+    expect(calls).toEqual([{ method: "POST", path: "/api/chat/c1/stop", body: undefined }]);
+  });
+
+  it("throws NotFoundError for a conversation that is not the user's (404)", async () => {
+    fakeApi({ "POST /api/chat/c9/stop": errorResponse(404, "not_found", "Not found.") });
+
+    const error = await stopTurn("c9").catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(NotFoundError);
+    expect(error).toMatchObject({ code: "not_found", message: "Not found.", status: 404 });
   });
 });
 

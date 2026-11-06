@@ -1,9 +1,27 @@
 """Deleting a user's content, their usage history, or the user and everything they own."""
 
+import uuid
+
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chat import running
+from app.chat.conversations import claim_user_turns
 from app.models import Conversation, SearchIndex, Thought, UsageEvent, User
+
+
+async def stop_and_claim(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Stop the user's running answers, then claim every conversation of the
+    user in a new transaction, which the delete that follows commits
+    (stop-and-spend-cap design decision 13). Raises turns_busy, having
+    rolled back, when an answer still holds a claim: nothing is deleted.
+
+    The request's read transaction ends first, so no connection waits idle
+    in a transaction while the turns stop.
+    """
+    await session.commit()
+    await running.stop_turns(user_id)
+    await claim_user_turns(session, user_id)
 
 
 async def delete_user_data(session: AsyncSession, user: User) -> None:
@@ -14,7 +32,12 @@ async def delete_user_data(session: AsyncSession, user: User) -> None:
     thoughts, their search indexes, connectors, the conversations' connector
     links, and tool actions.
     """
-    await session.execute(delete(User).where(User.id == user.id))
+    await delete_user_by_id(session, user.id)
+
+
+async def delete_user_by_id(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """`delete_user_data` for a user known only by id."""
+    await session.execute(delete(User).where(User.id == user_id))
     await session.commit()
 
 

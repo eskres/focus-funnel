@@ -123,6 +123,12 @@ class ToolProvider(Protocol):
         """True when a call must wait for the user's approval (decision 7)."""
         ...
 
+    def reaches_server(self, name: str, turn: TurnToolState) -> bool:
+        """True when a call that needs no approval may reach a remote server.
+        Turn lets a stop cancel only such a call, and then tells the model it
+        may have run (stop-and-spend-cap design decisions 3 and 12)."""
+        ...
+
     def action_target(self, name: str) -> ActionTarget:
         """What the card names, for a call that needs approval."""
         ...
@@ -185,6 +191,11 @@ class ConnectorTools:
         if not setting["acts"]:
             return False
         return not setting["always_allow"] or turn.read_connector_data
+
+    def reaches_server(self, name: str, turn: TurnToolState) -> bool:
+        # A reads tool, or an acts tool set to always allow: the call goes to
+        # the server. One that needs approval only writes a card.
+        return not self.needs_approval(name, turn)
 
     def action_target(self, name: str) -> ActionTarget:
         """What the card for a call to this tool names (decision 7)."""

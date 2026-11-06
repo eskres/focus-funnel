@@ -267,6 +267,28 @@ describe("API proxy", () => {
     });
   });
 
+  it("forwards a stop of the running answer with the credential and passes the 204 through", async () => {
+    backend = await startBackend((_req, _body, res) => {
+      res.writeHead(204);
+      res.end();
+    });
+    vi.stubEnv("BACKEND_URL", backend.url);
+
+    const response = await POST(
+      authed("http://localhost:3000/api/chat/c1/stop", { method: "POST" }),
+      ctx("chat", "c1", "stop"),
+    );
+
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe("");
+    expect(backend.requests).toHaveLength(1);
+    const [forwarded] = backend.requests;
+    expect(forwarded.method).toBe("POST");
+    expect(forwarded.url).toBe("/api/chat/c1/stop");
+    expect(forwarded.headers.authorization).toBe("Bearer test-access-token");
+    expect(forwarded.headers.cookie).toBeUndefined();
+  });
+
   it("passes backend status codes and empty bodies through", async () => {
     backend = await startBackend((_req, _body, res) => {
       res.writeHead(204);
@@ -308,6 +330,39 @@ describe("API proxy", () => {
     );
     expect(response.headers.get("cache-control")).toBe("no-cache");
     for (const name of ["set-cookie", "www-authenticate", "server", "connection", "keep-alive"]) {
+      expect(response.headers.get(name)).toBeNull();
+    }
+  });
+
+  it("passes X-Conversation-Id on a refused message, and still drops the rest", async () => {
+    const body = JSON.stringify({
+      error: { code: "spend_cap_reached", message: "Your monthly spend cap of $5.00 is reached." },
+    });
+    backend = await startBackend((_req, _body, res) => {
+      res.writeHead(409, {
+        "Content-Type": "application/json",
+        "X-Conversation-Id": "c1",
+        "Set-Cookie": "backend=secret; HttpOnly",
+        "X-Other": "dropped",
+        Server: "uvicorn",
+      });
+      res.end(body);
+    });
+    vi.stubEnv("BACKEND_URL", backend.url);
+
+    const response = await POST(
+      authed("http://localhost:3000/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "Hello" }),
+      }),
+      ctx("chat"),
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get("x-conversation-id")).toBe("c1");
+    expect(await response.text()).toBe(body);
+    for (const name of ["set-cookie", "x-other", "server"]) {
       expect(response.headers.get(name)).toBeNull();
     }
   });

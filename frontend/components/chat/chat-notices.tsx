@@ -9,7 +9,7 @@ export const USAGE_SETTINGS_HREF = "/settings#usage";
 export function formatThreshold(warning: UsageWarning): string {
   return warning.unit === "usd"
     ? `$${warning.amount.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`
-    : `${warning.amount.toLocaleString("en")} tokens`;
+    : `${warning.amount.toLocaleString("en")} ${warning.amount === 1 ? "token" : "tokens"}`;
 }
 
 /** Suggests /compact once the context passes the soft limit. It never blocks sending. */

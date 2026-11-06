@@ -16,13 +16,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import exists, select, update
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.config import ConnectorLimits
+from app.chat.conversations import TURN_CLAIM_TIMEOUT
 from app.errors import ErrorCode
 from app.mcp_client import mark_data
-from app.models import Connector, Message, ToolAction
+from app.models import Connector, Conversation, Message, ToolAction
 
 PENDING = "pending"
 RUNNING = "running"
@@ -157,6 +158,15 @@ async def wait_for_running(
     while True:
         await settle_stale(session, conversation_id, limits)
         await session.commit()
+        # Lock the open rows first: on Postgres this waits for an approval
+        # whose `move` began before the claim and has not committed yet, so
+        # the look below sees it running (stop-and-spend-cap decision 30).
+        # SQLite runs one writer at a time and ignores the lock.
+        await session.execute(
+            select(ToolAction.id)
+            .where(ToolAction.conversation_id == conversation_id, ToolAction.status.in_(OPEN))
+            .with_for_update()
+        )
         running = (
             await session.execute(
                 select(
@@ -176,8 +186,9 @@ async def wait_for_running(
 
 async def expire_actions(session: AsyncSession, conversation_id: uuid.UUID) -> None:
     """A turn starts: every pending or failed action of the conversation
-    expires. A running one finishes as it would. Not committed: the caller
-    commits it with the turn's user message."""
+    expires. A running one finishes as it would. Not committed: the chat
+    route commits it on its own, just before the turn's first model call
+    (stop-and-spend-cap design decision 9)."""
     await session.execute(
         update(ToolAction)
         .where(ToolAction.conversation_id == conversation_id, ToolAction.status.in_(OPEN))
@@ -187,16 +198,29 @@ async def expire_actions(session: AsyncSession, conversation_id: uuid.UUID) -> N
 
 
 async def moved_on(session: AsyncSession, action: ToolAction) -> bool:
-    """True when a user message came after the action: its turn is over, even
-    if no turn expired it (one ran while connectors were off)."""
+    """True when a turn ran after the action's: an answer (any assistant
+    message) follows a user message that came after it. A turn that ran
+    while connectors were off expired nothing, and this catches it. A
+    message refused before any model call (the spend cap, a full context)
+    stores no answer, so it leaves the action approvable (stop-and-spend-cap
+    design decision 9)."""
+    next_user = (
+        select(func.min(Message.position))
+        .where(
+            Message.conversation_id == action.conversation_id,
+            Message.role == "user",
+            Message.position > action.position,
+        )
+        .scalar_subquery()
+    )
     return bool(
         (
             await session.execute(
                 select(
                     exists().where(
                         Message.conversation_id == action.conversation_id,
-                        Message.role == "user",
-                        Message.position > action.position,
+                        Message.role == "assistant",
+                        Message.position > next_user,
                     )
                 )
             )
@@ -210,10 +234,20 @@ async def move(session: AsyncSession, action: ToolAction, status: str) -> bool:
     One conditional update, so of two requests only one wins, on SQLite and
     on Postgres alike. Reloads the row either way. updated_at is set here, so
     `settle_stale` can tell how long an action has been running.
+
+    The same update also requires that no turn holds the conversation's
+    claim, so an approval that checked for a turn before a message claimed
+    the conversation cannot start running during that turn: it loses here
+    and is refused with conversation_busy (stop-and-spend-cap decision 30).
     """
+    claimed = exists().where(
+        Conversation.id == action.conversation_id,
+        Conversation.turn_started_at.is_not(None),
+        Conversation.turn_started_at >= datetime.now(UTC) - TURN_CLAIM_TIMEOUT,
+    )
     result = await session.execute(
         update(ToolAction)
-        .where(ToolAction.id == action.id, ToolAction.status.in_(OPEN))
+        .where(ToolAction.id == action.id, ToolAction.status.in_(OPEN), ~claimed)
         .values(status=status, updated_at=datetime.now(UTC))
         .execution_options(synchronize_session=False)
     )
@@ -222,12 +256,14 @@ async def move(session: AsyncSession, action: ToolAction, status: str) -> bool:
     return result.rowcount == 1
 
 
-def outcome_note(action: ToolAction) -> str | None:
+def outcome_note(action: ToolAction, expiring: bool = False) -> str | None:
     """What the next turn's model reads about a finished action (done,
     unknown, declined, or expired), or None while it is pending or running
-    (decision 7)."""
+    (decision 7). With `expiring`, a pending or failed action reads as the
+    expired one it becomes when the turn this note is for starts."""
     name = f"{action.connector_name}__{action.tool}"
-    if action.status == DONE:
+    status = EXPIRED if expiring and action.status in OPEN else action.status
+    if status == DONE:
         data = mark_data(
             action.connector_name,
             action.tool,
@@ -235,15 +271,15 @@ def outcome_note(action: ToolAction) -> str | None:
             is_error=action.error_code == TOOL_ERROR,
         )
         return f"The user approved {name}. It ran and returned:\n{data}"
-    if action.status == UNKNOWN:
+    if status == UNKNOWN:
         return (
             f"The user approved {name}, but it is not known whether it ran: "
             f"{action.result or action.error_code} Do not say it ran or did not run, "
             "and do not call it again before the user has checked."
         )
-    if action.status == DECLINED:
+    if status == DECLINED:
         return f"The user declined {name}. It did not run."
-    if action.status == EXPIRED:
+    if status == EXPIRED:
         if action.error_code:
             # It was approved, failed, and was not approved again.
             return f"The user approved {name}, but it failed: {action.result or action.error_code}"

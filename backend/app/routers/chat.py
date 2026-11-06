@@ -3,6 +3,7 @@
 import logging
 import uuid
 
+import anyio
 import httpx2
 from fastapi import APIRouter, Depends, Response
 from fastapi.responses import StreamingResponse
@@ -55,9 +56,17 @@ from app.chat.tool_providers import (
     conversation_connector_tools,
 )
 from app.chat.turn import BuiltinTools, Turn
+from app.chat.usage import cap_state
 from app.config import Settings, get_settings
 from app.db import get_session, get_sessionmaker
-from app.errors import ApiError, ErrorCode, context_full, model_not_set, too_many_tools
+from app.errors import (
+    ApiError,
+    ErrorCode,
+    context_full,
+    model_not_set,
+    spend_cap_reached,
+    too_many_tools,
+)
 from app.mcp_client import McpConnect, get_mcp_connect
 from app.models import Conversation, Message, User
 from app.providers import get_provider_http_client, provider_for_user
@@ -148,6 +157,14 @@ async def _ensure_model(session: AsyncSession, user: User, conversation: Convers
         await session.commit()
 
 
+async def _check_cap(session: AsyncSession, user: User) -> None:
+    """Refuse with spend_cap_reached when the month reached the user's cap,
+    whatever the model and its price (design decisions 8 and 9)."""
+    state = await cap_state(session, user.id)
+    if state is not None and state.reached:
+        raise spend_cap_reached(state)
+
+
 @router.post("")
 async def chat(
     body: ChatRequest,
@@ -204,17 +221,19 @@ async def chat(
         conversation.archived_at = None
         conversation.last_activity_at = now()
         await _store_user_message(session, conversation, body.message)
-        if settings.mcp_enabled and not is_new:
-            # The turn starts: cards still waiting for approval expire with it
-            # (decision 7).
-            await expire_actions(session, conversation.id)
         await session.commit()
         if settings.mcp_enabled and not is_new:
             # An approval already running finishes first, so this turn gets
-            # its outcome. Any approval from now on finds its action expired.
+            # its outcome. An approval that has not moved its card yet loses
+            # that move while the claim is held (`move` requires that no
+            # turn holds it), so none can start before the expiry below
+            # (design decision 30).
             await wait_for_running(session, conversation.id, config.connectors)
 
         await _ensure_model(session, user, conversation)
+        # At the cap, no model is asked: the message stays stored and the
+        # refusal carries the conversation's id (design decision 9).
+        await _check_cap(session, user)
 
         # The connectors that are on (none while MCP_ENABLED is off). A
         # conversation past the tool limit is refused before any model call,
@@ -238,6 +257,9 @@ async def chat(
             refs=refs.by_id(),
             connectors=bool(connectors),
             actions=await list_actions(session, conversation.id) if settings.mcp_enabled else None,
+            # The open cards expire just before the first call (below), so
+            # this context already tells the model they did not run.
+            actions_expire=True,
         )
         # The held note is the last entry; a written proposal removes it by identity.
         held_note = held_note_of(context, held)
@@ -294,8 +316,19 @@ async def chat(
             else None,
             # A read followed by an act needs more rounds (decision 9).
             tool_rounds=config.connectors.tool_rounds if connectors else None,
+            # Read once here: no step of the turn fetches the model list.
+            info=info,
         )
         try:
+            if settings.mcp_enabled and not is_new:
+                # The turn starts: cards still waiting for approval expire
+                # with it (mcp-connectors decision 7), on their own commit and
+                # only now, after every refusal that sends nothing to the
+                # model (the cap, check_room, a missing key). A first call
+                # the provider refuses still counts as a sent message (design
+                # decision 9).
+                await expire_actions(session, conversation.id)
+                await session.commit()
             await turn.open()
         except BaseException:
             await call.aclose()
@@ -319,8 +352,10 @@ async def chat(
                 yield event
         finally:
             # In the turn's own background task, however the turn ends: no
-            # connector session outlives it (decision 9).
-            await turn.aclose()
+            # connector session outlives it (decision 9). Shielded, so a
+            # shutdown cancel that lands while it closes cannot skip it.
+            with anyio.CancelScope(shield=True):
+                await turn.aclose()
 
     async def settle() -> None:
         try:
@@ -344,8 +379,33 @@ async def chat(
         finally:
             await session.close()
 
-    turn_entry = running.start(conversation_id, user.id, after_position, events(), settle)
+    turn_entry = running.start(
+        conversation_id, user.id, after_position, events(), settle, control=turn.control
+    )
     return log_response(running.follow(turn_entry))
+
+
+@router.post("/{conversation_id}/stop", status_code=204)
+async def stop_turn(
+    conversation_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Stop the conversation's running answer (stop-and-spend-cap design
+    decision 1).
+
+    Answers 204 at once whenever the caller owns the conversation: the stop
+    was sent, it was already stopping, it is past its last check, or nothing
+    runs. The stream's terminal event says how the answer ended. Another
+    user's conversation and an unknown id are both not found. This route
+    never reads provider keys.
+    """
+    await get_conversation(session, user, conversation_id)
+    await session.close()
+    turn = running.get(conversation_id)
+    if turn is not None and turn.user_id == user.id:
+        turn.stop()
+    return Response(status_code=204)
 
 
 @router.get("/{conversation_id}/stream", response_model=None)
@@ -425,6 +485,9 @@ async def compact(
         await claim_turn(session, conversation)
         claimed = True
         await _ensure_model(session, user, conversation)
+        # A refused /compact changes nothing: the error path rolls back and
+        # frees the claim (design decision 9).
+        await _check_cap(session, user)
 
         plan = plan_compaction(await list_messages(session, conversation), config.compact_keep_recent)
         if not plan.replaced:

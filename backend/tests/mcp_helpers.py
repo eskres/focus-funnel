@@ -14,7 +14,10 @@ Its tools: `list_events` (read-only hint) and `create_event` (no hint) echo
 their `text` argument; `mixed` returns text, an image, audio, a resource link
 and an embedded resource; `structured` returns only structured content;
 `fails` returns an `isError` result; `slow` sleeps `seconds` before answering.
-Any other name gets a JSON-RPC error.
+Any other name gets a JSON-RPC error. While a test sets `hold_create`,
+`create_event` waits for it (and sets `create_entered` first). The HTTP
+method of every /mcp request is kept in `methods`, and `open_connections()`
+counts the client connections the server holds now.
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ import asyncio
 import socket
 import threading
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
@@ -78,6 +82,20 @@ def _page(tools: list[types.Tool], params: types.PaginatedRequestParams | None):
     )
 
 
+def _caller(state: McpTestServer):
+    async def call_tool(ctx, params: types.CallToolRequestParams) -> types.CallToolResult:
+        hold = state.hold_create
+        if params.name == "create_event" and hold is not None:
+            state.create_entered.set()
+            deadline = time.monotonic() + 10
+            while not hold.is_set() and time.monotonic() < deadline:
+                await asyncio.sleep(0.01)
+        state.called.append(params.name)
+        return await _call_tool(ctx, params)
+
+    return call_tool
+
+
 async def _call_tool(ctx, params: types.CallToolRequestParams) -> types.CallToolResult:
     name = params.name
     arguments = params.arguments or {}
@@ -124,8 +142,25 @@ class McpTestServer:
     extra_tools: list[types.Tool] = field(default_factory=list)
     # A JSON-RPC error that tools/list answers with, while set.
     list_error: MCPError | None = None
+    # The HTTP method of every /mcp request, in order.
+    methods: list[str] = field(default_factory=list)
+    # How many client connections the server holds open now. A client
+    # session that ends closes its connections (the SDK used here gives no
+    # session id, so no DELETE ends it).
+    open_connections: Callable[[], int] = lambda: 0
+    # The names of the tools called, in order, once each call is answered.
+    called: list[str] = field(default_factory=list)
+    # While set, create_event waits until the event is set.
+    hold_create: threading.Event | None = None
+    create_entered: threading.Event = field(default_factory=threading.Event)
 
     def reset(self) -> None:
+        if self.hold_create is not None:
+            self.hold_create.set()
+        self.hold_create = None
+        self.create_entered.clear()
+        self.methods.clear()
+        self.called.clear()
         self.list_error = None
         self.seen_headers.clear()
         self.revoked.clear()
@@ -138,7 +173,7 @@ class McpTestServer:
 
 
 def _app(state: McpTestServer):
-    server = Server("test", on_list_tools=_lister(state), on_call_tool=_call_tool)
+    server = Server("test", on_list_tools=_lister(state), on_call_tool=_caller(state))
     mcp_app = server.streamable_http_app(streamable_http_path="/mcp")
 
     async def app(scope, receive, send):
@@ -146,6 +181,7 @@ def _app(state: McpTestServer):
             if scope["type"] == "http":
                 headers = {k.decode(): v.decode() for k, v in scope["headers"]}
                 state.seen_headers.append(headers)
+                state.methods.append(scope["method"])
                 if headers.get("authorization") in state.revoked:
                     scope = {**scope, "path": "/401"}
                 else:
@@ -194,6 +230,7 @@ def running_mcp_server():
             timeout_graceful_shutdown=1,
         )
     )
+    state.open_connections = lambda: len(server.server_state.connections)
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     deadline = time.monotonic() + 10
