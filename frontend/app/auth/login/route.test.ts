@@ -25,7 +25,15 @@ describe("/auth/login in demo mode", () => {
     expect(response.headers.getSetCookie()).toEqual([]);
   });
 
-  it.each(["https://evil.example/app", "//evil.example/app", null])(
+  it.each([
+    "https://evil.example/app",
+    "//evil.example/app",
+    "/.//evil.example/app",
+    "/x/..//evil.example/app",
+    "/%2e//evil.example/app",
+    "/./\\evil.example/app",
+    null,
+  ])(
     "redirects to the default page for an unsafe or missing returnTo (%s)",
     async (returnTo) => {
       const url = new URL("/auth/login", APP);

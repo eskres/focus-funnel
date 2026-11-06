@@ -222,7 +222,7 @@ async def test_the_plumber_section():
         f"- 2026-10-11 09:00 UTC from Plumber chat, conversation {PLUMBER_CHAT_ID}, "
         f"proposal {UNDONE_PROPOSAL} (undone)"
     ) in lines
-    assert "- Tags: #home, #weekend plans" in lines
+    assert "- Tags: `#home`, `#weekend plans`" in lines
     assert "- Status: done, marked done 2026-11-04 10:15 UTC" in lines
     assert "- Date: 2026-11-09 (Europe/Oslo)" in lines
     assert "> Call the plumber about the leaking kitchen tap." in lines
@@ -246,7 +246,54 @@ async def test_a_reopened_thought():
 
 async def test_a_comma_inside_a_tag():
     text = await one(thought(tags=["a,b", "c"]))
-    assert "- Tags: #a\\,b, #c" in text.split("\n")
+    assert "- Tags: `#a,b`, `#c`" in text.split("\n")
+
+
+async def test_a_tag_holding_a_comma_and_a_hash_reads_as_one_tag():
+    """`a, #b` is one tag and `a`, `b` are two: the lines differ, and each
+    code span holds exactly one tag as stored (design decision 31)."""
+    one_tag = tags_line(await one(thought(tags=["a, #b"])))
+    two_tags = tags_line(await one(thought(tags=["a", "b"])))
+    assert one_tag == "- Tags: `#a, #b`"
+    assert two_tags == "- Tags: `#a`, `#b`"
+    assert code_spans(one_tag) == ["#a, #b"]
+    assert code_spans(two_tags) == ["#a", "#b"]
+
+
+@pytest.mark.parametrize(
+    "tag, written",
+    [
+        ("a`b", "``#a`b``"),
+        ("a`b`", "`` #a`b` ``"),
+        ("x``y", "```#x``y```"),
+        ("<b>", "`#<b>`"),
+        ("a\\_b", "`#a\\_b`"),
+    ],
+)
+async def test_a_tag_is_one_code_span_whatever_it_holds(tag, written):
+    line = tags_line(await one(thought(tags=[tag])))
+    assert line == f"- Tags: {written}"
+    assert code_spans(line) == ["#" + tag]
+
+
+def tags_line(text: str) -> str:
+    [line] = [line for line in text.split("\n") if line.startswith("- Tags: ")]
+    return line
+
+
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+
+
+def code_spans(line: str) -> list[str]:
+    """The text a CommonMark viewer shows for each code span in the line: one
+    space dropped from each end when both ends have one."""
+    spans = []
+    for found in CODE_SPAN.finditer(line):
+        body = found.group(2)
+        if body.startswith(" ") and body.endswith(" ") and body.strip(" "):
+            body = body[1:-1]
+        spans.append(body)
+    return spans
 
 
 # The raw text.
@@ -316,7 +363,7 @@ async def test_markdown_and_html_in_data_are_escaped():
     lines = text.split("\n")
     assert "## \\<b\\>Hi\\</b\\>" in lines
     assert "> \\!\\[x\\](https://evil.example/a) \\<img src=x\\>" in lines
-    assert "- Tags: #\\<b\\>" in lines
+    assert "- Tags: `#<b>`" in lines
     assert "- Category: \\*x\\*" in lines
     assert any(line.startswith("- From: \\<img src=x\\>, proposed ") for line in lines)
     assert any(
@@ -326,13 +373,61 @@ async def test_markdown_and_html_in_data_are_escaped():
 
 
 def assert_nothing_renders(text: str) -> None:
+    """Outside code blocks and code spans, every `![`, `<img`, `<b>`, and `](`
+    follows an odd run of backslashes: an even run is backslashes shown as
+    text, and the marker after it would render."""
     for line in outside_code(text):
+        line = CODE_SPAN.sub("", line)
         for marker in ("![", "<img", "<b>", "]("):
             for found in re.finditer(re.escape(marker), line):
-                assert found.start() > 0 and line[found.start() - 1] == "\\", (
-                    marker,
-                    line,
-                )
+                before = line[: found.start()]
+                run = len(before) - len(before.rstrip("\\"))
+                assert run % 2 == 1, (marker, line)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "> <img src=x>",
+        "> \\\\<img src=x>",
+        "> \\\\\\\\![x](y)",
+        "## a \\\\<b>",
+        "- From: \\\\[a](https://evil.example), proposed",
+    ],
+)
+def test_the_check_catches_a_marker_after_an_even_run_of_backslashes(line):
+    with pytest.raises(AssertionError):
+        assert_nothing_renders(line + "\n")
+
+
+@pytest.mark.parametrize("char", list("\\`*_[]<>!#&~|"))
+async def test_each_listed_character_is_escaped_outside_an_address(char):
+    text = await one(thought(title=f"a{char}b", summary=f"a{char}b"))
+    lines = text.split("\n")
+    assert f"## a\\{char}b" in lines
+    assert f"> a\\{char}b" in lines
+
+
+async def test_a_backslash_in_data_is_escaped_before_markup():
+    """A backslash in data is itself escaped, so it cannot escape the
+    backslash the writer puts before `<`, `[`, or `!` (design decision 5)."""
+    item = thought(
+        title="\\<b>Hi</b>",
+        summary="\\<img src=x onerror=alert(1)>\n\\[a](https://evil.example) \\![x](https://evil.example/i.png)",
+        category="\\\\<b>",
+        tags=["\\<b>"],
+    )
+    text = await one(item)
+    lines = text.split("\n")
+    assert "## \\\\\\<b\\>Hi\\</b\\>" in lines
+    assert "> \\\\\\<img src=x onerror=alert(1)\\>" in lines
+    assert (
+        "> \\\\\\[a\\](https://evil.example) \\\\\\!\\[x\\](https://evil.example/i.png)"
+        in lines
+    )
+    assert "- Category: \\\\\\\\\\<b\\>" in lines
+    assert "- Tags: `#\\<b>`" in lines
+    assert_nothing_renders(text)
 
 
 async def test_the_golden_file_renders_nothing_from_data():
@@ -360,7 +455,7 @@ async def test_list_rule_and_heading_lines_in_a_summary():
         "> &#32;   \\<b\\>x\\</b\\>",
         "> &#9;\\<b\\>x\\</b\\>",
         ">    three spaces",
-        "> see https://evil.example/a?x=1\\_y",
+        "> see https://evil.example/a?x=1_y",
     ]
     start = quoted.index("> \\- item")
     assert quoted[start : start + len(expected)] == expected
@@ -388,9 +483,52 @@ async def test_no_data_line_starts_a_list_rule_or_heading():
 
 async def test_a_bare_address_is_left_as_it_is():
     text = await one(thought(summary="see https://evil.example/a?x=1_y"))
-    assert "> see https://evil.example/a?x=1\\_y" in text.split("\n")
+    assert "> see https://evil.example/a?x=1_y" in text.split("\n")
     for marker in ("![", "<img", "]("):
         assert marker not in text
+
+
+@pytest.mark.parametrize(
+    "summary, line",
+    [
+        # Characters that are plain text in CommonMark stay bare inside an
+        # address, so autolinking viewers show and link it as stored.
+        (
+            "see https://example.com/a?x=1_y&b=2#top",
+            "> see https://example.com/a?x=1_y&b=2#top",
+        ),
+        (
+            "https://example.com/~user/page_one!",
+            "> https://example.com/~user/page_one!",
+        ),
+        ("go www.example.com/a_b|c ok", "> go www.example.com/a_b|c ok"),
+        ("ftp://files.example.com/pub/a__b", "> ftp://files.example.com/pub/a__b"),
+        ("HTTPS://X.COM/A_B", "> HTTPS://X.COM/A_B"),
+        # Outside the address everything listed is still escaped.
+        ("a_b https://x.com/a_b c_d", "> a\\_b https://x.com/a_b c\\_d"),
+        # Inside it, a character that could be markup there stays escaped:
+        # emphasis, an entity, `~~`, a backslash, a link or image, a code span.
+        ("https://x.com/_a_/", "> https://x.com/\\_a\\_/"),
+        ("https://x.com/a*b*", "> https://x.com/a\\*b\\*"),
+        (
+            "https://x.com/a&amp;b&#32;c&#x41;",
+            "> https://x.com/a\\&amp;b\\&#32;c\\&#x41;",
+        ),
+        ("https://x.com/a~~b~~", "> https://x.com/a\\~\\~b\\~\\~"),
+        ("https://x.com/a\\[b]", "> https://x.com/a\\\\\\[b\\]"),
+        (
+            "https://x.com/![x](https://evil.example/i.png)",
+            "> https://x.com/!\\[x\\](https://evil.example/i.png)",
+        ),
+        ("https://x.com/`a`", "> https://x.com/\\`a\\`"),
+        # The address ends at a space or `<`.
+        ("https://x.com/a<img src=x>", "> https://x.com/a\\<img src=x\\>"),
+    ],
+)
+async def test_an_address_keeps_only_its_inert_characters_bare(summary, line):
+    text = await one(thought(summary=summary))
+    assert line in text.split("\n")
+    assert_nothing_renders(text)
 
 
 # Line breaks.
@@ -464,7 +602,7 @@ async def test_single_line_fields_stay_on_their_line(brk):
         ],
     )
     lines = (await one(item)).splitlines()
-    assert "- Tags: #one two" in lines
+    assert "- Tags: `#one two`" in lines
     assert "- Category: cat egory" in lines
     assert any(line.startswith("- From: Week end, proposed ") for line in lines)
     assert any(" from Plumber chat, conversation " in line for line in lines)

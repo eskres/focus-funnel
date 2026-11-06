@@ -11,6 +11,7 @@ app.user_data, which calls stop_exports() (design decision 16).
 """
 
 import logging
+import re
 import time
 import uuid
 from collections.abc import AsyncIterable, AsyncIterator, Callable
@@ -280,9 +281,68 @@ async def json_chunks(
 
 _ESCAPED = set("\\`*_[]<>!#&~|")
 
+# A bare web address as autolinking viewers find one in the source (GFM's
+# extended autolinks, markdown-it's linkify): a scheme with `://`, or `www.`,
+# up to the next space or `<`. Matching more than a viewer links is safe, since
+# only characters that are inert in CommonMark are left unescaped (decision 30).
+_ADDRESS = re.compile(r"(?:(?:https?|ftp)://|www\.)[^\s<]*", re.IGNORECASE)
+_ENTITY = re.compile(
+    r"&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});"
+)
+
+
+def _escape_all(text: str) -> str:
+    return "".join("\\" + char if char in _ESCAPED else char for char in text)
+
+
+def _inert_in_address(address: str, at: int) -> bool:
+    """Whether the escaped character at `at` inside an address can be left as
+    it is: an autolinking viewer shows a backslash there and puts it in the
+    link, while a CommonMark viewer reads the bare character as plain text
+    (design decision 30)."""
+    char = address[at]
+    if char in "#!|":
+        # `#` never opens a line here, `!` makes an image only before an
+        # (escaped) `[`, and a table's delimiter row cannot hold an address.
+        return True
+    if char == "&":
+        return _ENTITY.match(address, at) is None
+    if char == "~":
+        # A lone `~` strikes nothing in markdown-it, which needs `~~`.
+        return address[at - 1 : at] != "~" and address[at + 1 : at + 2] != "~"
+    if char == "_":
+        # A run of `_` between two letters or digits cannot open or close
+        # emphasis.
+        start, end = at, at
+        while start > 0 and address[start - 1] == "_":
+            start -= 1
+        while end < len(address) and address[end] == "_":
+            end += 1
+        return (
+            start > 0
+            and end < len(address)
+            and address[start - 1].isalnum()
+            and address[end].isalnum()
+        )
+    return False
+
+
+def _escape_address(address: str) -> str:
+    return "".join(
+        "\\" + char if char in _ESCAPED and not _inert_in_address(address, at) else char
+        for at, char in enumerate(address)
+    )
+
 
 def _escape_chars(text: str) -> str:
-    return "".join("\\" + char if char in _ESCAPED else char for char in text)
+    parts: list[str] = []
+    last = 0
+    for found in _ADDRESS.finditer(text):
+        parts.append(_escape_all(text[last : found.start()]))
+        parts.append(_escape_address(found.group()))
+        last = found.end()
+    parts.append(_escape_all(text[last:]))
+    return "".join(parts)
 
 
 def _escape_line_start(line: str) -> str:
@@ -351,7 +411,19 @@ def _date_line(when: dict[str, str | None]) -> str:
 
 
 def _tag(tag: str) -> str:
-    return "#" + _one_line(tag).replace(",", "\\,")
+    """One tag as a code span, so a viewer shows it as stored and it reads as
+    one tag, a `, #` inside it included (design decision 31). The fence is one
+    backtick longer than the longest run in the tag; a tag that ends with a
+    backtick gets a space on each side, which the viewer drops."""
+    body = "#" + " ".join(tag.splitlines())
+    longest = run = 0
+    for char in body:
+        run = run + 1 if char == "`" else 0
+        longest = max(longest, run)
+    fence = "`" * (longest + 1)
+    if body.endswith("`"):
+        body = f" {body} "
+    return f"{fence}{body}{fence}"
 
 
 def _fence(raw_text: str) -> str:

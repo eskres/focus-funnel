@@ -148,7 +148,13 @@ async def test_each_batch_runs_two_selects_in_its_own_session(store, batch_of_tw
 
 async def test_a_batch_reads_one_snapshot(store, monkeypatch, batch_of_two):
     """Both queries of a batch run at REPEATABLE READ: an addition committed
-    between them is not seen, nor its text (design decision 2)."""
+    between them is not seen, nor its text (design decision 2).
+
+    The batch's thoughts, `raw_text` included, are loaded by the thoughts
+    query before the addition is committed, so their `raw_text` would read
+    "first words" at any isolation level. The text half is therefore checked
+    by reading `raw_text` again in the batch's own session after the commit:
+    only the batch's snapshot keeps it at "first words"."""
     alice = await store.user("alice")
     [first, second] = await store.thoughts(
         alice, *minutes(1, 2), raw_text="first words"
@@ -168,6 +174,7 @@ async def test_a_batch_reads_one_snapshot(store, monkeypatch, batch_of_two):
 
     proposal_id = await store.db(add_conversation)
     seen: list[str] = []
+    reread: list[str] = []
     real = export.additions_for
 
     async def wrapped(session, user_id, thought_ids):
@@ -195,6 +202,13 @@ async def test_a_batch_reads_one_snapshot(store, monkeypatch, batch_of_two):
             await other.commit()
 
         await store.db(add)
+        reread.append(
+            (
+                await session.execute(
+                    select(Thought.raw_text).where(Thought.id == first)
+                )
+            ).scalar_one()
+        )
         return await real(session, user_id, thought_ids)
 
     monkeypatch.setattr(export, "additions_for", wrapped)
@@ -203,6 +217,7 @@ async def test_a_batch_reads_one_snapshot(store, monkeypatch, batch_of_two):
     by_id = {thought.id: thought for thought in batch}
     assert by_id[first].additions == [] and by_id[second].additions == []
     assert by_id[first].raw_text == "first words"
+    assert reread == ["first words"]
 
 
 async def test_an_abort_after_a_batch_stops_before_the_next_query(store, batch_of_two):
