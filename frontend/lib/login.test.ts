@@ -41,6 +41,27 @@ describe("safeReturnTo (thought-export task 4.3)", () => {
     },
   );
 
+  it.each([
+    "/.//evil.example",
+    "/x/..//evil.example",
+    "/%2e//evil.example",
+    "/%2E//evil.example/path?q=1",
+    "/./\\evil.example",
+    "/.\\/evil.example",
+    "/x/../\\evil.example",
+    "/settings/..//evil.example",
+  ])("sends %j to /app: its resolved path starts with // (another site)", (value) => {
+    expect(safeReturnTo(value)).toBe("/app");
+  });
+
+  it.each(["/settings", "/settings?tab=x#h", "/a/b/../c", "/.//evil.example", "/x/..//evil.example"])(
+    "returns %j as a value that resolves on this site",
+    (value) => {
+      const origin = "https://app.example";
+      expect(new URL(safeReturnTo(value), origin).origin).toBe(origin);
+    },
+  );
+
   it("sends a first segment that does not percent-decode to /app", () => {
     expect(safeReturnTo("/%E0%A4%A/settings")).toBe("/app");
   });

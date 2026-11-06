@@ -53,7 +53,8 @@ async def test_one_export_per_user_and_format(async_api, bob):
 
     await held.done()
     assert_complete_json(held, 3)
-    assert await Download(api.app, api.headers, hold=False).start().done()
+    after = await Download(api.app, api.headers, hold=False).start().done()
+    assert_complete_json(after, 3)
     assert alice_id not in LIVE
 
 

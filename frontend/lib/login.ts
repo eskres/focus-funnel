@@ -26,8 +26,9 @@ const NOT_A_PAGE = new Set(["api", "auth"]);
  * The value is resolved with the WHATWG URL parser, as the router and the
  * redirects resolve it, and the resolved path is checked and returned. So dot
  * segments (`/settings/../api`, `%2e`), a dropped tab or line break, and a
- * backslash cannot lead to an API or auth route or to another site (thought-export
- * design decision 14).
+ * backslash cannot lead to an API or auth route or to another site, and a
+ * resolved path that starts with `//` is refused (thought-export design
+ * decisions 14 and 32).
  */
 export function safeReturnTo(value: string | null | undefined): string {
   if (!value || !value.startsWith("/")) return DEFAULT_RETURN_TO;
@@ -46,7 +47,13 @@ export function safeReturnTo(value: string | null | undefined): string {
     return DEFAULT_RETURN_TO;
   }
   if (NOT_A_PAGE.has(segment)) return DEFAULT_RETURN_TO;
-  return parsed.pathname + parsed.search + parsed.hash;
+  // Dot segments can resolve `/.//evil.example` to the path `//evil.example`,
+  // which as a returned value is scheme-relative: another site.
+  if (parsed.pathname.startsWith("//")) return DEFAULT_RETURN_TO;
+  const resolved = parsed.pathname + parsed.search + parsed.hash;
+  // What the callers resolve must stay on this site.
+  if (new URL(resolved, PLACEHOLDER_ORIGIN).origin !== PLACEHOLDER_ORIGIN) return DEFAULT_RETURN_TO;
+  return resolved;
 }
 
 /** The public base URL of the app: APP_BASE_URL, or the request's own origin. */

@@ -8,7 +8,7 @@ Exported 2026-11-05 14:03 UTC.
 
 - Status: done, marked done 2026-11-04 10:15 UTC
 - Category: task
-- Tags: #home, #weekend plans
+- Tags: `#home`, `#weekend plans`
 - Date: 2026-11-09 (Europe/Oslo)
 - Filed: 2026-10-01 09:12 UTC
 - Changed: 2026-10-12 09:00 UTC
@@ -74,7 +74,7 @@ he comes at nine
 > &#32;   \<b\>x\</b\>
 > &#9;\<b\>x\</b\>
 >    three spaces
-> see https://evil.example/a?x=1\_y
+> see https://evil.example/a?x=1_y
 
 ---
 
